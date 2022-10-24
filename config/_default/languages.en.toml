@@ -1,0 +1,21 @@
+languageCode = "en"
+languageName = "English"
+displayName = "EN"
+isoCode = "en"
+weight = 1
+rtl = false
+logo = "img/freebsdorb.png"
+description = ""
+# copyright = "Copy, _right?_ :thinking_face:"
+
+dateFormat = "2 January 2006"
+
+[author]
+  name = "Blowfish"
+  image = "img/freebsdorb.png"
+  headline = ""
+  bio = ""
+  links = [
+    { twitter = "https://twitter.com/revhelix" },
+    { github = "https://github.com/marklapointe" },
+  ]
