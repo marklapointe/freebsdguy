@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-text: var(--text);
+  --color-bg: var(--bg);
+}
+
+:root {
+  --primary: #f9fafb;
+  --secondary: #1f2937;
+  --accent: #ef4444;
+  --text: #f3f4f6;
+  --bg: #111827;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: bold;
+  color: var(--color-primary);
+}
+
+a {
+  color: var(--color-accent);
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.prose {
+    color: var(--color-text);
+}
+
+.prose h1, .prose h2, .prose h3 {
+    color: var(--color-primary);
+}

@@ -1,0 +1,10 @@
+{
+  "postsDir": "./server/posts",
+  "themeDir": "./server/themes",
+  "currentTheme": "default",
+  "siteName": "The FreeBSD Guy",
+  "pagination": 10,
+  "sortBy": "date",
+  "sortOrder": "desc",
+  "searchPlacement": "top"
+}

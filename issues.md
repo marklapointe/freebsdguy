@@ -1,0 +1,1 @@
+The homepage shold have the most recent posts, and be able to iterate through them. also I just tried logging in and it didn't work. At the same time I'd like everything to be typescript
