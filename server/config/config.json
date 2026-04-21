@@ -2,9 +2,15 @@
   "postsDir": "./server/posts",
   "themeDir": "./server/themes",
   "currentTheme": "default",
-  "siteName": "The FreeBSD Guy",
-  "pagination": 10,
-  "sortBy": "date",
-  "sortOrder": "desc",
-  "searchPlacement": "top"
+  "siteName": "Test",
+  "pagination": 20,
+  "sortBy": "title",
+  "sortOrder": "asc",
+  "searchPlacement": "bottom",
+  "aiConfig": {
+    "provider": "ollama",
+    "baseUrl": "",
+    "apiKey": "",
+    "modelId": "gpt-oss:120b"
+  }
 }

@@ -7,13 +7,15 @@ const sampleUsers: UsersConfig = {
     admin: {
         username: 'admin',
         passwordHash: '$2a$10$XmBwE8vW2A.HwL5oR2yv6.fP6A8h6R3u5Gz.k9W8O8R8v2k7m/S1u',
-        role: 'admin'
+        role: 'admin',
+        theme: 'dark'
     },
     users: [
         {
             username: 'contributor',
             passwordHash: 'old_hash',
-            role: 'contributor'
+            role: 'contributor',
+            theme: 'light'
         }
     ]
 };

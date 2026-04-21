@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "tsx server/index.ts",
+    "start": "NODE_ENV=production tsx server/index.ts",
     "change-password": "tsx server/scripts/change-password.ts",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -24,12 +24,15 @@
     "@types/node": "^22.19.15",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^5.1.4",
+    "@vitest/coverage-v8": "^4.0.18",
     "@vitest/ui": "^4.0.18",
     "autoprefixer": "^10.4.24",
     "jsdom": "^28.1.0",
     "postcss": "^8.5.6",
     "prettier": "^3.3.1",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.2.0",
     "tsx": "^4.19.3",
     "typescript": "^5.2.2",
@@ -37,11 +40,14 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/sanitize-html": "^2.16.1",
     "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.2",
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
+    "dompurify": "^3.4.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
@@ -55,6 +61,7 @@
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.0",
+    "sanitize-html": "^2.17.3",
     "tailwind-merge": "^3.5.0"
   }
 }

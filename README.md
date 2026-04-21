@@ -48,20 +48,15 @@ Themes are stored in `server/themes/`.
 
 #### Development Mode
 
-Start the Vite development server (frontend):
+Start the unified development server:
 ```bash
 npm run dev
 ```
-
-Start the Express backend server:
-```bash
-npm start
-```
-The frontend will be at `http://localhost:5173` and the backend at `http://localhost:3001`.
+The application (both frontend and API) will be available at `http://localhost:5173`.
 
 #### Production Mode
 
-Build the frontend and run the combined server:
+Build the project and run the production server:
 ```bash
 npm run build
 npm start
@@ -71,7 +66,8 @@ The site will be served at `http://localhost:3001`.
 #### Using Makefile
 
 - Build: `make build`
-- Run: `make run`
+- Run production: `make run`
+- Run development: `make run-dev`
 - Clean: `make clean`
 
 ### 4. Deployment on FreeBSD

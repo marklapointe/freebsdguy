@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { loadConfig, saveConfig, Config, configPath, loadUsers, saveUsers, UsersConfig, usersPath } from '../server/lib/config';
+import { loadConfig, saveConfig, Config, configPath, loadUsers, saveUsers, UsersConfig, usersPath, loadAIConfig } from '../server/lib/config';
 
 const testConfigPath = path.join(__dirname, 'test-config.json');
 const testUsersPath = path.join(__dirname, 'test-users.json');
@@ -65,5 +65,37 @@ describe('Config Library', () => {
         
         const loaded = JSON.parse(fs.readFileSync(testUsersPath, 'utf8'));
         expect(loaded.users.length).toBe(1);
+    });
+
+    it('should create default users if file does not exist', () => {
+        const missingUsersPath = path.join(__dirname, 'missing-users.json');
+        if (fs.existsSync(missingUsersPath)) fs.unlinkSync(missingUsersPath);
+        
+        const users = loadUsers(missingUsersPath);
+        expect(users.admin.username).toBe('admin');
+        expect(fs.existsSync(missingUsersPath)).toBe(true);
+        fs.unlinkSync(missingUsersPath);
+    });
+
+    it('should return null if AI config is not present in config', () => {
+        const configWithNoAI = { ...sampleConfig };
+        delete configWithNoAI.aiConfig;
+        const tempPath = path.join(__dirname, 'no-ai-config.json');
+        fs.writeFileSync(tempPath, JSON.stringify(configWithNoAI));
+        
+        const aiConfig = loadAIConfig(tempPath);
+        expect(aiConfig).toBeNull();
+        fs.unlinkSync(tempPath);
+    });
+
+    it('should load AI config from config file', () => {
+        const aiConfigData = { provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: 'test', modelId: 'llama3' };
+        const configWithAI = { ...sampleConfig, aiConfig: aiConfigData };
+        const tempPath = path.join(__dirname, 'with-ai-config.json');
+        fs.writeFileSync(tempPath, JSON.stringify(configWithAI));
+        
+        const aiConfig = loadAIConfig(tempPath);
+        expect(aiConfig).toEqual(aiConfigData);
+        fs.unlinkSync(tempPath);
     });
 });

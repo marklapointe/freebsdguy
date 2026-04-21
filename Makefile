@@ -11,10 +11,10 @@ build: install-deps
 	npm run build
 
 run:
-	npm start & npm run preview
-
-run-server:
 	npm start
+
+run-dev:
+	npm run dev
 
 clean:
 	rm -rf dist node_modules

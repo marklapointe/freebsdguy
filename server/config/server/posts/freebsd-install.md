@@ -1,16 +1,11 @@
 ---
-title: freebsd-install
-summary: >-
-  title: Installing FreeBSD: A Quick Start Guide
-
-  ---
-
-  summary: A step-by-step guide to installing the latest FreeBSD version on your
-  hardware.
-
-  date: 2026...
-date: '2026-03-12T02:49:54.667Z'
-author: admin
+title: "freebsd-install"
+summary: "title: Installing FreeBSD: A Quick Start Guide
+---
+summary: A step-by-step guide to installing the latest FreeBSD version on your hardware.
+date: 2026..."
+date: "2026-03-12T02:49:54.667Z"
+author: "admin"
 ---
 ---
 title: Installing FreeBSD: A Quick Start Guide

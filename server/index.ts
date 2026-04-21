@@ -4,7 +4,6 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cors from 'cors';
-import axios from 'axios';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,13 +11,17 @@ const __dirname = path.dirname(__filename);
 
 import { loadConfig, saveConfig, configPath, loadUsers, saveUsers, loadAIConfig } from './lib/config.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
+import { AIServiceFactory } from './lib/ai-service.ts';
 
 import dotenv from 'dotenv';
 dotenv.config();
 
 import multer from 'multer';
 
+import sanitizeHtml from 'sanitize-html';
+
 const app = express();
+export { app };
 const PORT = process.env.PORT || 3001;
 const SECRET = process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
@@ -57,7 +60,10 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
     if (!token) return res.status(401).json({ message: 'No token' });
 
     jwt.verify(token, SECRET, (err, decoded) => {
-        if (err) return res.status(403).json({ message: 'Failed to authenticate token' });
+        if (err) {
+            console.error(`[AUTH] JWT verification failed: ${err.message}`);
+            return res.status(403).json({ message: 'Failed to authenticate token' });
+        }
         req.user = decoded;
         next();
     });
@@ -75,8 +81,13 @@ app.post('/api/login', async (req: Request, res: Response) => {
         const match = await bcrypt.compare(password, usersConfig.admin.passwordHash);
         if (match) {
             console.log(`[AUTH] Admin login successful: ${username}`);
-            const token = jwt.sign({ username: usersConfig.admin.username, role: usersConfig.admin.role }, SECRET, { expiresIn: '1h' });
-            return res.json({ token, role: usersConfig.admin.role });
+            const token = jwt.sign({ username: usersConfig.admin.username, role: usersConfig.admin.role }, SECRET, { expiresIn: '24h' });
+            return res.json({ 
+                token, 
+                role: usersConfig.admin.role, 
+                username: usersConfig.admin.username,
+                theme: usersConfig.admin.theme 
+            });
         }
     }
 
@@ -86,8 +97,13 @@ app.post('/api/login', async (req: Request, res: Response) => {
         const match = await bcrypt.compare(password, user.passwordHash);
         if (match) {
             console.log(`[AUTH] User login successful: ${username}`);
-            const token = jwt.sign({ username: user.username, role: user.role }, SECRET, { expiresIn: '1h' });
-            return res.json({ token, role: user.role });
+            const token = jwt.sign({ username: user.username, role: user.role }, SECRET, { expiresIn: '24h' });
+            return res.json({ 
+                token, 
+                role: user.role, 
+                username: user.username,
+                theme: user.theme 
+            });
         }
     }
 
@@ -111,17 +127,21 @@ app.post('/api/admin/users', authenticate, async (req: AuthenticatedRequest, res
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
 
     const { username, password, role } = req.body;
+    
+    const cleanUsername = sanitizeHtml(username, { allowedTags: [], allowedAttributes: {} });
+    const cleanRole = sanitizeHtml(role, { allowedTags: [], allowedAttributes: {} });
+
     const usersConfig = loadUsers();
 
-    if (usersConfig.users.find(u => u.username === username) || usersConfig.admin.username === username) {
+    if (usersConfig.users.find(u => u.username === cleanUsername) || usersConfig.admin.username === cleanUsername) {
         return res.status(400).json({ message: 'User already exists' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    usersConfig.users.push({ username, passwordHash, role });
+    usersConfig.users.push({ username: cleanUsername, passwordHash, role: cleanRole });
     saveUsers(usersConfig);
 
-    console.log(`[INFO] New user created: ${username} with role ${role}`);
+    console.log(`[INFO] New user created: ${cleanUsername} with role ${cleanRole}`);
     res.json({ message: 'User created' });
 });
 
@@ -158,39 +178,57 @@ app.get('/api/posts', (_req: Request, res: Response) => {
 
 // AI: Summarize post content
 app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-    const { content } = req.body;
+    const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
     if (!content) return res.status(400).json({ message: 'No content provided' });
 
     const aiConfig = loadAIConfig();
-    if (!aiConfig) {
+    const provider = (overrideProvider || aiConfig?.provider) as 'ollama' | 'openai';
+    const baseUrl = overrideBaseUrl || aiConfig?.baseUrl;
+    const modelId = overrideModelId || aiConfig?.modelId;
+
+    if (!provider || !baseUrl || !modelId) {
         return res.status(503).json({ message: 'AI configuration not found' });
     }
 
     try {
-        const response = await axios.post(`${aiConfig.baseUrl}/chat/completions`, {
-            model: aiConfig.modelId,
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful assistant that summarizes blog posts. Provide a concise summary (1-3 sentences) of the following content.'
-                },
-                {
-                    role: 'user',
-                    content: content
-                }
-            ]
-        }, {
-            headers: {
-                'Authorization': `Bearer ${aiConfig.apiKey}`,
-                'Content-Type': 'application/json'
-            }
+        const service = AIServiceFactory.create(provider, { 
+            baseUrl, 
+            modelId, 
+            apiKey: aiConfig?.apiKey 
         });
-
-        const summary = response.data.choices[0].message.content.trim();
+        const summary = await service.summarize(content);
         res.json({ summary });
-    } catch (error) {
-        console.error('AI Summarization failed:', error);
-        res.status(500).json({ message: 'Failed to summarize content' });
+    } catch (error: any) {
+        console.error('AI Summarization failed:', error.message);
+        res.status(500).json({ message: error.message || 'Failed to summarize content via proxy' });
+    }
+});
+
+// AI: Fetch available models
+app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+    const aiConfig = loadAIConfig();
+    const provider = (req.query.provider as string || aiConfig?.provider) as 'ollama' | 'openai';
+    const baseUrl = req.query.baseUrl as string || aiConfig?.baseUrl;
+
+    console.log(`[AI] Fetching models via proxy. Provider: ${provider}, BaseURL: ${baseUrl}`);
+
+    if (!provider || !baseUrl) {
+        console.warn('[AI] Missing provider or baseUrl');
+        return res.status(400).json({ message: 'AI provider and Base URL are required' });
+    }
+
+    try {
+        const service = AIServiceFactory.create(provider, { 
+            baseUrl, 
+            modelId: '', // modelId not needed for getting models
+            apiKey: req.query.apiKey as string || aiConfig?.apiKey 
+        });
+        const models = await service.getModels();
+        console.log(`[AI] Successfully fetched ${models.length} models`);
+        res.json(models);
+    } catch (error: any) {
+        console.error('Failed to fetch models via proxy:', error.message);
+        res.status(500).json({ message: 'Failed to fetch models via proxy: ' + error.message });
     }
 });
 
@@ -235,7 +273,13 @@ app.get('/api/images/:filename', (req: Request, res: Response) => {
     const postsDir = path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
     const filename = req.params.filename as string;
-    res.sendFile(path.join(imagesDir, filename));
+    const filePath = path.join(imagesDir, filename);
+
+    if (fs.existsSync(filePath)) {
+        res.sendFile(filePath);
+    } else {
+        res.status(404).json({ message: 'Image not found' });
+    }
 });
 
 // Serve static frontend files in production
@@ -256,22 +300,49 @@ app.get('/api/config', (_req: Request, res: Response) => {
         pagination: config.pagination || 10,
         sortBy: config.sortBy || 'date',
         sortOrder: config.sortOrder || 'desc',
-        searchPlacement: config.searchPlacement || 'top'
+        searchPlacement: config.searchPlacement || 'top',
+        aiConfig: config.aiConfig
     });
+});
+
+// Admin: Update AI config
+app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const config = loadConfig();
+    const { provider, baseUrl, apiKey, modelId } = req.body;
+
+    config.aiConfig = {
+        provider: provider === 'openai' ? 'openai' : 'ollama',
+        baseUrl: sanitizeHtml(baseUrl, { allowedTags: [], allowedAttributes: {} }),
+        apiKey: sanitizeHtml(apiKey, { allowedTags: [], allowedAttributes: {} }),
+        modelId: sanitizeHtml(modelId, { allowedTags: [], allowedAttributes: {} })
+    };
+
+    saveConfig(config);
+    res.json({ message: 'AI Configuration updated' });
 });
 
 // Admin: Update site config
 app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
-    const { siteName, currentTheme, pagination, sortBy, sortOrder, searchPlacement } = req.body;
+    const { siteName, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig } = req.body;
 
-    if (siteName) config.siteName = siteName;
-    if (currentTheme) config.currentTheme = currentTheme;
+    if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
+    if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
     if (pagination !== undefined) config.pagination = Number(pagination);
-    if (sortBy) config.sortBy = sortBy;
-    if (sortOrder) config.sortOrder = sortOrder;
-    if (searchPlacement) config.searchPlacement = searchPlacement;
+    if (sortBy) config.sortBy = sanitizeHtml(sortBy, { allowedTags: [], allowedAttributes: {} }) as 'title' | 'date' | 'author';
+    if (sortOrder) config.sortOrder = sanitizeHtml(sortOrder, { allowedTags: [], allowedAttributes: {} }) as 'desc' | 'asc';
+    if (searchPlacement) config.searchPlacement = sanitizeHtml(searchPlacement, { allowedTags: [], allowedAttributes: {} }) as 'top' | 'bottom' | 'left' | 'right' | 'none';
+    
+    if (aiConfig) {
+        config.aiConfig = {
+            provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
+            baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
+            apiKey: sanitizeHtml(aiConfig.apiKey || '', { allowedTags: [], allowedAttributes: {} }),
+            modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
+        };
+    }
 
     saveConfig(config);
     
@@ -283,13 +354,31 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
         if (!fs.existsSync(themePath)) {
             // Create default theme if it doesn't exist
             if (!fs.existsSync(themeDir)) fs.mkdirSync(themeDir, { recursive: true });
-            fs.writeFileSync(themePath, JSON.stringify({
-                "--primary": "#1a202c",
-                "--secondary": "#2d3748",
-                "--accent": "#4a5568",
-                "--text": "#ffffff",
-                "--bg": "#f7fafc"
-            }, null, 2));
+            if (currentTheme === 'dark') {
+                fs.writeFileSync(themePath, JSON.stringify({
+                    "--primary": "#3b82f6",
+                    "--secondary": "#1f2937",
+                    "--accent": "#ef4444",
+                    "--text": "#f3f4f6",
+                    "--bg": "#111827"
+                }, null, 2));
+            } else if (currentTheme === 'light') {
+                fs.writeFileSync(themePath, JSON.stringify({
+                    "--primary": "#2563eb",
+                    "--secondary": "#f3f4f6",
+                    "--accent": "#ef4444",
+                    "--text": "#111827",
+                    "--bg": "#ffffff"
+                }, null, 2));
+            } else {
+                fs.writeFileSync(themePath, JSON.stringify({
+                    "--primary": "#2563eb",
+                    "--secondary": "#f3f4f6",
+                    "--accent": "#ef4444",
+                    "--text": "#111827",
+                    "--bg": "#ffffff"
+                }, null, 2));
+            }
         }
     }
 
@@ -314,8 +403,17 @@ app.get('/api/admin/themes', authenticate, (req: AuthenticatedRequest, res: Resp
 // Admin: Create/Update theme
 app.post('/api/admin/themes/:name', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
-    const name = req.params.name;
+    const name = sanitizeHtml(req.params.name as string, { allowedTags: [], allowedAttributes: {} });
     const colors = req.body;
+    
+    // Basic validation and sanitization of theme colors
+    const sanitizedColors: any = {};
+    for (const [key, value] of Object.entries(colors)) {
+        if (key.startsWith('--') && typeof value === 'string') {
+            sanitizedColors[key] = sanitizeHtml(value, { allowedTags: [], allowedAttributes: {} });
+        }
+    }
+
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const themeDir = path.resolve(configDir, config.themeDir);
@@ -324,7 +422,7 @@ app.post('/api/admin/themes/:name', authenticate, (req: AuthenticatedRequest, re
         fs.mkdirSync(themeDir, { recursive: true });
     }
 
-    fs.writeFileSync(path.join(themeDir, `${name}.json`), JSON.stringify(colors, null, 2));
+    fs.writeFileSync(path.join(themeDir, `${name}.json`), JSON.stringify(sanitizedColors, null, 2));
     res.json({ message: `Theme ${name} saved` });
 });
 
@@ -365,25 +463,76 @@ app.get('/api/admin/images', authenticate, (req: AuthenticatedRequest, res: Resp
 });
 
 // Theme support (just returns css variables)
-app.get('/api/theme', (_req: Request, res: Response) => {
+app.get('/api/theme', (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const themeDir = path.resolve(configDir, config.themeDir);
-    const themePath = path.join(themeDir, `${config.currentTheme}.json`);
+    const themeName = (req.query.name as string) || config.currentTheme;
+    const themePath = path.join(themeDir, `${themeName}.json`);
     
     if (fs.existsSync(themePath)) {
-        res.json(JSON.parse(fs.readFileSync(themePath, 'utf8')));
-    } else {
+        try {
+            res.json(JSON.parse(fs.readFileSync(themePath, 'utf8')));
+        } catch (e) {
+            console.error(`Error reading theme file ${themePath}:`, e);
+            res.status(500).json({ message: 'Error reading theme file' });
+        }
+    } else if (themeName === 'dark') {
         res.json({
-            "--primary": "#1a202c",
-            "--secondary": "#2d3748",
-            "--accent": "#4a5568",
-            "--text": "#ffffff",
-            "--bg": "#f7fafc"
+            "--primary": "#3b82f6",
+            "--secondary": "#1f2937",
+            "--accent": "#ef4444",
+            "--text": "#f3f4f6",
+            "--bg": "#111827"
+        });
+    } else {
+        // Default to light
+        res.json({
+            "--primary": "#2563eb",
+            "--secondary": "#f3f4f6",
+            "--accent": "#ef4444",
+            "--text": "#111827",
+            "--bg": "#ffffff"
         });
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+app.post('/api/theme', (req: Request, res: Response) => {
+    const { currentTheme } = req.body;
+    if (!currentTheme) return res.status(400).json({ message: 'currentTheme required' });
+    
+    // Try to get user from token if available
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, SECRET) as any;
+            if (decoded && decoded.username) {
+                const usersConfig = loadUsers();
+                if (usersConfig.admin.username === decoded.username) {
+                    usersConfig.admin.theme = currentTheme;
+                    saveUsers(usersConfig);
+                    return res.json({ message: 'User theme updated', currentTheme });
+                }
+                const userIndex = usersConfig.users.findIndex(u => u.username === decoded.username);
+                if (userIndex !== -1) {
+                    usersConfig.users[userIndex].theme = currentTheme;
+                    saveUsers(usersConfig);
+                    return res.json({ message: 'User theme updated', currentTheme });
+                }
+            }
+        } catch (err) {
+            // Token invalid or expired, fall back to global config
+        }
+    }
+
+    const config = loadConfig();
+    config.currentTheme = currentTheme;
+    saveConfig(config);
+    res.json({ message: 'Global theme updated', currentTheme });
 });
+
+if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {
+    app.listen(PORT, () => {
+        console.log(`Server running at http://localhost:${PORT}`);
+    });
+}
