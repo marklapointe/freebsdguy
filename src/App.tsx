@@ -26,9 +26,15 @@ api.interceptors.response.use(
     response => response,
     error => {
         if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-            // Only redirect if we were actually trying to use a token
+            // Check if it's a REAL auth error, not a "Forbidden" due to some feature being disabled
+            const isAuthError = error.response.data?.message === 'No token' || 
+                               error.response.data?.message === 'Failed to authenticate token' ||
+                               error.response.data?.message === 'Invalid credentials' ||
+                               error.response.data?.message === 'Forbidden';
+            
+            // Only redirect if we were actually trying to use a token AND it's a real auth error
             const token = localStorage.getItem('token');
-            if (token) {
+            if (token && isAuthError) {
                 console.warn('Authentication failed, clearing token and redirecting to login');
                 localStorage.removeItem('token');
                 localStorage.removeItem('role');
@@ -63,25 +69,30 @@ const Navbar = ({ user, setUser, siteName }) => {
             setTheme(user.theme);
             applyTheme(user.theme);
             localStorage.setItem('theme', user.theme);
-            return;
+        } else {
+            // Otherwise fetch from config or use localStorage
+            const localTheme = localStorage.getItem('theme');
+            if (localTheme) {
+                setTheme(localTheme);
+                applyTheme(localTheme);
+            } else {
+                api.get('/config').then(res => {
+                    const currentTheme = res.data.currentTheme;
+                    setTheme(currentTheme);
+                    applyTheme(currentTheme);
+                    localStorage.setItem('theme', currentTheme);
+                }).catch(() => {
+                    // fallback to default theme
+                    applyTheme();
+                });
+            }
         }
 
-        // Otherwise fetch from config or use localStorage
-        const localTheme = localStorage.getItem('theme');
-        if (localTheme) {
-            setTheme(localTheme);
-            applyTheme(localTheme);
-        } else {
-            api.get('/config').then(res => {
-                const currentTheme = res.data.currentTheme;
-                setTheme(currentTheme);
-                applyTheme(currentTheme);
-                localStorage.setItem('theme', currentTheme);
-            }).catch(() => {
-                // fallback to default theme
-                applyTheme();
-            });
-        }
+        const handleThemeChanged = (e: CustomEvent) => {
+            setTheme(e.detail);
+        };
+        window.addEventListener('themeChanged' as any, handleThemeChanged);
+        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
     }, [user]);
 
     const toggleTheme = async () => {
@@ -91,6 +102,8 @@ const Navbar = ({ user, setUser, siteName }) => {
             setTheme(newTheme);
             localStorage.setItem('theme', newTheme);
             await applyTheme(newTheme);
+            // Dispatch event for other components
+            window.dispatchEvent(new CustomEvent('themeChanged', { detail: newTheme }));
         } catch (e) {
             console.error('Failed to toggle theme', e);
         }
@@ -307,7 +320,28 @@ const Modal = ({ isOpen, title, message, type, onConfirm, onCancel }) => {
     );
 };
 
-const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummarizing, setPost }) => {
+const Notification = ({ id, message, title, onClose }) => {
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            onClose(id);
+        }, 5000);
+        return () => clearTimeout(timer);
+    }, [id, onClose]);
+
+    return (
+        <div className="bg-secondary border-l-4 border-accent p-4 rounded shadow-2xl flex justify-between items-start gap-4 w-80 mb-3 pointer-events-auto transition-all duration-300 transform translate-x-0 opacity-100">
+            <div className="flex-1">
+                {title && <h4 className="font-bold text-accent text-sm mb-1">{title}</h4>}
+                <p className="text-sm opacity-90">{message}</p>
+            </div>
+            <button onClick={() => onClose(id)} className="opacity-50 hover:opacity-100 transition">
+                <X size={16} />
+            </button>
+        </div>
+    );
+};
+
+const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummarizing, setPost, aiEnabled }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
@@ -349,14 +383,16 @@ const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummariz
                     <div className="space-y-1">
                         <div className="flex justify-between items-center">
                             <label htmlFor="post-summary" className="block text-xs font-bold uppercase text-accent">Summary</label>
-                            <button 
-                                type="button"
-                                onClick={onAutoSummarize}
-                                className="text-xs flex items-center gap-1 text-accent hover:underline disabled:opacity-50"
-                                disabled={isSummarizing || !post.content}
-                            >
-                                <Sparkles size={14} /> {isSummarizing ? 'Summarizing...' : 'Auto-Summarize'}
-                            </button>
+                            {aiEnabled && (
+                                <button 
+                                    type="button"
+                                    onClick={onAutoSummarize}
+                                    className="text-xs flex items-center gap-1 text-accent hover:underline disabled:opacity-50"
+                                    disabled={isSummarizing || !post.content}
+                                >
+                                    <Sparkles size={14} /> {isSummarizing ? 'Summarizing...' : 'Auto-Summarize'}
+                                </button>
+                            )}
                         </div>
                         <textarea 
                             id="post-summary"
@@ -435,7 +471,8 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
             provider: 'ollama',
             baseUrl: 'http://localhost:11434',
             apiKey: '',
-            modelId: 'llama3'
+            modelId: 'llama3',
+            enabled: true
         }
     });
     const [editingPost, setEditingPost] = useState(null);
@@ -443,18 +480,35 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     const [availableModels, setAvailableModels] = useState([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [newThemeName, setNewThemeName] = useState('');
-    const [themeColors, setThemeColors] = useState({
-        "--primary": "#3b82f6",
-        "--secondary": "#1f2937",
-        "--accent": "#ef4444",
-        "--text": "#f3f4f6",
-        "--bg": "#111827"
-    });
+    const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
 
     useEffect(() => {
-        api.get('/theme').then(res => {
-            setThemeColors(res.data);
-        });
+        if (themeColors) {
+            const root = document.documentElement;
+            Object.entries(themeColors).forEach(([key, value]) => {
+                root.style.setProperty(key, value as string);
+            });
+        }
+    }, [themeColors]);
+
+    useEffect(() => {
+        if (activeTab === 'appearance' || !themeColors) {
+            api.get('/theme?name=' + config.currentTheme).then(res => {
+                setThemeColors(res.data);
+            });
+        }
+    }, [activeTab, config.currentTheme]);
+
+    useEffect(() => {
+        const handleThemeChanged = (e: CustomEvent) => {
+            const newTheme = e.detail;
+            setConfig(prev => ({ ...prev, currentTheme: newTheme }));
+            api.get('/theme?name=' + newTheme).then(res => {
+                setThemeColors(res.data);
+            });
+        };
+        window.addEventListener('themeChanged' as any, handleThemeChanged);
+        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
     }, []);
 
     useEffect(() => {
@@ -505,15 +559,18 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     }, [activeTab]);
 
     const handleSaveConfig = () => {
-        api.post('/admin/config', config).then(() => {
+        api.post('/api/admin/config', config).then(() => {
             setSiteName(config.siteName);
             fetchConfig();
+            applyTheme(config.currentTheme);
+            // Notify other components (like Navbar) that the theme might have changed via selection
+            window.dispatchEvent(new CustomEvent('themeChanged', { detail: config.currentTheme }));
             showAlert('Settings saved successfully!', 'Success');
         });
     };
 
     const handleSaveAIConfig = () => {
-        api.post('/admin/config', config).then(() => {
+        api.post('/api/admin/ai-config', config.aiConfig).then(() => {
             fetchConfig().then(() => {
                 showAlert('AI settings saved successfully!', 'Success');
             });
@@ -522,27 +579,28 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
 
     const handleSaveTheme = () => {
         if (!newThemeName) return showAlert('Theme name is required', 'Error');
-        api.post(`/admin/themes/${newThemeName}`, themeColors).then(() => {
+        api.post(`/api/admin/themes/${newThemeName}`, themeColors).then(() => {
             fetchThemes();
+            setNewThemeName('');
             showAlert('Theme saved successfully!', 'Success');
         });
     };
 
     const handleDeleteUser = (username) => {
         showConfirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`, () => {
-            api.delete(`/admin/users/${username}`).then(fetchUsers);
+            api.delete(`/api/admin/users/${username}`).then(fetchUsers);
         }, 'Delete User');
     };
 
     const handleDeletePost = (slug) => {
         showConfirm(`Are you sure you want to delete post "${slug}"? This action cannot be undone.`, () => {
-            api.delete(`/posts/${slug}`).then(fetchPosts);
+            api.delete(`/api/posts/${slug}`).then(fetchPosts);
         }, 'Delete Post');
     };
 
     const handleSavePost = (e) => {
         e.preventDefault();
-        api.post('/posts', editingPost).then(() => {
+        api.post('/api/posts', editingPost).then(() => {
             setEditingPost(null);
             fetchPosts();
             fetchImages();
@@ -554,7 +612,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         if (!file) return;
         const formData = new FormData();
         formData.append('image', file);
-        api.post('/admin/upload', formData).then(() => {
+        api.post('/api/admin/upload', formData).then(() => {
             fetchImages();
         });
     };
@@ -660,6 +718,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                     onAutoSummarize={handleAutoSummarize}
                     isSummarizing={isSummarizing}
                     setPost={setEditingPost}
+                    aiEnabled={config.aiConfig?.enabled}
                 />
 
                 {activeTab === 'appearance' && (
@@ -684,7 +743,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="space-y-4">
                                     <h3 className="text-sm font-bold uppercase text-accent mb-2">Color Variables</h3>
-                                    {Object.entries(themeColors).map(([key, value]) => (
+                                    {themeColors && Object.entries(themeColors).map(([key, value]) => (
                                         <div key={key} className="flex items-center justify-between gap-4">
                                             <label className="text-sm font-medium">{key}</label>
                                             <div className="flex gap-2 items-center">
@@ -797,119 +856,141 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                     <div className="max-w-2xl mx-auto">
                         <h2 className="text-2xl font-bold mb-6">AI Summarization Settings</h2>
                         <form onSubmit={(e) => { e.preventDefault(); handleSaveAIConfig(); }} className="space-y-4 bg-bg p-6 rounded-lg border border-accent border-opacity-20">
-                            <div className="space-y-1">
-                                <label htmlFor="ai-provider" className="block text-xs font-bold uppercase text-accent">Provider</label>
-                                <select 
-                                    id="ai-provider"
-                                    className="w-full p-3 bg-secondary border border-accent rounded text-text"
-                                    value={config.aiConfig?.provider || 'ollama'} 
-                                    onChange={e => {
-                                        const newProvider = e.target.value;
-                                        const defaults = newProvider === 'ollama' 
-                                            ? { baseUrl: 'http://localhost:11434', modelId: 'llama3' }
-                                            : { baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-3.5-turbo' };
-                                        
-                                        setConfig({
-                                            ...config, 
-                                            aiConfig: {
-                                                ...(config.aiConfig || { baseUrl: '', apiKey: '', modelId: '' }), 
-                                                provider: newProvider as 'ollama' | 'openai',
-                                                baseUrl: defaults.baseUrl,
-                                                modelId: defaults.modelId
-                                            }
-                                        });
-                                    }}
-                                >
-                                    <option value="ollama">Ollama (Local)</option>
-                                    <option value="openai">OpenAI (Cloud)</option>
-                                </select>
-                            </div>
-                            <div className="space-y-1">
-                                <label htmlFor="ai-base-url" className="block text-xs font-bold uppercase text-accent">Base URL</label>
+                            <div className="flex items-center gap-2 mb-4">
                                 <input 
-                                    id="ai-base-url"
-                                    type="text" placeholder={config.aiConfig?.provider === 'ollama' ? "http://localhost:11434" : "https://api.openai.com/v1"}
-                                    className="w-full p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                    value={config.aiConfig?.baseUrl || ''} 
+                                    id="ai-enabled"
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-accent text-accent focus:ring-accent bg-secondary"
+                                    checked={config.aiConfig?.enabled || false}
                                     onChange={e => {
-                                        const newVal = e.target.value;
-                                        setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', apiKey: '', modelId: '' }), baseUrl: newVal}}));
+                                        const isChecked = e.target.checked;
+                                        setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '', modelId: '' }), enabled: isChecked}}));
                                     }}
-                                    autoComplete="off"
                                 />
-                                <p className="text-[10px] opacity-60">Ollama default: http://localhost:11434 | OpenAI default: https://api.openai.com/v1</p>
+                                <label htmlFor="ai-enabled" className="text-sm font-bold uppercase text-accent cursor-pointer">Enable AI Features</label>
                             </div>
-                            <div className="space-y-1">
-                                <label htmlFor="ai-model-id" className="block text-xs font-bold uppercase text-accent">Model ID</label>
-                                <div className="flex gap-2">
-                                    {config.aiConfig?.provider === 'ollama' ? (
-                                        <select 
-                                            id="ai-model-id"
-                                            className="flex-1 p-3 bg-secondary border border-accent rounded text-text"
-                                            value={config.aiConfig?.modelId || ''} 
-                                            onChange={e => {
-                                                const newVal = e.target.value;
-                                                setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '' }), modelId: newVal}}));
-                                            }}
-                                        >
-                                            <option value="" className="bg-secondary">Select a model...</option>
-                                            {availableModels.map(model => (
-                                                <option key={model} value={model} className="bg-secondary text-text">{model}</option>
-                                            ))}
-                                            {config.aiConfig?.modelId && !availableModels.includes(config.aiConfig.modelId) && (
-                                                <option value={config.aiConfig.modelId} className="bg-secondary text-text">{config.aiConfig.modelId} (Saved)</option>
-                                            )}
-                                        </select>
-                                    ) : (
-                                        <input 
-                                            id="ai-model-id"
-                                            type="text" 
-                                            placeholder="gpt-3.5-turbo"
-                                            className="flex-1 p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                            value={config.aiConfig?.modelId || ''} 
-                                            onChange={e => {
-                                                const newVal = e.target.value;
-                                                setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'openai', baseUrl: '', apiKey: '' }), modelId: newVal}}));
-                                            }}
-                                            autoComplete="off"
-                                        />
-                                    )}
-                                    {config.aiConfig?.provider === 'ollama' && (
-                                        <button 
-                                            id="ai-refresh-models"
-                                            type="button"
-                                            onClick={(e) => {
-                                                console.log('[AI] Refresh button clicked');
-                                                e.preventDefault();
-                                                // Using values from current config state directly ensures we get the latest values
-                                                fetchAIModels(
-                                                    config.aiConfig?.provider,
-                                                    config.aiConfig?.baseUrl,
-                                                    config.aiConfig?.apiKey
-                                                );
-                                            }}
-                                            className="p-2 bg-secondary border border-accent rounded hover:bg-opacity-80 transition flex items-center justify-center"
-                                            title="Refresh models"
-                                            disabled={isLoadingModels}
-                                        >
-                                            <RefreshCw className={isLoadingModels ? "animate-spin" : ""} size={20} />
-                                        </button>
-                                    )}
+                            
+                            {!config.aiConfig?.enabled && (
+                                <p className="text-sm opacity-70 italic mb-4">
+                                    AI features are currently disabled. Enable them to configure provider and model settings.
+                                </p>
+                            )}
+
+                            <div className={`space-y-4 transition-opacity ${!config.aiConfig?.enabled ? 'opacity-30 pointer-events-none' : ''}`}>
+                                <div className="space-y-1">
+                                    <label htmlFor="ai-provider" className="block text-xs font-bold uppercase text-accent">Provider</label>
+                                    <select 
+                                        id="ai-provider"
+                                        className="w-full p-3 bg-secondary border border-accent rounded text-text"
+                                        value={config.aiConfig?.provider || 'ollama'} 
+                                        onChange={e => {
+                                            const newProvider = e.target.value;
+                                            const defaults = newProvider === 'ollama' 
+                                                ? { baseUrl: 'http://localhost:11434', modelId: 'llama3' }
+                                                : { baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-3.5-turbo' };
+                                            
+                                            setConfig({
+                                                ...config, 
+                                                aiConfig: {
+                                                    ...(config.aiConfig || { baseUrl: '', apiKey: '', modelId: '', enabled: true }), 
+                                                    provider: newProvider as 'ollama' | 'openai',
+                                                    baseUrl: defaults.baseUrl,
+                                                    modelId: defaults.modelId
+                                                }
+                                            });
+                                        }}
+                                    >
+                                        <option value="ollama">Ollama (Local)</option>
+                                        <option value="openai">OpenAI (Cloud)</option>
+                                    </select>
                                 </div>
-                            </div>
-                            <div className="space-y-1">
-                                <label htmlFor="ai-api-key" className="block text-xs font-bold uppercase text-accent">API Key (Optional for Ollama)</label>
-                                <input 
-                                    id="ai-api-key"
-                                    type="password" placeholder="sk-..." 
-                                    className="w-full p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                    value={config.aiConfig?.apiKey || ''} 
-                                    onChange={e => {
-                                        const newVal = e.target.value;
-                                        setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', modelId: '' }), apiKey: newVal}}));
-                                    }}
-                                    autoComplete="new-password"
-                                />
+                                <div className="space-y-1">
+                                    <label htmlFor="ai-base-url" className="block text-xs font-bold uppercase text-accent">Base URL</label>
+                                    <input 
+                                        id="ai-base-url"
+                                        type="text" placeholder={config.aiConfig?.provider === 'ollama' ? "http://localhost:11434" : "https://api.openai.com/v1"}
+                                        className="w-full p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
+                                        value={config.aiConfig?.baseUrl || ''} 
+                                        onChange={e => {
+                                            const newVal = e.target.value;
+                                            setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', apiKey: '', modelId: '', enabled: true }), baseUrl: newVal}}));
+                                        }}
+                                        autoComplete="off"
+                                    />
+                                    <p className="text-[10px] opacity-60">Ollama default: http://localhost:11434 | OpenAI default: https://api.openai.com/v1</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <label htmlFor="ai-model-id" className="block text-xs font-bold uppercase text-accent">Model ID</label>
+                                    <div className="flex gap-2">
+                                        {config.aiConfig?.provider === 'ollama' ? (
+                                            <select 
+                                                id="ai-model-id"
+                                                className="flex-1 p-3 bg-secondary border border-accent rounded text-text"
+                                                value={config.aiConfig?.modelId || ''} 
+                                                onChange={e => {
+                                                    const newVal = e.target.value;
+                                                    setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '', enabled: true }), modelId: newVal}}));
+                                                }}
+                                            >
+                                                <option value="" className="bg-secondary">Select a model...</option>
+                                                {availableModels.map(model => (
+                                                    <option key={model} value={model} className="bg-secondary text-text">{model}</option>
+                                                ))}
+                                                {config.aiConfig?.modelId && !availableModels.includes(config.aiConfig.modelId) && (
+                                                    <option value={config.aiConfig.modelId} className="bg-secondary text-text">{config.aiConfig.modelId} (Saved)</option>
+                                                )}
+                                            </select>
+                                        ) : (
+                                            <input 
+                                                id="ai-model-id"
+                                                type="text" 
+                                                placeholder="gpt-3.5-turbo"
+                                                className="flex-1 p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
+                                                value={config.aiConfig?.modelId || ''} 
+                                                onChange={e => {
+                                                    const newVal = e.target.value;
+                                                    setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'openai', baseUrl: '', apiKey: '', enabled: true }), modelId: newVal}}));
+                                                }}
+                                                autoComplete="off"
+                                            />
+                                        )}
+                                        {config.aiConfig?.provider === 'ollama' && (
+                                            <button 
+                                                id="ai-refresh-models"
+                                                type="button"
+                                                onClick={(e) => {
+                                                    console.log('[AI] Refresh button clicked');
+                                                    e.preventDefault();
+                                                    // Using values from current config state directly ensures we get the latest values
+                                                    fetchAIModels(
+                                                        config.aiConfig?.provider,
+                                                        config.aiConfig?.baseUrl,
+                                                        config.aiConfig?.apiKey
+                                                    );
+                                                }}
+                                                className="p-2 bg-secondary border border-accent rounded hover:bg-opacity-80 transition flex items-center justify-center"
+                                                title="Refresh models"
+                                                disabled={isLoadingModels}
+                                            >
+                                                <RefreshCw className={isLoadingModels ? "animate-spin" : ""} size={20} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label htmlFor="ai-api-key" className="block text-xs font-bold uppercase text-accent">API Key (Optional for Ollama)</label>
+                                    <input 
+                                        id="ai-api-key"
+                                        type="password" placeholder="sk-..." 
+                                        className="w-full p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
+                                        value={config.aiConfig?.apiKey || ''} 
+                                        onChange={e => {
+                                            const newVal = e.target.value;
+                                            setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', modelId: '', enabled: true }), apiKey: newVal}}));
+                                        }}
+                                        autoComplete="new-password"
+                                    />
+                                </div>
                             </div>
                             <button type="submit" className="bg-accent p-3 px-6 rounded font-bold w-full mt-4">Save AI Configuration</button>
                         </form>
@@ -1033,6 +1114,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
 export default function App() {
     const [user, setUser] = useState(null);
     const [siteName, setSiteName] = useState('Generic Blog');
+    const [notifications, setNotifications] = useState([]);
 
     useEffect(() => {
         const localTheme = localStorage.getItem('theme');
@@ -1064,13 +1146,12 @@ export default function App() {
     });
 
     const showAlert = (message, title = '') => {
-        setModal({
-            isOpen: true,
-            title,
-            message,
-            type: 'alert',
-            onConfirm: () => setModal(prev => ({ ...prev, isOpen: false }))
-        });
+        const id = Date.now();
+        setNotifications(prev => [...prev, { id, message, title }]);
+    };
+
+    const removeNotification = (id) => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
     };
 
     const showConfirm = (message, onConfirm, title = '') => {
@@ -1099,6 +1180,11 @@ export default function App() {
                 <footer className="p-8 text-center opacity-50 text-sm mt-12 border-t border-secondary">
                     © 2026 {siteName}. All rights reserved. Built with Vite + React.
                 </footer>
+            </div>
+            <div className="fixed top-4 right-4 z-[100] pointer-events-none flex flex-col items-end">
+                {notifications.map(n => (
+                    <Notification key={n.id} {...n} onClose={removeNotification} />
+                ))}
             </div>
             <Modal 
                 isOpen={modal.isOpen}

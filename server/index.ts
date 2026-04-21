@@ -178,10 +178,13 @@ app.get('/api/posts', (_req: Request, res: Response) => {
 
 // AI: Summarize post content
 app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+    const aiConfig = loadAIConfig();
+    if (!aiConfig?.enabled) {
+        return res.status(403).json({ message: 'AI features are disabled' });
+    }
     const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
     if (!content) return res.status(400).json({ message: 'No content provided' });
 
-    const aiConfig = loadAIConfig();
     const provider = (overrideProvider || aiConfig?.provider) as 'ollama' | 'openai';
     const baseUrl = overrideBaseUrl || aiConfig?.baseUrl;
     const modelId = overrideModelId || aiConfig?.modelId;
@@ -207,6 +210,9 @@ app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, re
 // AI: Fetch available models
 app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: Response) => {
     const aiConfig = loadAIConfig();
+    if (!aiConfig?.enabled) {
+        return res.status(403).json({ message: 'AI features are disabled' });
+    }
     const provider = (req.query.provider as string || aiConfig?.provider) as 'ollama' | 'openai';
     const baseUrl = req.query.baseUrl as string || aiConfig?.baseUrl;
 
@@ -309,13 +315,14 @@ app.get('/api/config', (_req: Request, res: Response) => {
 app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
-    const { provider, baseUrl, apiKey, modelId } = req.body;
+    const { enabled, provider, baseUrl, apiKey, modelId } = req.body;
 
     config.aiConfig = {
+        enabled: !!enabled,
         provider: provider === 'openai' ? 'openai' : 'ollama',
-        baseUrl: sanitizeHtml(baseUrl, { allowedTags: [], allowedAttributes: {} }),
-        apiKey: sanitizeHtml(apiKey, { allowedTags: [], allowedAttributes: {} }),
-        modelId: sanitizeHtml(modelId, { allowedTags: [], allowedAttributes: {} })
+        baseUrl: sanitizeHtml(baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
+        apiKey: sanitizeHtml(apiKey || '', { allowedTags: [], allowedAttributes: {} }),
+        modelId: sanitizeHtml(modelId || '', { allowedTags: [], allowedAttributes: {} })
     };
 
     saveConfig(config);
@@ -337,6 +344,7 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
     
     if (aiConfig) {
         config.aiConfig = {
+            enabled: !!aiConfig.enabled,
             provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
             baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
             apiKey: sanitizeHtml(aiConfig.apiKey || '', { allowedTags: [], allowedAttributes: {} }),

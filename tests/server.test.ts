@@ -211,6 +211,12 @@ describe('API Endpoints', () => {
     });
 
     it('POST /api/ai/summarize should return 400 for no content', async () => {
+        // Ensure AI is enabled
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3' });
+
         const res = await request(app)
             .post('/api/ai/summarize')
             .set('Authorization', `Bearer ${adminToken}`)
@@ -219,7 +225,12 @@ describe('API Endpoints', () => {
     });
 
     it('POST /api/ai/summarize should return 503 if AI config not found', async () => {
-        // Mock loadAIConfig to return null or invalid config
+        // Ensure AI is enabled
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: '', baseUrl: '', modelId: '' });
+
         const res = await request(app)
             .post('/api/ai/summarize')
             .set('Authorization', `Bearer ${adminToken}`)
@@ -228,6 +239,12 @@ describe('API Endpoints', () => {
     });
 
     it('POST /api/ai/summarize should support overrides in body', async () => {
+        // Ensure AI is enabled
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3' });
+
         const res = await request(app)
             .post('/api/ai/summarize')
             .set('Authorization', `Bearer ${adminToken}`)
@@ -247,6 +264,7 @@ describe('API Endpoints', () => {
 
     it('POST /api/admin/ai-config should update AI configuration', async () => {
         const aiConfig = {
+            enabled: true,
             provider: 'ollama',
             baseUrl: 'http://localhost:11434',
             apiKey: 'test-key',
@@ -262,6 +280,40 @@ describe('API Endpoints', () => {
         // Verify it was saved by getting config
         const configRes = await request(app).get('/api/config');
         expect(configRes.body.aiConfig).toEqual(aiConfig);
+    });
+
+    it('POST /api/admin/ai-config should persist disabled state and return 403 on AI endpoints', async () => {
+        // Disable AI
+        const res = await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: false, provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3' });
+        expect(res.status).toBe(200);
+
+        // Verify it's disabled in config
+        const configRes = await request(app).get('/api/config');
+        expect(configRes.body.aiConfig.enabled).toBe(false);
+
+        // Verify /api/ai/summarize returns 403
+        const summarizeRes = await request(app)
+            .post('/api/ai/summarize')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ content: 'Test content' });
+        expect(summarizeRes.status).toBe(403);
+        expect(summarizeRes.body.message).toBe('AI features are disabled');
+
+        // Verify /api/ai/models returns 403
+        const modelsRes = await request(app)
+            .get('/api/ai/models?provider=ollama&baseUrl=http://localhost:11434')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(modelsRes.status).toBe(403);
+        expect(modelsRes.body.message).toBe('AI features are disabled');
+
+        // Re-enable for subsequent tests
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3' });
     });
 
     it('DELETE /api/admin/users/:username should return 400 when deleting primary admin', async () => {
@@ -300,6 +352,12 @@ describe('API Endpoints', () => {
     });
 
     it('GET /api/ai/models should return models for Ollama with query params', async () => {
+        // Ensure AI is enabled
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: 'ollama', baseUrl: 'http://localhost:11434', modelId: 'llama3' });
+
         const res = await request(app)
             .get('/api/ai/models?provider=ollama&baseUrl=http://localhost:11434')
             .set('Authorization', `Bearer ${adminToken}`);
@@ -308,11 +366,11 @@ describe('API Endpoints', () => {
     });
 
     it('GET /api/ai/models should return 400 if provider or baseUrl missing', async () => {
-        // Clear AI config first to ensure it's not picking it up from there
+        // Ensure AI is enabled but with empty values
         await request(app)
             .post('/api/admin/ai-config')
             .set('Authorization', `Bearer ${adminToken}`)
-            .send({ provider: '', baseUrl: '', modelId: '' });
+            .send({ enabled: true, provider: '', baseUrl: '', modelId: '' });
 
         const res = await request(app)
             .get('/api/ai/models')
@@ -322,6 +380,12 @@ describe('API Endpoints', () => {
     });
 
     it('GET /api/ai/models should return common models for OpenAI via query', async () => {
+        // Ensure AI is enabled
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-3.5-turbo' });
+
         const res = await request(app)
             .get('/api/ai/models?provider=openai&baseUrl=https://api.openai.com/v1')
             .set('Authorization', `Bearer ${adminToken}`);

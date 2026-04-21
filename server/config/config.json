@@ -8,6 +8,7 @@
   "sortOrder": "asc",
   "searchPlacement": "bottom",
   "aiConfig": {
+    "enabled": true,
     "provider": "ollama",
     "baseUrl": "",
     "apiKey": "",

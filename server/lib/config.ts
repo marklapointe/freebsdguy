@@ -79,6 +79,7 @@ export interface Config {
 }
 
 export interface AIConfig {
+    enabled: boolean;
     provider: 'ollama' | 'openai';
     baseUrl: string;
     apiKey: string;
