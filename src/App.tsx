@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import axios from 'axios';
-import { Search, LogIn, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon } from 'lucide-react';
+import { MdEditor } from 'md-editor-rt';
+import 'md-editor-rt/lib/style.css';
+import { Search, LogIn, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles } from 'lucide-react';
 
 // API Instance
 const api = axios.create({
@@ -216,6 +218,7 @@ const Admin = ({ user, siteName, setSiteName }) => {
         searchPlacement: 'top'
     });
     const [editingPost, setEditingPost] = useState(null);
+    const [isSummarizing, setIsSummarizing] = useState(false);
     const [newThemeName, setNewThemeName] = useState('');
     const [themeColors, setThemeColors] = useState({
         "--primary": "#1a202c",
@@ -286,6 +289,20 @@ const Admin = ({ user, siteName, setSiteName }) => {
         });
     };
 
+    const handleAutoSummarize = async () => {
+        if (!editingPost || !editingPost.content) return;
+        setIsSummarizing(true);
+        try {
+            const res = await api.post('/ai/summarize', { content: editingPost.content });
+            setEditingPost({ ...editingPost, summary: res.data.summary });
+        } catch (error) {
+            console.error('Summarization error:', error);
+            alert('Failed to generate summary');
+        } finally {
+            setIsSummarizing(false);
+        }
+    };
+
     if (!user || (user.role !== 'admin' && user.role !== 'contributor')) return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
     const TabButton = ({ id, icon: Icon, label }) => (
@@ -334,28 +351,77 @@ const Admin = ({ user, siteName, setSiteName }) => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <input 
                                         type="text" placeholder="Slug (URL-friendly)" 
-                                        className="w-full p-3 bg-bg border border-accent rounded"
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={editingPost.slug} onChange={e => setEditingPost({...editingPost, slug: e.target.value})}
                                         required 
                                     />
                                     <input 
                                         type="text" placeholder="Title" 
-                                        className="w-full p-3 bg-bg border border-accent rounded"
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={editingPost.title} onChange={e => setEditingPost({...editingPost, title: e.target.value})}
                                         required 
                                     />
                                 </div>
-                                <textarea 
-                                    placeholder="Summary (short description)" 
-                                    className="w-full p-3 bg-bg border border-accent rounded h-20"
-                                    value={editingPost.summary} onChange={e => setEditingPost({...editingPost, summary: e.target.value})}
-                                />
-                                <textarea 
-                                    placeholder="Content (Markdown supported)" 
-                                    className="w-full p-3 bg-bg border border-accent rounded h-64 font-mono text-sm"
-                                    value={editingPost.content} onChange={e => setEditingPost({...editingPost, content: e.target.value})}
-                                    required 
-                                />
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label className="block text-xs font-bold uppercase text-accent">Summary</label>
+                                        <button 
+                                            type="button"
+                                            onClick={handleAutoSummarize}
+                                            className="text-xs flex items-center gap-1 text-accent hover:underline disabled:opacity-50"
+                                            disabled={isSummarizing || !editingPost.content}
+                                        >
+                                            <Sparkles size={14} /> {isSummarizing ? 'Summarizing...' : 'Auto-Summarize'}
+                                        </button>
+                                    </div>
+                                    <textarea 
+                                        placeholder="Summary (short description)" 
+                                        className="w-full p-3 bg-bg border border-accent rounded h-20 text-text"
+                                        value={editingPost.summary} onChange={e => setEditingPost({...editingPost, summary: e.target.value})}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="block text-xs font-bold uppercase text-accent">Content</label>
+                                    <MdEditor
+                                        modelValue={editingPost.content}
+                                        onChange={(val) => setEditingPost({...editingPost, content: val})}
+                                        theme="dark"
+                                        language="en-US"
+                                        placeholder="Write your post content here (Markdown supported)..."
+                                        style={{ height: '500px' }}
+                                        toolbars={[
+                                            'bold',
+                                            'italic',
+                                            'title',
+                                            '-',
+                                            'strikeThrough',
+                                            'sub',
+                                            'sup',
+                                            'quote',
+                                            'unorderedList',
+                                            'orderedList',
+                                            '-',
+                                            'codeRow',
+                                            'code',
+                                            'link',
+                                            'image',
+                                            'table',
+                                            'mermaid',
+                                            'katex',
+                                            '-',
+                                            'revoke',
+                                            'next',
+                                            'save',
+                                            '=',
+                                            'pageFullscreen',
+                                            'fullscreen',
+                                            'preview',
+                                            'htmlPreview',
+                                            'catalog',
+                                            'github'
+                                        ]}
+                                    />
+                                </div>
                                 <div className="flex gap-4">
                                     <button type="submit" className="bg-accent p-3 px-6 rounded font-bold">Save Post</button>
                                     <button type="button" onClick={() => setEditingPost(null)} className="p-3 px-6 border border-accent rounded font-bold">Cancel</button>
@@ -415,7 +481,7 @@ const Admin = ({ user, siteName, setSiteName }) => {
                                             <div className="flex gap-2 items-center">
                                                 <input 
                                                     type="text" 
-                                                    className="w-24 p-1 text-xs bg-bg border border-accent rounded"
+                                                    className="w-24 p-1 text-xs bg-bg border border-accent rounded text-text"
                                                     value={value} 
                                                     onChange={e => setThemeColors({...themeColors, [key]: e.target.value})}
                                                 />
@@ -432,7 +498,7 @@ const Admin = ({ user, siteName, setSiteName }) => {
                                 <div className="space-y-4">
                                     <input 
                                         type="text" placeholder="Theme Name" 
-                                        className="w-full p-3 bg-bg border border-accent rounded"
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={newThemeName} onChange={e => setNewThemeName(e.target.value)}
                                     />
                                     <button onClick={handleSaveTheme} className="w-full bg-accent p-3 rounded font-bold">Save New Theme</button>
@@ -450,7 +516,7 @@ const Admin = ({ user, siteName, setSiteName }) => {
                             <div>
                                 <label className="block mb-2 font-medium">Site Name</label>
                                 <input 
-                                    type="text" className="w-full p-3 bg-bg border border-accent rounded"
+                                    type="text" className="w-full p-3 bg-bg border border-accent rounded text-text"
                                     value={config.siteName} onChange={e => setConfig({...config, siteName: e.target.value})}
                                 />
                             </div>
@@ -458,21 +524,21 @@ const Admin = ({ user, siteName, setSiteName }) => {
                                 <div>
                                     <label className="block mb-2 font-medium">Posts Per Page</label>
                                     <input 
-                                        type="number" className="w-full p-3 bg-bg border border-accent rounded"
+                                        type="number" className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={config.pagination} onChange={e => setConfig({...config, pagination: Number(e.target.value)})}
                                     />
                                 </div>
                                 <div>
                                     <label className="block mb-2 font-medium">Search Placement</label>
                                     <select 
-                                        className="w-full p-3 bg-bg border border-accent rounded"
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={config.searchPlacement} onChange={e => setConfig({...config, searchPlacement: e.target.value})}
                                     >
-                                        <option value="top">Top</option>
-                                        <option value="bottom">Bottom</option>
-                                        <option value="left">Left</option>
-                                        <option value="right">Right</option>
-                                        <option value="none">None</option>
+                                        <option value="top" className="bg-secondary">Top</option>
+                                        <option value="bottom" className="bg-secondary">Bottom</option>
+                                        <option value="left" className="bg-secondary">Left</option>
+                                        <option value="right" className="bg-secondary">Right</option>
+                                        <option value="none" className="bg-secondary">None</option>
                                     </select>
                                 </div>
                             </div>
@@ -480,22 +546,22 @@ const Admin = ({ user, siteName, setSiteName }) => {
                                 <div>
                                     <label className="block mb-2 font-medium">Sort By</label>
                                     <select 
-                                        className="w-full p-3 bg-bg border border-accent rounded"
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={config.sortBy} onChange={e => setConfig({...config, sortBy: e.target.value})}
                                     >
-                                        <option value="date">Date</option>
-                                        <option value="title">Title</option>
-                                        <option value="author">Author</option>
+                                        <option value="date" className="bg-secondary">Date</option>
+                                        <option value="title" className="bg-secondary">Title</option>
+                                        <option value="author" className="bg-secondary">Author</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block mb-2 font-medium">Sort Order</label>
                                     <select 
-                                        className="w-full p-3 bg-bg border border-accent rounded"
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
                                         value={config.sortOrder} onChange={e => setConfig({...config, sortOrder: e.target.value})}
                                     >
-                                        <option value="desc">Descending</option>
-                                        <option value="asc">Ascending</option>
+                                        <option value="desc" className="bg-secondary">Descending</option>
+                                        <option value="asc" className="bg-secondary">Ascending</option>
                                     </select>
                                 </div>
                             </div>
@@ -546,17 +612,17 @@ const Admin = ({ user, siteName, setSiteName }) => {
                             }} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                                 <div className="md:col-span-1">
                                     <label className="block mb-2 text-xs font-bold uppercase">Username</label>
-                                    <input name="username" type="text" className="w-full p-2 bg-bg border border-accent rounded" required />
+                                    <input name="username" type="text" className="w-full p-2 bg-bg border border-accent rounded text-text" required />
                                 </div>
                                 <div className="md:col-span-1">
                                     <label className="block mb-2 text-xs font-bold uppercase">Password</label>
-                                    <input name="password" type="password" className="w-full p-2 bg-bg border border-accent rounded" required />
+                                    <input name="password" type="password" className="w-full p-2 bg-bg border border-accent rounded text-text" required />
                                 </div>
                                 <div className="md:col-span-1">
                                     <label className="block mb-2 text-xs font-bold uppercase">Role</label>
-                                    <select name="role" className="w-full p-2 bg-bg border border-accent rounded">
-                                        <option value="contributor">Contributor</option>
-                                        <option value="admin">Admin</option>
+                                    <select name="role" className="w-full p-2 bg-bg border border-accent rounded text-text">
+                                        <option value="contributor" className="bg-secondary">Contributor</option>
+                                        <option value="admin" className="bg-secondary">Admin</option>
                                     </select>
                                 </div>
                                 <button type="submit" className="bg-accent p-2 rounded font-bold">Add User</button>
@@ -579,17 +645,35 @@ const Admin = ({ user, siteName, setSiteName }) => {
                             {images.map(img => (
                                 <div key={img} className="group relative bg-bg rounded overflow-hidden border border-accent border-opacity-20 aspect-square">
                                     <img src={`/api/images/${img}`} className="w-full h-full object-cover" />
-                                    <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center p-2 text-center">
-                                        <p className="text-[10px] text-white truncate w-full mb-2">{img}</p>
-                                        <button 
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(`![${img}](/api/images/${img})`);
-                                                alert('Markdown link copied!');
-                                            }}
-                                            className="bg-accent text-white p-1 px-2 rounded text-[10px] font-bold"
-                                        >
-                                            Copy MD
-                                        </button>
+                                    <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center p-2 text-center gap-2">
+                                        <p className="text-[10px] text-white truncate w-full">{img}</p>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(`![${img}](/api/images/${img})`);
+                                                    alert('Markdown link copied!');
+                                                }}
+                                                className="bg-accent text-white p-1 px-2 rounded text-[10px] font-bold flex items-center gap-1"
+                                                title="Copy Markdown Link"
+                                            >
+                                                <Copy size={10} /> MD
+                                            </button>
+                                            {editingPost && (
+                                                <button 
+                                                    onClick={() => {
+                                                        const imgLink = `\n![${img}](/api/images/${img})\n`;
+                                                        setEditingPost({
+                                                            ...editingPost,
+                                                            content: editingPost.content + imgLink
+                                                        });
+                                                        alert('Image injected into editor!');
+                                                    }}
+                                                    className="bg-blue-600 text-white p-1 px-2 rounded text-[10px] font-bold"
+                                                >
+                                                    Inject
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             ))}

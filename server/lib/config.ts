@@ -30,8 +30,22 @@ export interface Config {
     searchPlacement?: 'top' | 'bottom' | 'left' | 'right' | 'none';
 }
 
+export interface AIConfig {
+    name: string;
+    provider: string;
+    baseUrl: string;
+    apiKey: string;
+    modelId: string;
+}
+
 export const loadConfig = (customPath?: string): Config => {
     return JSON.parse(fs.readFileSync(customPath || configPath(), 'utf8'));
+};
+
+export const loadAIConfig = (customPath?: string): AIConfig | null => {
+    const targetPath = customPath || path.join(__dirname, '..', '..', 'local-ollama.json');
+    if (!fs.existsSync(targetPath)) return null;
+    return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
 };
 
 export const saveConfig = (config: Config, customPath?: string) => {

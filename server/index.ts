@@ -4,12 +4,13 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cors from 'cors';
+import axios from 'axios';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { loadConfig, saveConfig, configPath, loadUsers, saveUsers } from './lib/config.ts';
+import { loadConfig, saveConfig, configPath, loadUsers, saveUsers, loadAIConfig } from './lib/config.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
 
 import dotenv from 'dotenv';
@@ -153,6 +154,44 @@ app.get('/api/posts', (_req: Request, res: Response) => {
     const postsDir = path.resolve(configDir, config.postsDir);
     const posts = getPosts(postsDir);
     res.json(posts);
+});
+
+// AI: Summarize post content
+app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ message: 'No content provided' });
+
+    const aiConfig = loadAIConfig();
+    if (!aiConfig) {
+        return res.status(503).json({ message: 'AI configuration not found' });
+    }
+
+    try {
+        const response = await axios.post(`${aiConfig.baseUrl}/chat/completions`, {
+            model: aiConfig.modelId,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a helpful assistant that summarizes blog posts. Provide a concise summary (1-3 sentences) of the following content.'
+                },
+                {
+                    role: 'user',
+                    content: content
+                }
+            ]
+        }, {
+            headers: {
+                'Authorization': `Bearer ${aiConfig.apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const summary = response.data.choices[0].message.content.trim();
+        res.json({ summary });
+    } catch (error) {
+        console.error('AI Summarization failed:', error);
+        res.status(500).json({ message: 'Failed to summarize content' });
+    }
 });
 
 // Get single post
