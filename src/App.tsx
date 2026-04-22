@@ -505,6 +505,16 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
 
+    const themeLabelMap: Record<string, string> = {
+        '--primary': 'Primary',
+        '--secondary': 'Secondary',
+        '--accent': 'Accent',
+        '--text': 'Text',
+        '--bg': 'Background'
+    };
+
+    const getThemeLabel = (key: string) => themeLabelMap[key] || key.replace(/^--/, '').charAt(0).toUpperCase() + key.replace(/^--/, '').slice(1);
+
     useEffect(() => {
         if (themeColors) {
             const root = document.documentElement;
@@ -766,19 +776,19 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="space-y-4">
                                     <h3 className="text-sm font-bold uppercase text-accent mb-2">Color Variables</h3>
-                                    {themeColors && Object.entries(themeColors).map(([key, value]) => (
+                                    {['--primary', '--secondary', '--accent', '--text', '--bg'].map(key => (
                                         <div key={key} className="flex items-center justify-between gap-4">
-                                            <label className="text-sm font-medium">{key}</label>
+                                            <label className="text-sm font-medium">{getThemeLabel(key)}</label>
                                             <div className="flex gap-2 items-center">
                                                 <input 
                                                     type="text" 
                                                     className="w-24 p-1 text-xs bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                                    value={value} 
+                                                    value={themeColors?.[key] || ''} 
                                                     onChange={e => setThemeColors({...themeColors, [key]: e.target.value})}
                                                 />
                                                 <input 
                                                     type="color" 
-                                                    value={value} 
+                                                    value={themeColors?.[key] || '#000000'} 
                                                     onChange={e => setThemeColors({...themeColors, [key]: e.target.value})}
                                                     className="w-10 h-10 border-0 bg-transparent cursor-pointer"
                                                 />

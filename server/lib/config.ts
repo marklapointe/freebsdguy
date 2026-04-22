@@ -152,7 +152,7 @@ export const loadUsers = (customPath?: string): UsersConfig => {
         const defaultConfig: UsersConfig = {
             admin: {
                 username: 'admin',
-                passwordHash: '$2b$10$x7o/dvu7/KBaupXvvkmhQuvqMhonmzGO.Al4EAazaPFbDusbhhdXi', // admin123
+                passwordHash: '$2b$10$O9wR/Y6O6Wc7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/', // admin
                 role: 'admin'
             },
             users: []
@@ -169,7 +169,7 @@ export const loadUsers = (customPath?: string): UsersConfig => {
         return {
             admin: {
                 username: 'admin',
-                passwordHash: '$2b$10$x7o/dvu7/KBaupXvvkmhQuvqMhonmzGO.Al4EAazaPFbDusbhhdXi',
+                passwordHash: '$2b$10$O9wR/Y6O6Wc7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/',
                 role: 'admin'
             },
             users: []
