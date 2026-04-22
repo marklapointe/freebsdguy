@@ -118,7 +118,16 @@ export const loadConfig = (customPath?: string): Config => {
             siteName: 'FreeBSD Guy'
         };
     }
-    return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    try {
+        return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    } catch (e) {
+        return {
+            postsDir: './posts',
+            themeDir: './themes',
+            currentTheme: 'dark',
+            siteName: 'FreeBSD Guy'
+        };
+    }
 };
 
 export const loadAIConfig = (customPath?: string): AIConfig | null => {
@@ -154,7 +163,18 @@ export const loadUsers = (customPath?: string): UsersConfig => {
         fs.writeFileSync(targetPath, JSON.stringify(defaultConfig, null, 2));
         return defaultConfig;
     }
-    return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    try {
+        return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    } catch (e) {
+        return {
+            admin: {
+                username: 'admin',
+                passwordHash: '$2b$10$x7o/dvu7/KBaupXvvkmhQuvqMhonmzGO.Al4EAazaPFbDusbhhdXi',
+                role: 'admin'
+            },
+            users: []
+        };
+    }
 };
 
 export const saveUsers = (users: UsersConfig, customPath?: string) => {

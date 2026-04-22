@@ -1,101 +1,109 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { loadConfig, saveConfig, Config, configPath, loadUsers, saveUsers, UsersConfig, usersPath, loadAIConfig } from '../server/lib/config';
+import os from 'os';
+import { loadConfig, saveConfig, loadUsers, saveUsers, loadAIConfig, configPath, usersPath } from '../server/lib/config';
 
-const testConfigPath = path.join(__dirname, 'test-config.json');
-const testUsersPath = path.join(__dirname, 'test-users.json');
+describe('config.ts', () => {
+    const tempDir = path.join(os.tmpdir(), 'freebsdguy-test-config');
+    const customConfigPath = path.join(tempDir, 'config.json');
+    const customUsersPath = path.join(tempDir, 'users.json');
 
-const sampleConfig: Config = {
-    postsDir: './posts',
-    themeDir: './themes',
-    currentTheme: 'default',
-    siteName: 'Test Blog'
-};
-
-const sampleUsers: UsersConfig = {
-    admin: {
-        username: 'admin',
-        passwordHash: 'hash',
-        role: 'admin'
-    },
-    users: []
-};
-
-describe('Config Library', () => {
     beforeEach(() => {
-        fs.writeFileSync(testConfigPath, JSON.stringify(sampleConfig, null, 2));
-        fs.writeFileSync(testUsersPath, JSON.stringify(sampleUsers, null, 2));
-        vi.stubEnv('CONFIG_PATH', testConfigPath);
-        vi.stubEnv('USERS_PATH', testUsersPath);
+        if (fs.existsSync(tempDir)) {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+        fs.mkdirSync(tempDir, { recursive: true });
     });
 
     afterEach(() => {
-        if (fs.existsSync(testConfigPath)) {
-            fs.unlinkSync(testConfigPath);
+        if (fs.existsSync(tempDir)) {
+            fs.rmSync(tempDir, { recursive: true, force: true });
         }
-        if (fs.existsSync(testUsersPath)) {
-            fs.unlinkSync(testUsersPath);
-        }
-        vi.unstubAllEnvs();
     });
 
-    it('should load config from a file', () => {
-        const config = loadConfig(testConfigPath);
-        expect(config.siteName).toBe('Test Blog');
+    it('loadConfig returns default config if file does not exist', () => {
+        const config = loadConfig(customConfigPath);
+        expect(config.currentTheme).toBe('dark');
+        expect(config.siteName).toBe('FreeBSD Guy');
     });
 
-    it('should load users from a file', () => {
-        const users = loadUsers(testUsersPath);
-        expect(users.admin.username).toBe('admin');
+    it('loadConfig handles corrupted JSON', () => {
+        fs.writeFileSync(customConfigPath, '{ corrupted: json }');
+        const config = loadConfig(customConfigPath);
+        expect(config.currentTheme).toBe('dark'); // Should fallback
     });
 
-    it('should save config to a file', () => {
-        const updatedConfig = { ...sampleConfig, siteName: 'Updated Blog' };
-        saveConfig(updatedConfig, testConfigPath);
-        
-        const loaded = JSON.parse(fs.readFileSync(testConfigPath, 'utf8'));
-        expect(loaded.siteName).toBe('Updated Blog');
+    it('loadUsers handles corrupted JSON', () => {
+        fs.writeFileSync(customUsersPath, '{ corrupted: json }');
+        const users = loadUsers(customUsersPath);
+        expect(users.admin.username).toBe('admin'); // Should fallback
     });
 
-    it('should save users to a file', () => {
-        const updatedUsers = { ...sampleUsers };
-        updatedUsers.users.push({ username: 'new', passwordHash: 'h', role: 'contributor' });
-        saveUsers(updatedUsers, testUsersPath);
-        
-        const loaded = JSON.parse(fs.readFileSync(testUsersPath, 'utf8'));
-        expect(loaded.users.length).toBe(1);
+    it('saveConfig and loadConfig works', () => {
+        const config = {
+            postsDir: './test-posts',
+            themeDir: './test-themes',
+            currentTheme: 'light',
+            siteName: 'Test Site'
+        };
+        saveConfig(config, customConfigPath);
+        const loaded = loadConfig(customConfigPath);
+        expect(loaded).toEqual(config);
     });
 
-    it('should create default users if file does not exist', () => {
-        const missingUsersPath = path.join(__dirname, 'missing-users.json');
-        if (fs.existsSync(missingUsersPath)) fs.unlinkSync(missingUsersPath);
-        
-        const users = loadUsers(missingUsersPath);
-        expect(users.admin.username).toBe('admin');
-        expect(fs.existsSync(missingUsersPath)).toBe(true);
-        fs.unlinkSync(missingUsersPath);
-    });
-
-    it('should return null if AI config is not present in config', () => {
-        const configWithNoAI = { ...sampleConfig };
-        delete configWithNoAI.aiConfig;
-        const tempPath = path.join(__dirname, 'no-ai-config.json');
-        fs.writeFileSync(tempPath, JSON.stringify(configWithNoAI));
-        
-        const aiConfig = loadAIConfig(tempPath);
+    it('loadAIConfig returns null if no aiConfig', () => {
+        const config = {
+            postsDir: './posts',
+            themeDir: './themes',
+            currentTheme: 'dark'
+        };
+        saveConfig(config, customConfigPath);
+        const aiConfig = loadAIConfig(customConfigPath);
         expect(aiConfig).toBeNull();
-        fs.unlinkSync(tempPath);
     });
 
-    it('should load AI config from config file', () => {
-        const aiConfigData = { provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: 'test', modelId: 'llama3' };
-        const configWithAI = { ...sampleConfig, aiConfig: aiConfigData };
-        const tempPath = path.join(__dirname, 'with-ai-config.json');
-        fs.writeFileSync(tempPath, JSON.stringify(configWithAI));
-        
-        const aiConfig = loadAIConfig(tempPath);
-        expect(aiConfig).toEqual(aiConfigData);
-        fs.unlinkSync(tempPath);
+    it('loadAIConfig returns aiConfig if present', () => {
+        const aiConfig = {
+            enabled: true,
+            provider: 'ollama' as const,
+            baseUrl: 'http://localhost:11434',
+            apiKey: '',
+            modelId: 'llama3'
+        };
+        const config = {
+            postsDir: './posts',
+            themeDir: './themes',
+            currentTheme: 'dark',
+            aiConfig
+        };
+        saveConfig(config, customConfigPath);
+        const loadedAI = loadAIConfig(customConfigPath);
+        expect(loadedAI).toEqual(aiConfig);
+    });
+
+    it('loadUsers returns default admin if file does not exist', () => {
+        const users = loadUsers(customUsersPath);
+        expect(users.admin.username).toBe('admin');
+        expect(fs.existsSync(customUsersPath)).toBe(true);
+    });
+
+    it('saveUsers and loadUsers works', () => {
+        const users = {
+            admin: {
+                username: 'superadmin',
+                passwordHash: 'hash',
+                role: 'admin'
+            },
+            users: []
+        };
+        saveUsers(users, customUsersPath);
+        const loaded = loadUsers(customUsersPath);
+        expect(loaded).toEqual(users);
+    });
+    
+    it('configPath and usersPath return strings', () => {
+        expect(typeof configPath()).toBe('string');
+        expect(typeof usersPath()).toBe('string');
     });
 });

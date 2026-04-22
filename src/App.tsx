@@ -8,7 +8,7 @@ import 'md-editor-rt/lib/style.css';
 import { Search, LogIn, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X } from 'lucide-react';
 
 // API Instance
-const api = axios.create({
+export const api = axios.create({
     baseURL: '/api'
 });
 
@@ -149,17 +149,17 @@ const Navbar = ({ user, setUser, siteName }) => {
                     <>
                         <span className="hidden sm:inline opacity-70">Hello, {user.username}</span>
                         {(user.role === 'admin' || user.role === 'contributor') && (
-                            <Link to="/admin" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Settings">
+                            <Link to="/admin" data-testid="admin-link" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Settings">
                                 <Settings size={20} />
                             </Link>
                         )}
-                        <button onClick={handleLogout} className="p-2 hover:bg-accent rounded transition hover:text-white" title="Logout">
+                        <button onClick={handleLogout} data-testid="logout-button" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Logout">
                             <LogOut size={20} />
                         </button>
                     </>
                 ) : (
-                    <Link to="/login" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Login">
-                        <LogIn size={20} />
+                    <Link to="/login" data-testid="login-link" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Login">
+                        Login
                     </Link>
                 )}
             </div>
@@ -284,6 +284,7 @@ const Login = ({ setUser }) => {
                     <label htmlFor="username" className="block mb-2 text-sm font-medium">Username</label>
                     <input 
                         id="username"
+                        data-testid="username-input"
                         type="text" 
                         className="w-full p-3 rounded bg-bg text-text border border-accent focus:outline-none"
                         value={username}
@@ -296,6 +297,7 @@ const Login = ({ setUser }) => {
                     <label htmlFor="password" className="block mb-2 text-sm font-medium">Password</label>
                     <input 
                         id="password"
+                        data-testid="password-input"
                         type="password" 
                         className="w-full p-3 rounded bg-bg text-text border border-accent focus:outline-none"
                         value={password}
@@ -304,7 +306,7 @@ const Login = ({ setUser }) => {
                         autoComplete="current-password"
                     />
                 </div>
-                <button type="submit" className="w-full p-3 bg-accent rounded font-bold hover:bg-opacity-80 transition shadow-lg text-white">
+                <button type="submit" data-testid="login-submit" className="w-full p-3 bg-accent rounded font-bold hover:bg-opacity-80 transition shadow-lg text-white">
                     Sign In
                 </button>
             </form>
