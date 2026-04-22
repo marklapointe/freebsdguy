@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { loadConfig, saveConfig, loadUsers, saveUsers, loadAIConfig, configPath, usersPath } from '../server/lib/config';
+import { loadConfig, saveConfig, loadUsers, saveUsers, loadAIConfig, configPath, usersPath, isConfigWritable } from '../server/lib/config';
 
 describe('config.ts', () => {
     const tempDir = path.join(os.tmpdir(), 'mdweb-test-config');
@@ -105,5 +105,9 @@ describe('config.ts', () => {
     it('configPath and usersPath return strings', () => {
         expect(typeof configPath()).toBe('string');
         expect(typeof usersPath()).toBe('string');
+    });
+
+    it('isConfigWritable returns true for writable file', () => {
+        expect(isConfigWritable(customConfigPath)).toBe(true);
     });
 });

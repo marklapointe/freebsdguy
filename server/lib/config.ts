@@ -66,6 +66,10 @@ export interface UsersConfig {
     users: User[];
 }
 
+export interface ServiceConfig {
+    port?: number;
+}
+
 export interface Config {
     postsDir: string;
     themeDir: string;
@@ -76,6 +80,7 @@ export interface Config {
     sortOrder?: 'asc' | 'desc';
     searchPlacement?: 'top' | 'bottom' | 'left' | 'right' | 'none';
     aiConfig?: AIConfig;
+    service?: ServiceConfig;
 }
 
 export interface AIConfig {
@@ -139,6 +144,25 @@ export const saveConfig = (config: Config, customPath?: string) => {
     const targetPath = customPath || configPath();
     ensureDirectoryExists(targetPath);
     fs.writeFileSync(targetPath, JSON.stringify(config, null, 2));
+};
+
+export const isConfigWritable = (customPath?: string): boolean => {
+    const targetPath = customPath || configPath();
+    try {
+        if (fs.existsSync(targetPath)) {
+            fs.accessSync(targetPath, fs.constants.W_OK);
+            return true;
+        } else {
+            const dir = path.dirname(targetPath);
+            if (fs.existsSync(dir)) {
+                fs.accessSync(dir, fs.constants.W_OK);
+                return true;
+            }
+        }
+    } catch (e) {
+        return false;
+    }
+    return false;
 };
 
 export const loadUsers = (customPath?: string): UsersConfig => {

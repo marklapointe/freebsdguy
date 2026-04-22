@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify';
 import axios from 'axios';
 import { MdEditor } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
-import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X } from 'lucide-react';
+import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle } from 'lucide-react';
 
 // API Instance
 export const api = axios.create({
@@ -497,8 +497,12 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
             apiKey: '',
             modelId: 'llama3',
             enabled: true
+        },
+        service: {
+            port: 3001
         }
     });
+    const [isWritable, setIsWritable] = useState(true);
     const [editingPost, setEditingPost] = useState(null);
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
@@ -551,6 +555,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
             fetchUsers();
             fetchThemes();
             fetchConfig();
+            fetchConfigStatus();
         }
         fetchPosts();
         fetchImages();
@@ -561,6 +566,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     const fetchThemes = () => api.get('/admin/themes').then(res => { setThemes(res.data); return res; });
     const fetchImages = () => api.get('/admin/images').then(res => { setImages(res.data); return res; });
     const fetchConfig = () => api.get('/config').then(res => { setConfig(res.data); return res; });
+    const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { setIsWritable(res.data.isWritable); return res; });
 
     const fetchAIModels = (p?: string, b?: string, k?: string) => {
         const provider = p || config.aiConfig?.provider || 'ollama';
@@ -699,6 +705,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                         <TabButton id="appearance" icon={Palette} label="Appearance" />
                         <TabButton id="layout" icon={Layout} label="Layout" />
                         <TabButton id="ai" icon={Cpu} label="AI Settings" />
+                        <TabButton id="service" icon={Server} label="Service" />
                         <TabButton id="users" icon={Users} label="Users" />
                     </>
                 )}
@@ -706,6 +713,15 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
             </div>
 
             <div className="bg-secondary p-8 rounded-xl shadow-2xl border border-accent border-opacity-30 min-h-[500px]">
+                {!isWritable && (
+                    <div className="mb-8 p-6 bg-red-500 bg-opacity-10 border-2 border-red-500 rounded-xl flex items-center gap-4 animate-pulse">
+                        <AlertCircle className="text-red-500 flex-shrink-0" size={32} />
+                        <div>
+                            <h3 className="text-xl font-bold text-red-500">Settings Read-Only</h3>
+                            <p className="text-sm opacity-90">The configuration file is not writable. Any changes you make in this menu will not be saved to the disk.</p>
+                        </div>
+                    </div>
+                )}
                 {activeTab === 'posts' && (
                     <div>
                         <div className="flex justify-between items-center mb-6">
@@ -1016,6 +1032,36 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                             </div>
                             <button type="submit" className="bg-accent p-3 px-6 rounded font-bold w-full mt-4">Save AI Configuration</button>
                         </form>
+                    </div>
+                )}
+
+                {activeTab === 'service' && (
+                    <div className="max-w-2xl mx-auto">
+                        <h2 className="text-2xl font-bold mb-6">Service Settings</h2>
+                        <div className="space-y-6 bg-bg p-6 rounded-lg border border-accent border-opacity-20">
+                            <div className="space-y-1">
+                                <label htmlFor="service-port" className="block text-xs font-bold uppercase text-accent">TCP Port</label>
+                                <input 
+                                    id="service-port"
+                                    type="number" className="w-full p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
+                                    value={config.service?.port || 3001} 
+                                    onChange={e => {
+                                        const newVal = parseInt(e.target.value, 10);
+                                        setConfig(prev => ({...prev, service: {...(prev.service || {}), port: newVal}}));
+                                    }}
+                                    autoComplete="off"
+                                    disabled={!isWritable}
+                                />
+                                <p className="text-[10px] opacity-60">Specify the port the application should listen on. Defaults to 3001.</p>
+                            </div>
+                            <button 
+                                onClick={handleSaveConfig} 
+                                className={`w-full bg-accent p-3 rounded font-bold shadow-lg hover:bg-opacity-90 transition text-white ${!isWritable ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={!isWritable}
+                            >
+                                Save Service Settings
+                            </button>
+                        </div>
                     </div>
                 )}
 

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { loadConfig, saveConfig, configPath, loadUsers, saveUsers, loadAIConfig } from './lib/config.ts';
+import { loadConfig, saveConfig, configPath, loadUsers, saveUsers, loadAIConfig, isConfigWritable } from './lib/config.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 
@@ -22,7 +22,19 @@ import sanitizeHtml from 'sanitize-html';
 
 const app = express();
 export { app };
-const PORT = process.env.PORT || 3001;
+// Parse command line arguments for --port
+let cliPort: number | null = null;
+const portArgIndex = process.argv.indexOf('--port') !== -1 ? process.argv.indexOf('--port') : process.argv.indexOf('-p');
+if (portArgIndex !== -1 && process.argv.length > portArgIndex + 1) {
+    const p = parseInt(process.argv[portArgIndex + 1], 10);
+    if (!isNaN(p)) {
+        cliPort = p;
+        console.log(`[INFO] Port specified via CLI: ${cliPort}`);
+    }
+}
+
+const config = loadConfig();
+const PORT = cliPort || config.service?.port || process.env.PORT || 3001;
 const SECRET = process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
 // Configure Multer for image uploads
@@ -468,6 +480,11 @@ app.get('/api/admin/images', authenticate, (req: AuthenticatedRequest, res: Resp
 });
 
 // Theme support (just returns css variables)
+app.get('/api/admin/config-status', authenticate, (_req: AuthenticatedRequest, res: Response) => {
+    if (_req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    res.json({ isWritable: isConfigWritable() });
+});
+
 app.get('/api/theme', (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());

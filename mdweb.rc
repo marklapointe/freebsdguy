@@ -14,15 +14,22 @@ load_rc_config $name
 : ${mdweb_enable:="NO"}
 : ${mdweb_user:="www"}
 : ${mdweb_dir:="/usr/local/www/MDWeb"}
+: ${mdweb_port:=""}
 
 pidfile="/var/run/${name}.pid"
 procname="/usr/local/bin/node"
 command="/usr/sbin/daemon"
+
+# Handle optional port argument
+if [ -n "${mdweb_port}" ]; then
+    port_arg="-p ${mdweb_port}"
+fi
+
 # -f: run in foreground (daemon handles backgrounding)
 # -p: write child pid to pidfile
 # -r: restart child if it exits
 # -u: run as user
-command_args="-f -p ${pidfile} -r -u ${mdweb_user} /usr/bin/env NODE_ENV=production ${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts"
+command_args="-f -p ${pidfile} -r -u ${mdweb_user} /usr/bin/env NODE_ENV=production ${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts ${port_arg}"
 
 start_precmd="mdweb_prestart"
 stop_postcmd="mdweb_postclean"
