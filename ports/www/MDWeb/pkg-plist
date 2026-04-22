@@ -1,3 +1,7 @@
-@comment This is a placeholder for the package list
+@comment This is the package list for MDWeb
+share/man/man1/mdweb.1.gz
 %%WWWDIR%%/package.json
-%%WWWDIR%%/README.md
+%%WWWDIR%%/package-lock.json
+@dir %%WWWDIR%%/server
+@dir %%WWWDIR%%/node_modules
+@dir %%WWWDIR%%

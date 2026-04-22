@@ -5,7 +5,7 @@ import os from 'os';
 import { loadConfig, saveConfig, loadUsers, saveUsers, loadAIConfig, configPath, usersPath } from '../server/lib/config';
 
 describe('config.ts', () => {
-    const tempDir = path.join(os.tmpdir(), 'freebsdguy-test-config');
+    const tempDir = path.join(os.tmpdir(), 'mdweb-test-config');
     const customConfigPath = path.join(tempDir, 'config.json');
     const customUsersPath = path.join(tempDir, 'users.json');
 
@@ -25,7 +25,7 @@ describe('config.ts', () => {
     it('loadConfig returns default config if file does not exist', () => {
         const config = loadConfig(customConfigPath);
         expect(config.currentTheme).toBe('dark');
-        expect(config.siteName).toBe('FreeBSD Guy');
+        expect(config.siteName).toBe('MDWeb');
     });
 
     it('loadConfig handles corrupted JSON', () => {

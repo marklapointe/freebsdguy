@@ -17,7 +17,7 @@ vi.mock('gray-matter', async () => {
 });
 
 describe('posts.ts', () => {
-    const tempDir = path.join(os.tmpdir(), 'freebsdguy-test-posts');
+    const tempDir = path.join(os.tmpdir(), 'mdweb-test-posts');
 
     beforeEach(() => {
         if (fs.existsSync(tempDir)) {

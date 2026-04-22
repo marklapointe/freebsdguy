@@ -1,13 +1,13 @@
 ---
-title: Welcome to FreeBSD Guy
-summary: A quick introduction to the FreeBSD Guy website and what to expect.
+title: Welcome to MDWeb
+summary: A quick introduction to the MDWeb website and what to expect.
 date: 2026-02-22
 author: admin
 ---
 
-# Welcome to FreeBSD Guy!
+# Welcome to MDWeb!
 
-This is the first post on the new FreeBSD Guy website, built with **React**, **Vite**, and **Tailwind CSS**.
+This is the first post on the new MDWeb website, built with **React**, **Vite**, and **Tailwind CSS**.
 
 ## Features
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const APP_NAME = 'freebsdguy';
+const APP_NAME = 'mdweb';
 
 const getBaseConfigDir = () => {
     if (process.env.CONFIG_DIR) return process.env.CONFIG_DIR;
@@ -115,7 +115,7 @@ export const loadConfig = (customPath?: string): Config => {
             postsDir: './posts',
             themeDir: './themes',
             currentTheme: 'dark',
-            siteName: 'FreeBSD Guy'
+            siteName: 'MDWeb'
         };
     }
     try {
@@ -125,7 +125,7 @@ export const loadConfig = (customPath?: string): Config => {
             postsDir: './posts',
             themeDir: './themes',
             currentTheme: 'dark',
-            siteName: 'FreeBSD Guy'
+            siteName: 'MDWeb'
         };
     }
 };

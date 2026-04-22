@@ -1135,7 +1135,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
 
 export default function App() {
     const [user, setUser] = useState(null);
-    const [siteName, setSiteName] = useState('Generic Blog');
+    const [siteName, setSiteName] = useState('MDWeb');
     const [notifications, setNotifications] = useState([]);
 
     useEffect(() => {

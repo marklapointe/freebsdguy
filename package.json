@@ -1,8 +1,8 @@
 {
-  "name": "freebsdguy",
+  "name": "mdweb",
   "private": true,
   "version": "1.0.0",
-  "description": "FreeBSD Guy personal website",
+  "description": "MDWeb personal website",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -40,6 +40,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "tsx": "^4.19.3",
     "@types/dompurify": "^3.0.5",
     "@types/sanitize-html": "^2.16.1",
     "axios": "^1.13.5",

@@ -1,0 +1,37 @@
+.Dd April 21, 2026
+.Dt MDWEB 1
+.Os
+.Sh NAME
+.Nm mdweb
+.Nd a dynamic blogging platform built with React and Node.js
+.Sh SYNOPSIS
+.Nm
+.Op Fl d
+.Op Fl p Ar port
+.Sh DESCRIPTION
+.Nm
+is a lightweight, dynamic blogging platform that supports Markdown posts,
+dynamic theming, and user management. It features a React frontend and a
+Node.js backend.
+.Pp
+The following options are available:
+.Bl -tag -width indent
+.It Fl d
+Enable development mode.
+.It Fl p Ar port
+Specify the port to listen on (default is 3001).
+.El
+.Sh FILES
+.Bl -tag -width "/usr/local/etc/mdweb/config.json" -compact
+.It Pa /usr/local/etc/mdweb/config.json
+Main configuration file.
+.It Pa /usr/local/etc/mdweb/users.json
+User credentials and roles.
+.It Pa /usr/local/www/MDWeb
+Default directory for the web application files.
+.El
+.Sh SEE ALSO
+.Xr node 1 ,
+.Xr npm 1
+.Sh AUTHORS
+.An Mark Lapointe Aq Mt mark@cloudbsd.org

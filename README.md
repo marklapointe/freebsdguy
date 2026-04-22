@@ -1,6 +1,6 @@
-# FreeBSD Guy Website
+# MDWeb Website
 
-A dynamic blogging platform built with **React**, **Vite**, **Tailwind CSS**, and **Node.js (TypeScript)**. Designed for the FreeBSD enthusiast, supporting dynamic posts, themes, and user management.
+A dynamic blogging platform built with **React**, **Vite**, **Tailwind CSS**, and **Node.js (TypeScript)**. Designed for the MDWeb enthusiast, supporting dynamic posts, themes, and user management.
 
 ## Features
 
@@ -72,20 +72,20 @@ The site will be served at `http://localhost:3001`.
 
 ### 4. Deployment on FreeBSD
 
-A sample RC script `freebsdguy.rc` is provided. To use it:
+A sample RC script `mdweb.rc` is provided. To use it:
 
-1. Copy the script to `/usr/local/etc/rc.d/freebsdguy`.
-2. Set the executable permission: `chmod +x /usr/local/etc/rc.d/freebsdguy`.
-3. Enable the service: `sysrc freebsdguy_enable="YES"`.
-4. Start the service: `service freebsdguy start`.
+1. Copy the script to `/usr/local/etc/rc.d/mdweb`.
+2. Set the executable permission: `chmod +x /usr/local/etc/rc.d/mdweb`.
+3. Enable the service: `sysrc mdweb_enable="YES"`.
+4. Start the service: `service mdweb start`.
 
 ### 5. OCI Container
 
 Build the container image using the provided `Containerfile`:
 
 ```bash
-podman build -t freebsdguy -f Containerfile .
-podman run -p 3001:3001 freebsdguy
+podman build -t mdweb -f Containerfile .
+podman run -p 3001:3001 mdweb
 ```
 
 ### 6. Changing User Passwords
