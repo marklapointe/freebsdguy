@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify';
 import axios from 'axios';
 import { MdEditor } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
-import { Search, LogIn, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X } from 'lucide-react';
+import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X } from 'lucide-react';
 
 // API Instance
 export const api = axios.create({
