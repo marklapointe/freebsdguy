@@ -114,7 +114,7 @@ export const loadConfig = (customPath?: string): Config => {
         return {
             postsDir: './posts',
             themeDir: './themes',
-            currentTheme: 'default',
+            currentTheme: 'dark',
             siteName: 'FreeBSD Guy'
         };
     }

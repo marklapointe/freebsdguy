@@ -56,51 +56,65 @@ const applyTheme = async (themeName?: string) => {
         Object.entries(themeData).forEach(([key, value]) => {
             root.style.setProperty(key, value as string);
         });
+        
+        // As per user request: "The only thing that needs to preserved in a local storage is wheather the theme is light or dark."
+        if (themeName === 'light' || themeName === 'dark') {
+            localStorage.setItem('theme', themeName);
+        } else if (themeName) {
+            // If it's a custom theme name, we should probably clear the light/dark override 
+            // so the custom theme takes full effect and isn't overridden by a stale preference.
+            localStorage.removeItem('theme');
+        }
     } catch (error) {
         console.error('Failed to load theme', error);
     }
 };
 
 const Navbar = ({ user, setUser, siteName }) => {
-    const [theme, setTheme] = useState(localStorage.getItem('theme') || '');
+    const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
     useEffect(() => {
-        // If we have a theme in user object (from login), use it
-        if (user && user.theme) {
-            setTheme(user.theme);
-            applyTheme(user.theme);
-            localStorage.setItem('theme', user.theme);
-        } else {
-            // Otherwise fetch from config or use localStorage
+        const syncTheme = async () => {
             const localTheme = localStorage.getItem('theme');
-            if (localTheme) {
+            // User requested ONLY light/dark in localStorage.
+            if (localTheme === 'light' || localTheme === 'dark') {
+                await applyTheme(localTheme);
                 setTheme(localTheme);
-                applyTheme(localTheme);
+            } else if (user && user.theme && (user.theme === 'light' || user.theme === 'dark')) {
+                // If no local storage but user has a preference, use it
+                await applyTheme(user.theme);
+                setTheme(user.theme);
             } else {
-                api.get('/config').then(res => {
+                // Otherwise fetch from config
+                try {
+                    const res = await api.get('/config');
                     const currentTheme = res.data.currentTheme;
-                    setTheme(currentTheme);
-                    applyTheme(currentTheme);
-                    localStorage.setItem('theme', currentTheme);
-                }).catch(() => {
-                    // fallback to default theme
-                    applyTheme();
-                });
+                    // If we have a local preference, it would have been caught above.
+                    // Since it wasn't, we use the site default.
+                    setTheme(currentTheme === 'dark' || currentTheme === 'light' ? currentTheme : 'dark');
+                    await applyTheme(currentTheme);
+                } catch (e) {
+                    await applyTheme();
+                }
             }
-        }
+        };
+
+        syncTheme();
 
         const handleThemeChanged = (e: CustomEvent) => {
-            setTheme(e.detail);
+            if (e.detail && typeof e.detail === 'string') {
+                setTheme(e.detail);
+            }
         };
         window.addEventListener('themeChanged' as any, handleThemeChanged);
         return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
     }, [user]);
 
     const toggleTheme = async () => {
-        const newTheme = theme === 'dark' ? 'light' : 'dark';
+        // Toggle between light and dark mode as a user preference
+        const newTheme = (theme === 'dark') ? 'light' : 'dark';
         try {
             await api.post('/theme', { currentTheme: newTheme });
             setTheme(newTheme);
-            localStorage.setItem('theme', newTheme);
             await applyTheme(newTheme);
             // Dispatch event for other components
             window.dispatchEvent(new CustomEvent('themeChanged', { detail: newTheme }));
@@ -113,6 +127,7 @@ const Navbar = ({ user, setUser, siteName }) => {
         localStorage.removeItem('token');
         localStorage.removeItem('role');
         localStorage.removeItem('username');
+        localStorage.removeItem('theme'); // Clear theme on logout to fallback to global config
         setUser(null);
         navigate('/login');
     };
@@ -166,7 +181,7 @@ const Home = () => {
     );
 
     return (
-        <div className="container mx-auto p-4 max-w-4xl">
+        <div className="container mx-auto p-4 max-w-[85%]">
             <div className="mb-8 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 opacity-50" size={20} />
                 <input 
@@ -210,7 +225,7 @@ const PostDetail = () => {
     if (!post) return <div className="p-8 text-center">Loading...</div>;
 
     return (
-        <div className="container mx-auto p-4 max-w-4xl bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden">
+        <div className="container mx-auto p-4 max-w-[85%] bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden">
             <div className="p-8">
                 <h1 className="text-4xl font-extrabold mb-4 border-b border-accent border-opacity-30 pb-4">{post.title}</h1>
                 <div className="flex gap-4 text-sm opacity-70 mb-8">
@@ -245,6 +260,13 @@ const Login = ({ setUser }) => {
                 role: res.data.role,
                 theme: res.data.theme
             };
+            if (res.data.theme && (res.data.theme === 'light' || res.data.theme === 'dark')) {
+                localStorage.setItem('theme', res.data.theme);
+                applyTheme(res.data.theme);
+            } else {
+                localStorage.removeItem('theme');
+                applyTheme();
+            }
             localStorage.setItem('username', userObj.username);
             setUser(userObj);
             navigate('/admin');
@@ -462,7 +484,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     const [images, setImages] = useState([]);
     const [config, setConfig] = useState({
         siteName: siteName,
-        currentTheme: 'default',
+        currentTheme: 'dark',
         pagination: 10,
         sortBy: 'date',
         sortOrder: 'desc',
@@ -479,7 +501,6 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
-    const [newThemeName, setNewThemeName] = useState('');
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
 
     useEffect(() => {
@@ -502,10 +523,12 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     useEffect(() => {
         const handleThemeChanged = (e: CustomEvent) => {
             const newTheme = e.detail;
-            setConfig(prev => ({ ...prev, currentTheme: newTheme }));
-            api.get('/theme?name=' + newTheme).then(res => {
-                setThemeColors(res.data);
-            });
+            if (newTheme && typeof newTheme === 'string') {
+                setConfig(prev => ({ ...prev, currentTheme: newTheme }));
+                api.get('/theme?name=' + newTheme).then(res => {
+                    setThemeColors(res.data);
+                });
+            }
         };
         window.addEventListener('themeChanged' as any, handleThemeChanged);
         return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
@@ -559,7 +582,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     }, [activeTab]);
 
     const handleSaveConfig = () => {
-        api.post('/api/admin/config', config).then(() => {
+        api.post('/admin/config', config).then(() => {
             setSiteName(config.siteName);
             fetchConfig();
             applyTheme(config.currentTheme);
@@ -570,7 +593,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     };
 
     const handleSaveAIConfig = () => {
-        api.post('/api/admin/ai-config', config.aiConfig).then(() => {
+        api.post('/admin/ai-config', config.aiConfig).then(() => {
             fetchConfig().then(() => {
                 showAlert('AI settings saved successfully!', 'Success');
             });
@@ -578,29 +601,27 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     };
 
     const handleSaveTheme = () => {
-        if (!newThemeName) return showAlert('Theme name is required', 'Error');
-        api.post(`/api/admin/themes/${newThemeName}`, themeColors).then(() => {
+        api.post(`/admin/themes/${config.currentTheme}`, themeColors).then(() => {
             fetchThemes();
-            setNewThemeName('');
-            showAlert('Theme saved successfully!', 'Success');
+            showAlert(`${config.currentTheme.charAt(0).toUpperCase() + config.currentTheme.slice(1)} theme colors saved!`, 'Success');
         });
     };
 
     const handleDeleteUser = (username) => {
         showConfirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`, () => {
-            api.delete(`/api/admin/users/${username}`).then(fetchUsers);
+            api.delete(`/admin/users/${username}`).then(fetchUsers);
         }, 'Delete User');
     };
 
     const handleDeletePost = (slug) => {
         showConfirm(`Are you sure you want to delete post "${slug}"? This action cannot be undone.`, () => {
-            api.delete(`/api/posts/${slug}`).then(fetchPosts);
+            api.delete(`/posts/${slug}`).then(fetchPosts);
         }, 'Delete Post');
     };
 
     const handleSavePost = (e) => {
         e.preventDefault();
-        api.post('/api/posts', editingPost).then(() => {
+        api.post('/posts', editingPost).then(() => {
             setEditingPost(null);
             fetchPosts();
             fetchImages();
@@ -612,7 +633,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         if (!file) return;
         const formData = new FormData();
         formData.append('image', file);
-        api.post('/api/admin/upload', formData).then(() => {
+        api.post('/admin/upload', formData).then(() => {
             fetchImages();
         });
     };
@@ -732,7 +753,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                         onClick={() => setConfig({...config, currentTheme: t})}
                                         className={`p-4 rounded-lg border-2 transition ${config.currentTheme === t ? 'border-accent bg-accent bg-opacity-10' : 'border-accent border-opacity-20 hover:border-opacity-100'}`}
                                     >
-                                        {t}
+                                        {t.charAt(0).toUpperCase() + t.slice(1)}
                                     </button>
                                 ))}
                             </div>
@@ -764,18 +785,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                     ))}
                                 </div>
                                 <div className="space-y-4">
-                                    <div className="space-y-1">
-                                        <label htmlFor="theme-name" className="block text-xs font-bold uppercase text-accent">New Theme Name</label>
-                                        <input 
-                                            id="theme-name"
-                                            type="text" placeholder="Theme Name" 
-                                            className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                            value={newThemeName} onChange={e => setNewThemeName(e.target.value)}
-                                            autoComplete="off"
-                                        />
-                                    </div>
-                                    <button onClick={handleSaveTheme} className="w-full bg-accent p-3 rounded font-bold text-white shadow-md hover:bg-opacity-90 transition">Save New Theme</button>
-                                    <button onClick={handleSaveConfig} className="w-full border border-accent p-3 rounded font-bold hover:bg-accent hover:bg-opacity-10 transition">Apply Current Selection</button>
+                                    <button onClick={handleSaveTheme} className="w-full bg-accent p-3 rounded font-bold text-white shadow-md hover:bg-opacity-90 transition">Save {config.currentTheme.charAt(0).toUpperCase() + config.currentTheme.slice(1)} Theme Colors</button>
                                 </div>
                             </div>
                         </div>
@@ -1117,12 +1127,27 @@ export default function App() {
     const [notifications, setNotifications] = useState([]);
 
     useEffect(() => {
-        const localTheme = localStorage.getItem('theme');
-        if (localTheme) {
-            applyTheme(localTheme);
-        } else {
-            applyTheme();
-        }
+        const initTheme = async () => {
+            const localTheme = localStorage.getItem('theme');
+            // Strict check: only light/dark from localStorage
+            if (localTheme === 'light' || localTheme === 'dark') {
+                await applyTheme(localTheme);
+            } else {
+                try {
+                    const res = await api.get('/config');
+                    if (res.data.currentTheme) {
+                        await applyTheme(res.data.currentTheme);
+                    } else {
+                        await applyTheme();
+                    }
+                } catch (e) {
+                    await applyTheme();
+                }
+            }
+        };
+        
+        initTheme();
+
         api.get('/config').then(res => {
             if (res.data.siteName) {
                 setSiteName(res.data.siteName);
@@ -1133,7 +1158,8 @@ export default function App() {
         const role = localStorage.getItem('role');
         const username = localStorage.getItem('username');
         if (token) {
-            setUser({ role, username, theme: localTheme }); 
+            const localTheme = localStorage.getItem('theme');
+            setUser({ role, username, theme: (localTheme === 'light' || localTheme === 'dark') ? localTheme : null }); 
         }
     }, []);
 

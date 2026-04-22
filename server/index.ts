@@ -396,22 +396,19 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
 // Admin: Get all themes
 app.get('/api/admin/themes', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
-    const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const themeDir = path.resolve(configDir, config.themeDir);
-    
-    let themes = ['default'];
-    if (fs.existsSync(themeDir)) {
-        const files = fs.readdirSync(themeDir).filter(f => f.endsWith('.json'));
-        themes = Array.from(new Set(['default', ...files.map(f => f.replace('.json', ''))]));
-    }
-    res.json(themes);
+    // Strictly only light and dark themes are allowed
+    res.json(['light', 'dark']);
 });
 
-// Admin: Create/Update theme
+// Admin: Update theme
 app.post('/api/admin/themes/:name', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
-    const name = sanitizeHtml(req.params.name as string, { allowedTags: [], allowedAttributes: {} });
+    const name = req.params.name;
+    
+    if (name !== 'light' && name !== 'dark') {
+        return res.status(400).json({ message: 'Only light and dark themes can be modified' });
+    }
+
     const colors = req.body;
     
     // Basic validation and sanitization of theme colors
@@ -516,11 +513,20 @@ app.post('/api/theme', (req: Request, res: Response) => {
             const decoded = jwt.verify(token, SECRET) as any;
             if (decoded && decoded.username) {
                 const usersConfig = loadUsers();
+                
+                // If user is Admin, update global config as well
                 if (usersConfig.admin.username === decoded.username) {
                     usersConfig.admin.theme = currentTheme;
                     saveUsers(usersConfig);
-                    return res.json({ message: 'User theme updated', currentTheme });
+                    
+                    const config = loadConfig();
+                    config.currentTheme = currentTheme;
+                    saveConfig(config);
+                    
+                    console.log(`[INFO] Admin updated global theme to: ${currentTheme}`);
+                    return res.json({ message: 'Global and Admin theme updated', currentTheme });
                 }
+                
                 const userIndex = usersConfig.users.findIndex(u => u.username === decoded.username);
                 if (userIndex !== -1) {
                     usersConfig.users[userIndex].theme = currentTheme;

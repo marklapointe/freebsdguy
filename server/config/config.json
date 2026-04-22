@@ -1,7 +1,7 @@
 {
   "postsDir": "./server/posts",
   "themeDir": "./server/themes",
-  "currentTheme": "default",
+  "currentTheme": "dark",
   "siteName": "Test",
   "pagination": 20,
   "sortBy": "title",
