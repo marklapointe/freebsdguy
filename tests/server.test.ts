@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { loadUsers, saveUsers } from '../server/lib/config';
+import { loadUsers, saveUsers, loadConfig, configPath } from '../server/lib/config';
 
 const SECRET = process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
@@ -141,13 +141,19 @@ describe('API Endpoints', () => {
         expect(res.body.message).toBe('Post deleted');
     });
 
-    it('POST /api/admin/config should update config for admin', async () => {
+    it('POST /api/admin/config should update config including service port for admin', async () => {
         const res = await request(app)
             .post('/api/admin/config')
             .set('Authorization', `Bearer ${adminToken}`)
-            .send({ siteName: 'New API Blog' });
+            .send({ 
+                siteName: 'New API Blog',
+                service: { port: 4000 }
+            });
         expect(res.status).toBe(200);
         expect(res.body.message).toBe('Configuration updated');
+        
+        const configRes = await request(app).get('/api/config');
+        expect(configRes.body.service.port).toBe(4000);
     });
 
     it('GET /api/admin/themes should return themes for admin', async () => {
@@ -205,6 +211,41 @@ describe('API Endpoints', () => {
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(200);
         expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('DELETE /api/admin/images/:filename should delete image and return 200', async () => {
+        // Create a dummy image file
+        const config = loadConfig();
+        const configDir = path.dirname(configPath());
+        const postsDir = path.resolve(configDir, config.postsDir);
+        const imagesDir = path.join(postsDir, 'images');
+        if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+        const testImage = path.join(imagesDir, 'test-delete.png');
+        fs.writeFileSync(testImage, 'dummy content');
+
+        const res = await request(app)
+            .delete('/api/admin/images/test-delete.png')
+            .set('Authorization', `Bearer ${adminToken}`);
+        
+        expect(res.status).toBe(200);
+        expect(res.body.message).toBe('Image deleted');
+        expect(fs.existsSync(testImage)).toBe(false);
+    });
+
+    it('DELETE /api/admin/images/:filename should return 400 for invalid filename', async () => {
+        const res = await request(app)
+            .delete(`/api/admin/images/${encodeURIComponent('../config.json')}`)
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(400);
+        expect(res.body.message).toBe('Invalid filename');
+    });
+
+    it('DELETE /api/admin/images/:filename should return 404 for nonexistent image', async () => {
+        const res = await request(app)
+            .delete('/api/admin/images/nonexistent-image.png')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('Image not found');
     });
 
     it('POST /api/login should work for admin', async () => {

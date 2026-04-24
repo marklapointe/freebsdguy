@@ -565,7 +565,13 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     const fetchPosts = () => api.get('/posts').then(res => { setPosts(res.data); return res; });
     const fetchThemes = () => api.get('/admin/themes').then(res => { setThemes(res.data); return res; });
     const fetchImages = () => api.get('/admin/images').then(res => { setImages(res.data); return res; });
-    const fetchConfig = () => api.get('/config').then(res => { setConfig(res.data); return res; });
+    const fetchConfig = () => api.get('/config').then(res => {
+        setConfig(res.data);
+        if (res.data.service?.port) {
+            localStorage.setItem('lastPort', res.data.service.port.toString());
+        }
+        return res;
+    });
     const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { setIsWritable(res.data.isWritable); return res; });
 
     const fetchAIModels = (p?: string, b?: string, k?: string) => {
@@ -601,12 +607,21 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
 
     const handleSaveConfig = () => {
         api.post('/admin/config', config).then(() => {
+            const oldPort = parseInt(localStorage.getItem('lastPort') || '5173');
+            const newPort = config.service?.port || 5173;
+            
             setSiteName(config.siteName);
             fetchConfig();
             applyTheme(config.currentTheme);
             // Notify other components (like Navbar) that the theme might have changed via selection
             window.dispatchEvent(new CustomEvent('themeChanged', { detail: config.currentTheme }));
-            showAlert('Settings saved successfully!', 'Success');
+            
+            if (oldPort !== newPort) {
+                showAlert(`Settings saved! Port changed to ${newPort}. You will need to restart the service for this to take effect.`, 'Success');
+                localStorage.setItem('lastPort', newPort.toString());
+            } else {
+                showAlert('Settings saved successfully!', 'Success');
+            }
         });
     };
 
@@ -635,6 +650,12 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         showConfirm(`Are you sure you want to delete post "${slug}"? This action cannot be undone.`, () => {
             api.delete(`/posts/${slug}`).then(fetchPosts);
         }, 'Delete Post');
+    };
+
+    const handleDeleteImage = (filename) => {
+        showConfirm(`Are you sure you want to delete image "${filename}"? This action cannot be undone.`, () => {
+            api.delete(`/admin/images/${filename}`).then(fetchImages);
+        }, 'Delete Image');
     };
 
     const handleSavePost = (e) => {
@@ -1044,7 +1065,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                 <input 
                                     id="service-port"
                                     type="number" className="w-full p-3 bg-secondary border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                    value={config.service?.port || 3001} 
+                                    value={config.service?.port || 5173} 
                                     onChange={e => {
                                         const newVal = parseInt(e.target.value, 10);
                                         setConfig(prev => ({...prev, service: {...(prev.service || {}), port: newVal}}));
@@ -1052,7 +1073,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                     autoComplete="off"
                                     disabled={!isWritable}
                                 />
-                                <p className="text-[10px] opacity-60">Specify the port the application should listen on. Defaults to 3001.</p>
+                                <p className="text-[10px] opacity-60">Specify the port the application should listen on. Defaults to 5173.</p>
                             </div>
                             <button 
                                 onClick={handleSaveConfig} 
@@ -1166,6 +1187,13 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                                     Inject
                                                 </button>
                                             )}
+                                            <button 
+                                                onClick={() => handleDeleteImage(img)}
+                                                className="bg-red-600 text-white p-1 px-2 rounded text-[10px] font-bold flex items-center gap-1"
+                                                title="Delete Image"
+                                            >
+                                                <Trash2 size={10} /> Delete
+                                            </button>
                                         </div>
                                     </div>
                                 </div>

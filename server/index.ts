@@ -17,6 +17,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import multer from 'multer';
+import sharp from 'sharp';
 
 import sanitizeHtml from 'sanitize-html';
 
@@ -34,25 +35,30 @@ if (portArgIndex !== -1 && process.argv.length > portArgIndex + 1) {
 }
 
 const config = loadConfig();
-const PORT = cliPort || config.service?.port || process.env.PORT || 3001;
+const PORT = cliPort || config.service?.port || process.env.PORT || 5173;
 const SECRET = process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
-// Configure Multer for image uploads
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-        const config = loadConfig();
-        const configDir = path.dirname(configPath());
-        const postsDir = path.resolve(configDir, config.postsDir);
-        const imagesDir = path.join(postsDir, 'images');
-        if (!fs.existsSync(imagesDir)) {
-            fs.mkdirSync(imagesDir, { recursive: true });
-        }
-        cb(null, imagesDir);
-    },
-    filename: (_req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    }
-});
+// Ensure storage directories exist
+const configDir = path.dirname(configPath());
+const postsDir = path.resolve(configDir, config.postsDir);
+const imagesDir = path.join(postsDir, 'images');
+
+if (!fs.existsSync(postsDir)) {
+    console.log(`[INFO] Creating posts directory: ${postsDir}`);
+    fs.mkdirSync(postsDir, { recursive: true });
+} else {
+    console.log(`[INFO] Using existing posts directory: ${postsDir}`);
+}
+
+if (!fs.existsSync(imagesDir)) {
+    console.log(`[INFO] Creating images directory: ${imagesDir}`);
+    fs.mkdirSync(imagesDir, { recursive: true });
+} else {
+    console.log(`[INFO] Using existing images directory: ${imagesDir}`);
+}
+
+// Configure Multer for image uploads (to memory first, then processed by sharp)
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 app.use(cors());
@@ -290,18 +296,26 @@ app.get('/api/images/:filename', (req: Request, res: Response) => {
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
-    const filename = req.params.filename as string;
-    const filePath = path.join(imagesDir, filename);
+    const filename = decodeURIComponent(req.params.filename as string);
+    const filePath = path.resolve(imagesDir, filename);
+
+    // Security check: ensure the resolved path is still within imagesDir
+    if (!filePath.startsWith(path.resolve(imagesDir))) {
+        console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
+        return res.status(403).json({ message: 'Forbidden' });
+    }
 
     if (fs.existsSync(filePath)) {
         res.sendFile(filePath);
     } else {
+        console.warn(`[WARN] Image not found: ${filePath}`);
         res.status(404).json({ message: 'Image not found' });
     }
 });
 
 // Serve static frontend files in production
 const distPath = path.resolve(__dirname, '../dist');
+console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`);
 if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
     app.get(/^\/(?!api).*/, (_req: Request, res: Response) => {
@@ -319,7 +333,8 @@ app.get('/api/config', (_req: Request, res: Response) => {
         sortBy: config.sortBy || 'date',
         sortOrder: config.sortOrder || 'desc',
         searchPlacement: config.searchPlacement || 'top',
-        aiConfig: config.aiConfig
+        aiConfig: config.aiConfig,
+        service: config.service || { port: 3001 }
     });
 });
 
@@ -341,11 +356,48 @@ app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: 
     res.json({ message: 'AI Configuration updated' });
 });
 
+// Admin: Delete image
+app.delete('/api/admin/images/:filename', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
+    
+    // We use req.params.filename which express might have already decoded, 
+    // but we also check the raw URL if needed. 
+    // However, the issue is likely that express doesn't match "../" in a param if it's not encoded or if it's treated as part of the path.
+    // Let's use a more robust check on the param itself.
+    const filename = decodeURIComponent(req.params.filename as string);
+    
+    // Sanity check: prevent directory traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
+        return res.status(400).json({ message: 'Invalid filename' });
+    }
+
+    const config = loadConfig();
+    const configDir = path.dirname(configPath());
+    const postsDir = path.resolve(configDir, config.postsDir);
+    const imagesDir = path.join(postsDir, 'images');
+    const filePath = path.join(imagesDir, filename);
+
+    if (fs.existsSync(filePath)) {
+        try {
+            fs.unlinkSync(filePath);
+            console.log(`[INFO] Image deleted: ${filename}`);
+            res.json({ message: 'Image deleted' });
+        } catch (error: any) {
+            console.error(`[ERROR] Failed to delete image ${filename}:`, error.message);
+            res.status(500).json({ message: 'Failed to delete image' });
+        }
+    } else {
+        console.warn(`[WARN] Image deletion failed, not found: ${filePath}`);
+        res.status(404).json({ message: 'Image not found' });
+    }
+});
+
 // Admin: Update site config
 app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
-    const { siteName, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig } = req.body;
+    const { siteName, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service } = req.body;
 
     if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
     if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
@@ -361,6 +413,12 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
             baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
             apiKey: sanitizeHtml(aiConfig.apiKey || '', { allowedTags: [], allowedAttributes: {} }),
             modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
+        };
+    }
+
+    if (service) {
+        config.service = {
+            port: Number(service.port) || 3001
         };
     }
 
@@ -460,10 +518,36 @@ app.delete('/api/posts/:slug', authenticate, (req: AuthenticatedRequest, res: Re
     }
 });
 
-// Image upload
-app.post('/api/admin/upload', authenticate, upload.single('image'), (req: AuthenticatedRequest, res: Response) => {
+// Image upload (with WebP conversion and renaming)
+app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: AuthenticatedRequest, res: Response) => {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    res.json({ filename: req.file.filename, url: `/api/images/${req.file.filename}` });
+
+    try {
+        const config = loadConfig();
+        const configDir = path.dirname(configPath());
+        const postsDir = path.resolve(configDir, config.postsDir);
+        const imagesDir = path.join(postsDir, 'images');
+
+        if (!fs.existsSync(imagesDir)) {
+            fs.mkdirSync(imagesDir, { recursive: true });
+        }
+
+        // Generate a new filename: timestamp-random.webp
+        const newFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.webp`;
+        const outputPath = path.join(imagesDir, newFilename);
+
+        // Convert to WebP using sharp
+        // We use animated: true to preserve animations if it's a GIF/WebP already
+        await sharp(req.file.buffer, { animated: true })
+            .webp({ effort: 4 }) // Effort 4 is a good balance
+            .toFile(outputPath);
+
+        console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
+        res.json({ filename: newFilename, url: `/api/images/${newFilename}` });
+    } catch (error) {
+        console.error('[ERROR] Image processing failed:', error);
+        res.status(500).json({ message: 'Image processing failed' });
+    }
 });
 
 // Get all images

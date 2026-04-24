@@ -20,11 +20,11 @@ COPY --from=builder /app/package*.json ./
 RUN npm install -g tsx
 
 # Set default environment variables
-ENV PORT=3001
+ENV PORT=5173
 ENV JWT_SECRET=change_me_in_production
 ENV CONFIG_PATH=/app/server/config/config.json
 ENV USERS_PATH=/app/server/config/users.json
 
-EXPOSE 3001
+EXPOSE 5173
 
 CMD ["tsx", "server/index.ts"]

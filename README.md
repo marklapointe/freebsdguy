@@ -61,7 +61,7 @@ Build the project and run the production server:
 npm run build
 npm start
 ```
-The site will be served at `http://localhost:3001`.
+The site will be served at `http://localhost:5173`.
 
 #### Using Makefile
 
@@ -85,7 +85,7 @@ Build the container image using the provided `Containerfile`:
 
 ```bash
 podman build -t mdweb -f Containerfile .
-podman run -p 3001:3001 mdweb
+podman run -p 5173:5173 mdweb
 ```
 
 ### 6. Changing User Passwords

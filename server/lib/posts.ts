@@ -18,6 +18,11 @@ export interface Post extends PostMetadata {
 
 export const getPosts = (postsDir: string): PostMetadata[] => {
     if (!fs.existsSync(postsDir)) {
+        try {
+            fs.mkdirSync(postsDir, { recursive: true });
+        } catch (error) {
+            console.error(`Error creating posts directory ${postsDir}:`, error);
+        }
         return [];
     }
 
