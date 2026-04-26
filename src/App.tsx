@@ -3,14 +3,19 @@ import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import remarkEmoji from 'remark-emoji';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
+import rehypeSlug from 'rehype-slug';
+import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
 import DOMPurify from 'dompurify';
 import axios from 'axios';
 import { MdEditor } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
+import mermaid from 'mermaid';
 import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon } from 'lucide-react';
 
 interface Post {
@@ -291,6 +296,41 @@ const Home = () => {
     );
 };
 
+const Mermaid = ({ chart }: { chart: string }) => {
+    const [svg, setSvg] = useState('');
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const isLight = document.documentElement.style.getPropertyValue('--primary').includes('0, 0, 0') || 
+                       localStorage.getItem('theme') === 'light';
+        
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: isLight ? 'default' : 'dark',
+            securityLevel: 'loose',
+            fontFamily: 'inherit'
+        });
+
+        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+        try {
+            mermaid.render(id, chart).then(({ svg }) => {
+                setSvg(svg);
+                setError(null);
+            }).catch(err => {
+                console.error('Mermaid render error:', err);
+                setError('Failed to render Mermaid diagram');
+            });
+        } catch (e) {
+            console.error('Mermaid exception:', e);
+            setError('Mermaid initialization error');
+        }
+    }, [chart]);
+
+    if (error) return <pre className="p-4 bg-red-500 bg-opacity-10 text-red-500 rounded text-xs overflow-auto">{error}</pre>;
+    if (!svg) return <div className="flex justify-center p-8 opacity-50 animate-pulse"><RefreshCw className="animate-spin" /></div>;
+    return <div className="mermaid-chart flex justify-center my-6 overflow-hidden" dangerouslySetInnerHTML={{ __html: svg }} />;
+};
+
 const PostDetail = () => {
     const { slug } = useParams<{ slug: string }>();
     const [post, setPost] = useState<Post | null>(null);
@@ -309,10 +349,23 @@ const PostDetail = () => {
                     <span>{new Date(post.date).toLocaleDateString()}</span>
                     {post.author && <span>by {post.author}</span>}
                 </div>
-                <div className="prose max-w-none prose-headings:text-primary prose-a:text-accent prose-p:text-text prose-strong:text-text prose-code:text-accent">
+                <div className="prose max-w-none prose-headings:text-primary prose-a:text-accent prose-p:text-text prose-strong:text-text prose-code:text-accent prose-img:rounded-lg prose-img:shadow-md prose-blockquote:border-accent prose-blockquote:bg-accent prose-blockquote:bg-opacity-5 prose-blockquote:p-4 prose-blockquote:rounded-r-lg">
                     <ReactMarkdown 
-                        remarkPlugins={[remarkGfm, remarkMath]} 
-                        rehypePlugins={[rehypeHighlight, rehypeKatex]}
+                        remarkPlugins={[remarkGfm, remarkMath, remarkEmoji]} 
+                        rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeKatex, rehypeSlug, [rehypeAutolinkHeadings, { behavior: 'wrap' }]]}
+                        components={{
+                            code({ className, children, ...props }: any) {
+                                const match = /language-(\w+)/.exec(className || '');
+                                if (match && match[1] === 'mermaid') {
+                                    return <Mermaid chart={String(children).replace(/\n$/, '')} />;
+                                }
+                                return (
+                                    <code className={className} {...props}>
+                                        {children}
+                                    </code>
+                                );
+                            }
+                        }}
                     >
                         {DOMPurify.sanitize(post.content)}
                     </ReactMarkdown>
