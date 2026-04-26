@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { loadUsers, saveUsers } from '../lib/config.ts';
 import { updatePassword } from '../lib/auth.ts';
 

@@ -25,3 +25,6 @@ dist-ssr
 
 # User credentials
 server/config/users.json
+
+# Test data
+tests/tmp

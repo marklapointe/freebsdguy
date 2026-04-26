@@ -1,0 +1,139 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import enquirer from 'enquirer';
+import { loadConfig, saveConfig, configPath, loadUsers } from './config.ts';
+
+export interface PreflightIssue {
+    id: string;
+    description: string;
+    critical: boolean;
+    fixable: boolean;
+    fixed?: boolean;
+}
+
+export const generateSecret = () => {
+    return crypto.randomBytes(32).toString('hex');
+};
+
+export const runPreflight = async (interactive: boolean = false): Promise<PreflightIssue[]> => {
+    const issues: PreflightIssue[] = [];
+    const config = loadConfig();
+    const users = loadUsers();
+    const configDir = path.dirname(configPath());
+
+    // 1. Check directories
+    const postsDir = path.resolve(configDir, config.postsDir);
+    const imagesDir = path.join(postsDir, 'images');
+
+    if (!fs.existsSync(postsDir)) {
+        issues.push({
+            id: 'DIR_POSTS_MISSING',
+            description: `Posts directory missing: ${postsDir}`,
+            critical: true,
+            fixable: true
+        });
+    }
+
+    if (!fs.existsSync(imagesDir)) {
+        issues.push({
+            id: 'DIR_IMAGES_MISSING',
+            description: `Images directory missing: ${imagesDir}`,
+            critical: true,
+            fixable: true
+        });
+    }
+
+    // 2. Check JWT Secret
+    const SECRET = config.jwtSecret || process.env.JWT_SECRET || 'freebsd_guy_secret_key';
+    if (SECRET === 'freebsd_guy_secret_key') {
+        issues.push({
+            id: 'JWT_SECRET_DEFAULT',
+            description: 'JWT secret is using the default insecure value.',
+            critical: process.env.NODE_ENV === 'production',
+            fixable: true
+        });
+    }
+
+    // 3. Check Admin User
+    if (!users.admin || !users.admin.username) {
+        issues.push({
+            id: 'ADMIN_USER_MISSING',
+            description: 'No admin user configured.',
+            critical: true,
+            fixable: false
+        });
+    }
+
+    if (issues.length > 0) {
+        if (!process.env.VITEST) {
+            console.log('\n--- Pre-flight Check ---');
+            for (const issue of issues) {
+                console.log(`${issue.critical ? '[CRITICAL]' : '[WARNING]'} ${issue.description}`);
+            }
+        }
+
+        if (interactive) {
+            const fixableIssues = issues.filter(i => i.fixable);
+            if (fixableIssues.length > 0) {
+                const { fix } = await (enquirer as any).prompt({
+                    type: 'confirm',
+                    name: 'fix',
+                    message: 'Attempt to automatically fix fixable issues?',
+                    initial: true
+                }) as any;
+
+                if (fix) {
+                    for (const issue of issues) {
+                        if (issue.fixable) {
+                            const success = await fixIssue(issue);
+                            if (success) {
+                                issue.fixed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (issues.some(i => i.critical && !i.fixed)) {
+                console.log('\n[ERROR] Some critical issues could not be fixed. Please run "npm run setup" to configure the application.');
+            }
+        }
+    } else if (!process.env.VITEST) {
+        console.log('[INFO] Pre-flight check passed.');
+    }
+
+    return issues;
+};
+
+const fixIssue = async (issue: PreflightIssue): Promise<boolean> => {
+    const config = loadConfig();
+    const configDir = path.dirname(configPath());
+
+    try {
+        switch (issue.id) {
+            case 'DIR_POSTS_MISSING': {
+                const postsDir = path.resolve(configDir, config.postsDir);
+                fs.mkdirSync(postsDir, { recursive: true });
+                console.log(`✔ Created posts directory: ${postsDir}`);
+                return true;
+            }
+            case 'DIR_IMAGES_MISSING': {
+                const iDir = path.join(path.resolve(configDir, config.postsDir), 'images');
+                fs.mkdirSync(iDir, { recursive: true });
+                console.log(`✔ Created images directory: ${iDir}`);
+                return true;
+            }
+            case 'JWT_SECRET_DEFAULT': {
+                const newSecret = generateSecret();
+                config.jwtSecret = newSecret;
+                saveConfig(config);
+                console.log('✔ Generated and saved a new random JWT secret to config.json');
+                return true;
+            }
+        }
+    } catch (e) {
+        console.error(`Failed to fix ${issue.id}:`, e);
+    }
+    return false;
+};

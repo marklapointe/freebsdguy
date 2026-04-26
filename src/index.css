@@ -6,6 +6,9 @@
   --color-accent: var(--accent);
   --color-text: var(--text);
   --color-bg: var(--bg);
+  --color-border: var(--border);
+  --color-hover: var(--hover);
+  --color-site-name: var(--site-name-color);
 }
 
 :root {
@@ -14,6 +17,9 @@
   --accent: #ef4444;
   --text: #f3f4f6;
   --bg: #111827;
+  --border: #374151;
+  --hover: #1f2937;
+  --site-name-color: #3b82f6;
 }
 
 body {

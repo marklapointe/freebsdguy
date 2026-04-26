@@ -4,6 +4,8 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,9 +14,14 @@ const __dirname = path.dirname(__filename);
 import { loadConfig, saveConfig, configPath, loadUsers, saveUsers, loadAIConfig, isConfigWritable } from './lib/config.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
+import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName } from './lib/images.ts';
+import { runPreflight } from './lib/preflight.ts';
 
-import dotenv from 'dotenv';
-dotenv.config();
+const isSafePath = (baseDir: string, targetPath: string) => {
+    const resolvedBase = path.resolve(baseDir);
+    const resolvedTarget = path.resolve(targetPath);
+    return resolvedTarget.startsWith(resolvedBase);
+};
 
 import multer from 'multer';
 import sharp from 'sharp';
@@ -22,6 +29,7 @@ import sharp from 'sharp';
 import sanitizeHtml from 'sanitize-html';
 
 const app = express();
+app.set('trust proxy', 1);
 export { app };
 // Parse command line arguments for --port
 let cliPort: number | null = null;
@@ -34,35 +42,56 @@ if (portArgIndex !== -1 && process.argv.length > portArgIndex + 1) {
     }
 }
 
+// Run pre-flight check
+const preflightIssues = await runPreflight(process.stdout.isTTY);
+if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
+    console.error('[FATAL] Pre-flight check failed with critical issues. Application cannot start.');
+    process.exit(1);
+}
+
 const config = loadConfig();
 const PORT = cliPort || config.service?.port || process.env.PORT || 5173;
-const SECRET = process.env.JWT_SECRET || 'freebsd_guy_secret_key';
-
-// Ensure storage directories exist
-const configDir = path.dirname(configPath());
-const postsDir = path.resolve(configDir, config.postsDir);
-const imagesDir = path.join(postsDir, 'images');
-
-if (!fs.existsSync(postsDir)) {
-    console.log(`[INFO] Creating posts directory: ${postsDir}`);
-    fs.mkdirSync(postsDir, { recursive: true });
-} else {
-    console.log(`[INFO] Using existing posts directory: ${postsDir}`);
-}
-
-if (!fs.existsSync(imagesDir)) {
-    console.log(`[INFO] Creating images directory: ${imagesDir}`);
-    fs.mkdirSync(imagesDir, { recursive: true });
-} else {
-    console.log(`[INFO] Using existing images directory: ${imagesDir}`);
-}
+const SECRET = config.jwtSecret || process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
 // Configure Multer for image uploads (to memory first, then processed by sharp)
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+            "img-src": ["'self'", "data:", "https:"],
+            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // unsafe-eval needed for some dev builds/vite
+            "connect-src": ["'self'", "https://api.openai.com", "http://localhost:*"], // Allow AI APIs and local Ollama
+        },
+    },
+}));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 100,
+    message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    validate: { ip: false },
+});
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    message: { message: 'Too many login attempts, please try again after 15 minutes' },
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    validate: { ip: false },
+});
+
 app.use(cors());
 app.use(express.json());
+
+// Apply general limiter to all API routes
+app.use('/api/', apiLimiter);
 
 // Extend Request to include user and file
 interface AuthenticatedRequest extends Request {
@@ -88,7 +117,7 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
 };
 
 // Login
-app.post('/api/login', async (req: Request, res: Response) => {
+app.post('/api/login', loginLimiter, async (req: Request, res: Response) => {
     const { username, password } = req.body;
     const usersConfig = loadUsers();
 
@@ -186,11 +215,27 @@ app.delete('/api/admin/users/:username', authenticate, (req: AuthenticatedReques
 });
 
 // Get posts
-app.get('/api/posts', (_req: Request, res: Response) => {
+app.get('/api/posts', (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
     const posts = getPosts(postsDir);
+
+    const limit = parseInt(req.query.limit as string);
+    const offset = parseInt(req.query.offset as string);
+
+    if (!isNaN(limit) || !isNaN(offset)) {
+        const l = isNaN(limit) ? (config.pagination || 10) : limit;
+        const o = isNaN(offset) ? 0 : offset;
+        
+        return res.json({
+            posts: posts.slice(o, o + l),
+            total: posts.length,
+            limit: l,
+            offset: o
+        });
+    }
+
     res.json(posts);
 });
 
@@ -262,6 +307,14 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
     const slug = req.params.slug as string;
+    
+    // Security check: prevent directory traversal
+    const postPath = path.join(postsDir, `${slug}.md`);
+    if (!isSafePath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+        return res.status(403).json({ message: 'Forbidden' });
+    }
+
     const post = getPost(postsDir, slug);
     
     if (!post) {
@@ -278,6 +331,13 @@ app.post('/api/posts', authenticate, (req: AuthenticatedRequest, res: Response) 
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
     
+    // Security check: prevent directory traversal
+    const postPath = path.join(postsDir, `${slug}.md`);
+    if (!isSafePath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+        return res.status(403).json({ message: 'Forbidden' });
+    }
+
     savePost(postsDir, {
         slug,
         title,
@@ -297,16 +357,34 @@ app.get('/api/images/:filename', (req: Request, res: Response) => {
     const postsDir = path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
     const filename = decodeURIComponent(req.params.filename as string);
-    const filePath = path.resolve(imagesDir, filename);
+    const filePath = path.join(imagesDir, filename);
 
     // Security check: ensure the resolved path is still within imagesDir
-    if (!filePath.startsWith(path.resolve(imagesDir))) {
+    if (!isSafePath(imagesDir, filePath)) {
         console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
 
     if (fs.existsSync(filePath)) {
-        res.sendFile(filePath);
+        try {
+            const stats = fs.statSync(filePath);
+            if (stats.isFile()) {
+                res.sendFile(filename, { root: imagesDir }, (err) => {
+                    if (err) {
+                        console.error(`[ERROR] Failed to send image ${filename}:`, err);
+                        if (!res.headersSent) {
+                            res.status(404).json({ message: 'Image not found' });
+                        }
+                    }
+                });
+            } else {
+                console.warn(`[WARN] Not a file: ${filePath}`);
+                res.status(404).json({ message: 'Image not found' });
+            }
+        } catch (error: any) {
+            console.error(`[ERROR] File access error for ${filename}:`, error.message);
+            res.status(500).json({ message: 'Error accessing image' });
+        }
     } else {
         console.warn(`[WARN] Image not found: ${filePath}`);
         res.status(404).json({ message: 'Image not found' });
@@ -319,7 +397,19 @@ console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`
 if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
     app.get(/^\/(?!api).*/, (_req: Request, res: Response) => {
-        res.sendFile(path.join(distPath, 'index.html'));
+        const indexPath = path.join(distPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+            res.sendFile('index.html', { root: distPath }, (err) => {
+                if (err) {
+                    console.error('[ERROR] Failed to send index.html:', err);
+                    if (!res.headersSent) {
+                        res.status(404).send('Not Found');
+                    }
+                }
+            });
+        } else {
+            res.status(404).send('Not Found');
+        }
     });
 }
 
@@ -328,6 +418,7 @@ app.get('/api/config', (_req: Request, res: Response) => {
     const config = loadConfig();
     res.json({
         siteName: config.siteName || 'Generic Blog',
+        siteLogo: config.siteLogo || 'logo.webp',
         currentTheme: config.currentTheme,
         pagination: config.pagination || 10,
         sortBy: config.sortBy || 'date',
@@ -348,7 +439,7 @@ app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: 
         enabled: !!enabled,
         provider: provider === 'openai' ? 'openai' : 'ollama',
         baseUrl: sanitizeHtml(baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-        apiKey: sanitizeHtml(apiKey || '', { allowedTags: [], allowedAttributes: {} }),
+        apiKey: apiKey || '', // Do not sanitize API keys as it can corrupt them
         modelId: sanitizeHtml(modelId || '', { allowedTags: [], allowedAttributes: {} })
     };
 
@@ -360,27 +451,30 @@ app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: 
 app.delete('/api/admin/images/:filename', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
     
-    // We use req.params.filename which express might have already decoded, 
-    // but we also check the raw URL if needed. 
-    // However, the issue is likely that express doesn't match "../" in a param if it's not encoded or if it's treated as part of the path.
-    // Let's use a more robust check on the param itself.
+    // Standardize directory traversal check
     const filename = decodeURIComponent(req.params.filename as string);
-    
-    // Sanity check: prevent directory traversal
-    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
-        return res.status(400).json({ message: 'Invalid filename' });
-    }
-
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
     const filePath = path.join(imagesDir, filename);
 
+    if (!isSafePath(imagesDir, filePath)) {
+        console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
+        return res.status(403).json({ message: 'Forbidden' });
+    }
+
     if (fs.existsSync(filePath)) {
         try {
             fs.unlinkSync(filePath);
+            
+            // Also remove from manifest if it exists
+            const manifest = loadManifest(imagesDir);
+            if (manifest[filename]) {
+                delete manifest[filename];
+                saveManifest(imagesDir, manifest);
+            }
+
             console.log(`[INFO] Image deleted: ${filename}`);
             res.json({ message: 'Image deleted' });
         } catch (error: any) {
@@ -397,9 +491,10 @@ app.delete('/api/admin/images/:filename', authenticate, (req: AuthenticatedReque
 app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
-    const { siteName, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service } = req.body;
+    const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service } = req.body;
 
     if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
+    if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
     if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
     if (pagination !== undefined) config.pagination = Number(pagination);
     if (sortBy) config.sortBy = sanitizeHtml(sortBy, { allowedTags: [], allowedAttributes: {} }) as 'title' | 'date' | 'author';
@@ -411,7 +506,7 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
             enabled: !!aiConfig.enabled,
             provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
             baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-            apiKey: sanitizeHtml(aiConfig.apiKey || '', { allowedTags: [], allowedAttributes: {} }),
+            apiKey: aiConfig.apiKey || '', // Do not sanitize API keys
             modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
         };
     }
@@ -436,9 +531,12 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
                 fs.writeFileSync(themePath, JSON.stringify({
                     "--primary": "#3b82f6",
                     "--secondary": "#1f2937",
-                    "--accent": "#ef4444",
+                    "--accent": "#3a297a",
                     "--text": "#f3f4f6",
-                    "--bg": "#111827"
+                    "--bg": "#111827",
+                    "--border": "#374151",
+                    "--hover": "#1f2937",
+                    "--site-name-color": "#3b82f6"
                 }, null, 2));
             } else if (currentTheme === 'light') {
                 fs.writeFileSync(themePath, JSON.stringify({
@@ -446,7 +544,10 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
                     "--secondary": "#f3f4f6",
                     "--accent": "#ef4444",
                     "--text": "#111827",
-                    "--bg": "#ffffff"
+                    "--bg": "#ffffff",
+                    "--border": "#e5e7eb",
+                    "--hover": "#f3f4f6",
+                    "--site-name-color": "#2563eb"
                 }, null, 2));
             } else {
                 fs.writeFileSync(themePath, JSON.stringify({
@@ -454,7 +555,10 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
                     "--secondary": "#f3f4f6",
                     "--accent": "#ef4444",
                     "--text": "#111827",
-                    "--bg": "#ffffff"
+                    "--bg": "#ffffff",
+                    "--border": "#e5e7eb",
+                    "--hover": "#f3f4f6",
+                    "--site-name-color": "#2563eb"
                 }, null, 2));
             }
         }
@@ -510,6 +614,11 @@ app.delete('/api/posts/:slug', authenticate, (req: AuthenticatedRequest, res: Re
     const postsDir = path.resolve(configDir, config.postsDir);
     const postPath = path.join(postsDir, `${slug}.md`);
 
+    if (!isSafePath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+        return res.status(403).json({ message: 'Forbidden' });
+    }
+
     if (fs.existsSync(postPath)) {
         fs.unlinkSync(postPath);
         res.json({ message: 'Post deleted' });
@@ -532,6 +641,47 @@ app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: 
             fs.mkdirSync(imagesDir, { recursive: true });
         }
 
+        const manifest = loadManifest(imagesDir);
+        const md5 = calculateMD5(req.file.buffer);
+        const size = req.file.size;
+        const originalName = req.file.originalname;
+        const force = req.query.force === 'true';
+
+        // 1. Check for content duplication
+        const duplicate = findDuplicate(manifest, md5, size);
+        if (duplicate) {
+            // Verify the file actually exists on disk
+            const existingPath = path.join(imagesDir, duplicate.filename);
+            if (fs.existsSync(existingPath)) {
+                console.log(`[INFO] Duplicate image upload detected: ${duplicate.filename} (Original: ${duplicate.originalName})`);
+                return res.json({ 
+                    filename: duplicate.filename, 
+                    url: `/api/images/${duplicate.filename}`,
+                    duplicated: true,
+                    message: 'Image already exists'
+                });
+            } else {
+                // File missing on disk, remove from manifest and proceed
+                delete manifest[duplicate.filename];
+            }
+        }
+
+        // 2. Check for name conflict (different content but same original name)
+        const nameConflict = findByName(manifest, originalName);
+        if (nameConflict && !force) {
+            // Verify conflict file actually exists
+            if (fs.existsSync(path.join(imagesDir, nameConflict.filename))) {
+                console.log(`[INFO] Image name conflict detected: ${originalName}`);
+                return res.status(409).json({ 
+                    message: `An image with the name "${originalName}" already exists but has different content.`,
+                    conflict: true,
+                    existingFilename: nameConflict.filename
+                });
+            } else {
+                delete manifest[nameConflict.filename];
+            }
+        }
+
         // Generate a new filename: timestamp-random.webp
         const newFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.webp`;
         const outputPath = path.join(imagesDir, newFilename);
@@ -542,6 +692,16 @@ app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: 
             .webp({ effort: 4 }) // Effort 4 is a good balance
             .toFile(outputPath);
 
+        // Update manifest
+        manifest[newFilename] = {
+            filename: newFilename,
+            originalName,
+            md5,
+            size,
+            uploadedAt: Date.now()
+        };
+        saveManifest(imagesDir, manifest);
+
         console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
         res.json({ filename: newFilename, url: `/api/images/${newFilename}` });
     } catch (error) {
@@ -550,7 +710,7 @@ app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: 
     }
 });
 
-// Get all images
+// Get images with pagination
 app.get('/api/admin/images', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
@@ -558,9 +718,38 @@ app.get('/api/admin/images', authenticate, (req: AuthenticatedRequest, res: Resp
     const postsDir = path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
 
-    if (!fs.existsSync(imagesDir)) return res.json([]);
-    const files = fs.readdirSync(imagesDir);
-    res.json(files);
+    if (!fs.existsSync(imagesDir)) return res.json({ images: [], total: 0 });
+    
+    try {
+        const manifest = loadManifest(imagesDir);
+        const entries = fs.readdirSync(imagesDir, { withFileTypes: true });
+        
+        // Get files and map to metadata objects, excluding the manifest itself
+        const files = entries
+            .filter(entry => entry.isFile() && entry.name !== 'metadata.json')
+            .map(entry => {
+                const name = entry.name;
+                // If it's in the manifest, use that. Otherwise, synthesize basic info.
+                return manifest[name] || {
+                    filename: name,
+                    originalName: name,
+                    uploadedAt: fs.statSync(path.join(imagesDir, name)).mtimeMs
+                };
+            })
+            // Sort by upload date (newest first)
+            .sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0));
+        
+        const total = files.length;
+        const limit = req.query.limit === 'all' ? total : parseInt(req.query.limit as string || '30');
+        const offset = parseInt(req.query.offset as string || '0');
+        
+        const paginatedFiles = req.query.limit === 'all' ? files : files.slice(offset, offset + limit);
+        
+        res.json({ images: paginatedFiles, total });
+    } catch (error: any) {
+        console.error('[ERROR] Failed to list images:', error.message);
+        res.status(500).json({ message: 'Failed to list images' });
+    }
 });
 
 // Theme support (just returns css variables)
@@ -587,9 +776,12 @@ app.get('/api/theme', (req: Request, res: Response) => {
         res.json({
             "--primary": "#3b82f6",
             "--secondary": "#1f2937",
-            "--accent": "#ef4444",
+            "--accent": "#3a297a",
             "--text": "#f3f4f6",
-            "--bg": "#111827"
+            "--bg": "#111827",
+            "--border": "#374151",
+            "--hover": "#1f2937",
+            "--site-name-color": "#3b82f6"
         });
     } else {
         // Default to light
@@ -598,7 +790,10 @@ app.get('/api/theme', (req: Request, res: Response) => {
             "--secondary": "#f3f4f6",
             "--accent": "#ef4444",
             "--text": "#111827",
-            "--bg": "#ffffff"
+            "--bg": "#ffffff",
+            "--border": "#e5e7eb",
+            "--hover": "#f3f4f6",
+            "--site-name-color": "#2563eb"
         });
     }
 });

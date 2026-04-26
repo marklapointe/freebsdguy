@@ -45,6 +45,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    fileParallelism: false,
+    env: {
+      CONFIG_DIR: path.resolve(__dirname, 'tests/tmp'),
+    },
     coverage: {
       include: ['src/**/*.{ts,tsx}', 'server/**/*.{ts,tsx}'],
       exclude: ['server/scripts/**'],

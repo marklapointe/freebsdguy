@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import axios from 'axios';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // Mock axios before importing App
 vi.mock('axios', () => {
@@ -25,46 +24,78 @@ vi.mock('axios', () => {
 
 import App, { api } from '../src/App';
 
+const commonMocks = (url: string) => {
+    if (url.startsWith('/posts?')) return Promise.resolve({ data: { posts: [], total: 0, limit: 10, offset: 0 } });
+    if (url === '/posts') return Promise.resolve({ data: [] });
+    if (url === '/config') return Promise.resolve({ data: { siteName: 'MDWeb', currentTheme: 'dark' } });
+    if (url === '/admin/config-status') return Promise.resolve({ data: { isWritable: true } });
+    if (url === '/admin/users') return Promise.resolve({ data: [] });
+    if (url.startsWith('/admin/images')) return Promise.resolve({ data: { files: [], total: 0, limit: 30, offset: 0 } });
+    if (url === '/admin/themes') return Promise.resolve({ data: [] });
+    if (url.includes('/theme')) return Promise.resolve({ data: { '--bg': '#121212' } });
+    return null;
+};
+
 describe('App Component', () => {
     beforeEach(() => {
+        window.history.pushState({}, 'Home', '/');
         vi.clearAllMocks();
         localStorage.clear();
         
         // Mock default responses for the api instance
         (api.get as any).mockImplementation((url: string) => {
-            console.log('API GET:', url);
-            if (url === '/posts' || url === '/api/posts') return Promise.resolve({ data: [] });
-            if (url === '/config' || url === '/api/config') return Promise.resolve({ data: { siteName: 'MDWeb', currentTheme: 'dark' } });
-            if (url.includes('/theme')) return Promise.resolve({ data: { '--bg': '#121212' } });
-            return Promise.reject(new Error('not found'));
+            const mock = commonMocks(url);
+            if (mock) return mock;
+            return Promise.reject(new Error(`not found: ${url}`));
         });
     });
 
     it('renders site title', async () => {
-        // Skip for now due to environment issues with findByText/waitFor in this container
-        // render(<App />);
-        // await waitFor(() => {
-        //     expect(screen.getByText(/MDWeb/i)).toBeTruthy();
-        // }, { timeout: 3000 });
+        render(<App />);
+        await waitFor(() => {
+            expect(screen.getAllByText(/MDWeb/i).length).toBeGreaterThan(0);
+        });
     });
 
     it('navigates to login page', async () => {
-        // Skip
+        render(<App />);
+        const loginLink = await screen.findByTestId('login-link');
+        fireEvent.click(loginLink);
+        // Look for the heading in the login form
+        expect(screen.getByRole('heading', { name: /Login/i })).toBeTruthy();
     });
 
     it('handles login successfully', async () => {
-        // Skip
-    });
+        (api.post as any).mockResolvedValueOnce({ 
+            data: { token: 'fake-token', role: 'admin', username: 'admin', theme: 'dark' } 
+        });
+        
+        render(<App />);
+        const loginLink = await screen.findByTestId('login-link');
+        fireEvent.click(loginLink);
+        
+        fireEvent.change(screen.getByTestId('username-input'), { target: { value: 'admin' } });
+        fireEvent.change(screen.getByTestId('password-input'), { target: { value: 'admin' } });
+        fireEvent.click(screen.getByTestId('login-submit'));
 
-    it('toggles theme', async () => {
-        // Skip for now to see if other tests pass
+        await waitFor(() => {
+            expect(localStorage.getItem('token')).toBe('fake-token');
+        });
     });
 
     it('renders posts on home page', async () => {
-        // Skip
-    });
+        const mockPosts = [
+            { slug: 'test-post', title: 'Test Post', date: '2026-01-01', summary: 'Test summary', content: 'Test content' }
+        ];
+        (api.get as any).mockImplementation((url: string) => {
+            if (url.includes('/posts')) return Promise.resolve({ data: { posts: mockPosts, total: 1, limit: 10, offset: 0 } });
+            const mock = commonMocks(url);
+            if (mock) return mock;
+            return Promise.reject(new Error(`not found: ${url}`));
+        });
 
-    it('renders post detail', async () => {
-        // Skip
+        render(<App />);
+        expect(await screen.findByText('Test Post')).toBeTruthy();
+        expect(screen.getByText('Test summary')).toBeTruthy();
     });
 });

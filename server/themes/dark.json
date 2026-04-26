@@ -3,5 +3,8 @@
   "--secondary": "#1f2937",
   "--accent": "#3a297a",
   "--text": "#f3f4f6",
-  "--bg": "#111827"
+  "--bg": "#111827",
+  "--border": "#374151",
+  "--hover": "#1f2937",
+  "--site-name-color": "#3b82f6"
 }

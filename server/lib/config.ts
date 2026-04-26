@@ -75,12 +75,14 @@ export interface Config {
     themeDir: string;
     currentTheme: string;
     siteName?: string;
+    siteLogo?: string;
     pagination?: number;
     sortBy?: 'date' | 'title' | 'author';
     sortOrder?: 'asc' | 'desc';
     searchPlacement?: 'top' | 'bottom' | 'left' | 'right' | 'none';
     aiConfig?: AIConfig;
     service?: ServiceConfig;
+    jwtSecret?: string;
 }
 
 export interface AIConfig {
@@ -176,7 +178,7 @@ export const loadUsers = (customPath?: string): UsersConfig => {
         const defaultConfig: UsersConfig = {
             admin: {
                 username: 'admin',
-                passwordHash: '$2b$10$O9wR/Y6O6Wc7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/', // admin
+                passwordHash: '$2b$10$aec45wHR7e4wuCbZDL2SNuzHTZ/5caQoygpy2dd6anaY4Bb9hi/sW', // admin
                 role: 'admin'
             },
             users: []
@@ -193,7 +195,7 @@ export const loadUsers = (customPath?: string): UsersConfig => {
         return {
             admin: {
                 username: 'admin',
-                passwordHash: '$2b$10$O9wR/Y6O6Wc7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/O7.pS/YF4p/',
+                passwordHash: '$2b$10$aec45wHR7e4wuCbZDL2SNuzHTZ/5caQoygpy2dd6anaY4Bb9hi/sW',
                 role: 'admin'
             },
             users: []

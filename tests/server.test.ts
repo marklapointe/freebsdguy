@@ -210,7 +210,8 @@ describe('API Endpoints', () => {
             .get('/api/admin/images')
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(200);
-        expect(Array.isArray(res.body)).toBe(true);
+        expect(Array.isArray(res.body.images)).toBe(true);
+        expect(typeof res.body.total).toBe('number');
     });
 
     it('DELETE /api/admin/images/:filename should delete image and return 200', async () => {
@@ -232,12 +233,11 @@ describe('API Endpoints', () => {
         expect(fs.existsSync(testImage)).toBe(false);
     });
 
-    it('DELETE /api/admin/images/:filename should return 400 for invalid filename', async () => {
+    it('DELETE /api/admin/images/:filename should return 403 for invalid filename', async () => {
         const res = await request(app)
             .delete(`/api/admin/images/${encodeURIComponent('../config.json')}`)
             .set('Authorization', `Bearer ${adminToken}`);
-        expect(res.status).toBe(400);
-        expect(res.body.message).toBe('Invalid filename');
+        expect(res.status).toBe(403);
     });
 
     it('DELETE /api/admin/images/:filename should return 404 for nonexistent image', async () => {

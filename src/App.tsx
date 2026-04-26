@@ -1,11 +1,41 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import axios from 'axios';
 import { MdEditor } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
-import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle } from 'lucide-react';
+import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon } from 'lucide-react';
+
+interface Post {
+    slug: string;
+    title: string;
+    date: string;
+    author: string;
+    summary: string;
+    content: string;
+    category?: string;
+}
+
+interface ImageInfo {
+    filename: string;
+    originalName: string;
+    uploadedAt: number;
+    size?: number;
+    md5?: string;
+}
+
+interface User {
+    username: string;
+    role: string;
+    theme?: string;
+}
+
+interface AlertType {
+    id: number;
+    title: string;
+    message: string;
+}
 
 // API Instance
 export const api = axios.create({
@@ -70,7 +100,7 @@ const applyTheme = async (themeName?: string) => {
     }
 };
 
-const Navbar = ({ user, setUser, siteName }) => {
+const Navbar = ({ user, setUser, siteName, siteLogo }: { user: User | null; setUser: (user: User | null) => void; siteName: string; siteLogo?: string }) => {
     const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
     useEffect(() => {
         const syncTheme = async () => {
@@ -139,7 +169,13 @@ const Navbar = ({ user, setUser, siteName }) => {
     return (
         <nav className="p-4 bg-secondary text-text flex justify-between items-center shadow-md">
             <Link to="/" className="text-2xl font-bold flex items-center gap-2">
-                <span className="text-accent">{firstPart}</span> {restParts}
+                {siteLogo ? (
+                    <img src={`/api/images/${siteLogo}`} alt={siteName} className="h-10 w-auto" />
+                ) : (
+                    <>
+                        <span style={{ color: 'var(--site-name-color, var(--accent))' }}>{firstPart}</span> {restParts}
+                    </>
+                )}
             </Link>
             <div className="flex gap-4 items-center">
                                 <button onClick={toggleTheme} className="p-2 hover:bg-accent rounded transition hover:text-white" title="Toggle theme">
@@ -168,12 +204,31 @@ const Navbar = ({ user, setUser, siteName }) => {
 };
 
 const Home = () => {
-    const [posts, setPosts] = useState([]);
+    const [posts, setPosts] = useState<Post[]>([]);
     const [search, setSearch] = useState('');
+    const [offset, setOffset] = useState(0);
+    const [total, setTotal] = useState(0);
+    const [limit] = useState(10);
 
     useEffect(() => {
-        api.get('/posts').then(res => setPosts(res.data));
+        fetchPosts(0);
     }, []);
+
+    const fetchPosts = (newOffset: number) => {
+        api.get(`/posts?limit=${limit}&offset=${newOffset}`).then(res => {
+            if (newOffset === 0) {
+                setPosts(res.data.posts);
+            } else {
+                setPosts(prev => [...prev, ...res.data.posts]);
+            }
+            setTotal(res.data.total);
+            setOffset(newOffset);
+        });
+    };
+
+    const loadMore = () => {
+        fetchPosts(offset + limit);
+    };
 
     const filteredPosts = posts.filter(p => 
         p.title.toLowerCase().includes(search.toLowerCase()) || 
@@ -210,13 +265,29 @@ const Home = () => {
                     </div>
                 ))}
             </div>
+            {!search && posts.length < total && (
+                <div className="mt-12 flex justify-center">
+                    <button 
+                        onClick={loadMore}
+                        className="bg-accent p-3 px-10 rounded-full font-bold hover:bg-opacity-80 transition shadow-lg text-white flex items-center gap-2 group"
+                    >
+                        <Plus size={20} className="group-hover:rotate-90 transition-transform duration-300" /> Load More Posts
+                    </button>
+                </div>
+            )}
+            {search && filteredPosts.length === 0 && (
+                <div className="text-center py-20 opacity-50">
+                    <Search size={48} className="mx-auto mb-4" />
+                    <p className="text-xl">No posts matching "{search}"</p>
+                </div>
+            )}
         </div>
     );
 };
 
 const PostDetail = () => {
-    const { slug } = useParams();
-    const [post, setPost] = useState(null);
+    const { slug } = useParams<{ slug: string }>();
+    const [post, setPost] = useState<Post | null>(null);
 
     useEffect(() => {
         api.get(`/posts/${slug}`).then(res => setPost(res.data));
@@ -243,13 +314,13 @@ const PostDetail = () => {
     );
 };
 
-const Login = ({ setUser }) => {
+const Login = ({ setUser }: { setUser: (user: User | null) => void }) => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const navigate = useNavigate();
 
-    const handleSubmit = async (e) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
             const res = await api.post('/login', { username, password });
@@ -314,7 +385,7 @@ const Login = ({ setUser }) => {
     );
 };
 
-const Modal = ({ isOpen, title, message, type, onConfirm, onCancel }) => {
+const Modal = ({ isOpen, title, message, type, onConfirm, onCancel }: { isOpen: boolean; title: string; message: string; type: string; onConfirm: () => void; onCancel: () => void }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -344,7 +415,7 @@ const Modal = ({ isOpen, title, message, type, onConfirm, onCancel }) => {
     );
 };
 
-const Notification = ({ id, message, title, onClose }) => {
+const Notification = ({ id, message, title, onClose }: { id: number; message: string; title: string; onClose: (id: number) => void }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
             onClose(id);
@@ -365,7 +436,17 @@ const Notification = ({ id, message, title, onClose }) => {
     );
 };
 
-const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummarizing, setPost, aiEnabled }) => {
+const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummarizing, setPost, aiEnabled, theme = 'dark' }: { 
+    isOpen: boolean; 
+    post: any; 
+    onSave: (e: any) => void; 
+    onCancel: () => void; 
+    onAutoSummarize: () => void; 
+    isSummarizing: boolean; 
+    setPost: (post: any) => void; 
+    aiEnabled: boolean;
+    theme?: 'light' | 'dark';
+}) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
@@ -431,7 +512,7 @@ const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummariz
                         <MdEditor
                             modelValue={post.content}
                             onChange={(val) => setPost({...post, content: val})}
-                            theme={document.documentElement.style.getPropertyValue('--bg').trim() === '#ffffff' ? 'light' : 'dark'}
+                            theme={theme}
                             language="en-US"
                             placeholder="Write your post content here (Markdown supported)..."
                             style={{ height: '500px' }}
@@ -478,14 +559,76 @@ const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummariz
     );
 };
 
-const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
+const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload }: { isOpen: boolean; images: ImageInfo[]; onSelect: (filename: string) => void; onClose: () => void; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
+            <div className="bg-secondary rounded-2xl shadow-2xl border border-accent border-opacity-30 w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+                <div className="p-6 border-b border-accent border-opacity-20 flex justify-between items-center bg-bg bg-opacity-50">
+                    <div>
+                        <h2 className="text-2xl font-bold">Select Image</h2>
+                        <p className="text-xs opacity-60">Choose an existing image or upload a new one</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <label className="bg-accent bg-opacity-10 text-accent p-2 px-4 rounded-lg font-bold border border-accent border-opacity-30 hover:bg-opacity-20 transition cursor-pointer flex items-center gap-2">
+                            <Upload size={18} /> Upload New
+                            <input type="file" className="hidden" accept="image/*" onChange={onUpload} />
+                        </label>
+                        <button onClick={onClose} className="p-2 hover:bg-accent hover:bg-opacity-10 rounded-lg transition text-accent"><X size={28} /></button>
+                    </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {images.map(img => (
+                        <div 
+                            key={img.filename} 
+                            onClick={() => { onSelect(img.filename); onClose(); }}
+                            className="group cursor-pointer rounded-xl border border-accent border-opacity-10 p-2 transition hover:border-opacity-100 hover:bg-accent hover:bg-opacity-5 relative"
+                        >
+                            <div className="aspect-square rounded-lg overflow-hidden bg-bg flex items-center justify-center mb-2 border border-accent border-opacity-5 group-hover:border-opacity-20">
+                                <img src={`/api/images/${img.filename}`} alt={img.originalName} className="max-h-full max-w-full object-contain transition-transform group-hover:scale-105" />
+                            </div>
+                            <p className="text-[10px] font-medium truncate opacity-70 group-hover:opacity-100" title={img.originalName}>{img.originalName}</p>
+                            <div className="absolute inset-0 bg-accent bg-opacity-0 group-hover:bg-opacity-5 transition-all rounded-xl pointer-events-none"></div>
+                        </div>
+                    ))}
+                    {images.length === 0 && (
+                        <div className="col-span-full py-32 text-center">
+                            <ImageIcon className="mx-auto mb-4 opacity-20" size={64} />
+                            <p className="opacity-50 font-medium">No images found in your library.</p>
+                            <p className="text-xs opacity-30 mt-1">Upload some images to get started!</p>
+                        </div>
+                    )}
+                </div>
+                <div className="p-6 border-t border-accent border-opacity-20 flex justify-end bg-bg bg-opacity-50">
+                    <button onClick={onClose} className="p-3 px-8 bg-secondary border border-accent border-opacity-30 rounded-lg font-bold hover:bg-opacity-80 transition">Close</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, showConfirm }: { 
+    user: User | null; 
+    siteName: string; 
+    setSiteName: (name: string) => void; 
+    siteLogo?: string;
+    setSiteLogo: (logo?: string) => void;
+    showAlert: (msg: string, title?: string) => void; 
+    showConfirm: (msg: string, onConfirm: () => void, title?: string) => void; 
+}) => {
     const [activeTab, setActiveTab] = useState('posts');
-    const [users, setUsers] = useState([]);
-    const [posts, setPosts] = useState([]);
-    const [themes, setThemes] = useState([]);
-    const [images, setImages] = useState([]);
-    const [config, setConfig] = useState({
+    const [isDragging, setIsDragging] = useState(false);
+    const [users, setUsers] = useState<any[]>([]);
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [themes, setThemes] = useState<string[]>([]);
+    const [images, setImages] = useState<ImageInfo[]>([]);
+    const [imagePage, setImagePage] = useState(1);
+    const [imagesPerPage, setImagesPerPage] = useState('30');
+    const [totalImages, setTotalImages] = useState(0);
+    const [showLogoPicker, setShowLogoPicker] = useState(false);
+    const [config, setConfig] = useState<any>({
         siteName: siteName,
+        siteLogo: siteLogo || 'logo.webp',
         currentTheme: 'dark',
         pagination: 10,
         sortBy: 'date',
@@ -503,9 +646,9 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         }
     });
     const [isWritable, setIsWritable] = useState(true);
-    const [editingPost, setEditingPost] = useState(null);
+    const [editingPost, setEditingPost] = useState<any>(null);
     const [isSummarizing, setIsSummarizing] = useState(false);
-    const [availableModels, setAvailableModels] = useState([]);
+    const [availableModels, setAvailableModels] = useState<string[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
 
@@ -514,7 +657,10 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         '--secondary': 'Secondary',
         '--accent': 'Accent',
         '--text': 'Text',
-        '--bg': 'Background'
+        '--bg': 'Background',
+        '--border': 'Border',
+        '--hover': 'Hover',
+        '--site-name-color': 'Site Name Text'
     };
 
     const getThemeLabel = (key: string) => themeLabelMap[key] || key.replace(/^--/, '').charAt(0).toUpperCase() + key.replace(/^--/, '').slice(1);
@@ -540,7 +686,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         const handleThemeChanged = (e: CustomEvent) => {
             const newTheme = e.detail;
             if (newTheme && typeof newTheme === 'string') {
-                setConfig(prev => ({ ...prev, currentTheme: newTheme }));
+                setConfig((prev: any) => ({ ...prev, currentTheme: newTheme }));
                 api.get('/theme?name=' + newTheme).then(res => {
                     setThemeColors(res.data);
                 });
@@ -561,14 +707,37 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         fetchImages();
     }, [user]);
 
+    useEffect(() => {
+        if (user) fetchImages();
+    }, [imagePage, imagesPerPage]);
+
     const fetchUsers = () => api.get('/admin/users').then(res => { setUsers(res.data); return res; });
     const fetchPosts = () => api.get('/posts').then(res => { setPosts(res.data); return res; });
     const fetchThemes = () => api.get('/admin/themes').then(res => { setThemes(res.data); return res; });
-    const fetchImages = () => api.get('/admin/images').then(res => { setImages(res.data); return res; });
+    const fetchImages = () => {
+        const limit = imagesPerPage;
+        const offset = (imagePage - 1) * (limit === 'all' ? 0 : parseInt(limit));
+        return api.get(`/admin/images?limit=${limit}&offset=${offset}`).then(res => { 
+            setImages(res.data.images); 
+            setTotalImages(res.data.total);
+            return res; 
+        });
+    };
     const fetchConfig = () => api.get('/config').then(res => {
-        setConfig(res.data);
-        if (res.data.service?.port) {
-            localStorage.setItem('lastPort', res.data.service.port.toString());
+        const data = res.data;
+        // Ensure aiConfig exists and has defaults for the UI
+        if (!data.aiConfig) {
+            data.aiConfig = {
+                enabled: false,
+                provider: 'ollama',
+                baseUrl: 'http://localhost:11434',
+                apiKey: '',
+                modelId: 'llama3'
+            };
+        }
+        setConfig(data);
+        if (data.service?.port) {
+            localStorage.setItem('lastPort', data.service.port.toString());
         }
         return res;
     });
@@ -600,10 +769,10 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
     };
 
     useEffect(() => {
-        if (activeTab === 'ai' && config.aiConfig?.provider === 'ollama' && availableModels.length === 0 && config.aiConfig?.baseUrl) {
+        if (activeTab === 'ai' && config.aiConfig?.provider === 'ollama' && config.aiConfig?.baseUrl) {
             fetchAIModels();
         }
-    }, [activeTab]);
+    }, [activeTab, config.aiConfig?.provider, config.aiConfig?.baseUrl]);
 
     const handleSaveConfig = () => {
         api.post('/admin/config', config).then(() => {
@@ -611,6 +780,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
             const newPort = config.service?.port || 5173;
             
             setSiteName(config.siteName);
+            setSiteLogo(config.siteLogo || undefined);
             fetchConfig();
             applyTheme(config.currentTheme);
             // Notify other components (like Navbar) that the theme might have changed via selection
@@ -640,25 +810,25 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         });
     };
 
-    const handleDeleteUser = (username) => {
+    const handleDeleteUser = (username: string) => {
         showConfirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`, () => {
             api.delete(`/admin/users/${username}`).then(fetchUsers);
         }, 'Delete User');
     };
 
-    const handleDeletePost = (slug) => {
+    const handleDeletePost = (slug: string) => {
         showConfirm(`Are you sure you want to delete post "${slug}"? This action cannot be undone.`, () => {
             api.delete(`/posts/${slug}`).then(fetchPosts);
         }, 'Delete Post');
     };
 
-    const handleDeleteImage = (filename) => {
+    const handleDeleteImage = (filename: string) => {
         showConfirm(`Are you sure you want to delete image "${filename}"? This action cannot be undone.`, () => {
             api.delete(`/admin/images/${filename}`).then(fetchImages);
         }, 'Delete Image');
     };
 
-    const handleSavePost = (e) => {
+    const handleSavePost = (e: React.FormEvent) => {
         e.preventDefault();
         api.post('/posts', editingPost).then(() => {
             setEditingPost(null);
@@ -667,14 +837,96 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
         });
     };
 
-    const handleFileUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const formData = new FormData();
-        formData.append('image', file);
-        api.post('/admin/upload', formData).then(() => {
-            fetchImages();
-        });
+    const uploadFiles = async (files: FileList | File[]) => {
+        const fileArray = Array.from(files);
+        let successCount = 0;
+        let failCount = 0;
+        let duplicateCount = 0;
+
+        for (const file of fileArray) {
+            if (!file.type.startsWith('image/')) continue;
+            
+            let force = false;
+            let uploadSuccess = false;
+
+            while (!uploadSuccess) {
+                const formData = new FormData();
+                formData.append('image', file);
+                
+                try {
+                    const res = await api.post(`/admin/upload${force ? '?force=true' : ''}`, formData);
+                    if (res.data.duplicated) {
+                        duplicateCount++;
+                    } else {
+                        successCount++;
+                    }
+                    uploadSuccess = true;
+                } catch (error: any) {
+                    if (error.response?.status === 409) {
+                        const confirmUpload = confirm(`An image named "${file.name}" already exists with different content. Do you want to upload it anyway as a new file?`);
+                        if (confirmUpload) {
+                            force = true;
+                        } else {
+                            uploadSuccess = true; // Skip this file
+                        }
+                    } else {
+                        console.error('Upload failed for', file.name, error);
+                        failCount++;
+                        uploadSuccess = true;
+                    }
+                }
+            }
+        }
+
+        if (successCount > 0 || duplicateCount > 0) {
+            if (imagePage === 1) {
+                fetchImages();
+            } else {
+                setImagePage(1);
+            }
+            
+            if (failCount === 0) {
+                if (duplicateCount > 0 && successCount === 0) {
+                    showAlert(`Image${duplicateCount > 1 ? 's' : ''} already existed and ${duplicateCount > 1 ? 'were' : 'was'} skipped.`, 'Info');
+                } else if (duplicateCount > 0) {
+                    showAlert(`Uploaded ${successCount} new image${successCount > 1 ? 's' : ''} (${duplicateCount} already existed).`, 'Success');
+                } else {
+                    showAlert(`Successfully uploaded ${successCount} image${successCount > 1 ? 's' : ''}.`, 'Success');
+                }
+            } else {
+                showAlert(`Uploaded ${successCount} images (${duplicateCount} skipped), but ${failCount} failed.`, 'Partial Success');
+            }
+        } else if (failCount > 0) {
+            showAlert(`Failed to upload ${failCount} image${failCount > 1 ? 's' : ''}.`, 'Upload Failed');
+        }
+    };
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            uploadFiles(e.target.files);
+        }
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            uploadFiles(e.dataTransfer.files);
+        }
     };
 
     const handleAutoSummarize = async () => {
@@ -694,7 +946,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
             setEditingPost({ ...editingPost, summary: res.data.summary });
         } catch (error) {
             console.error('Summarization error:', error);
-            const errorMsg = error.response?.data?.message || 'Failed to generate summary. Please check your AI configuration on the backend.';
+            const errorMsg = (error as any).response?.data?.message || 'Failed to generate summary. Please check your AI configuration on the backend.';
             showAlert(errorMsg, 'Error');
         } finally {
             setIsSummarizing(false);
@@ -703,7 +955,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
 
     if (!user || (user.role !== 'admin' && user.role !== 'contributor')) return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
-    const TabButton = ({ id, icon: Icon, label }) => (
+    const TabButton = ({ id, icon: Icon, label }: { id: string; icon: LucideIcon; label: string }) => (
         <button 
             onClick={() => setActiveTab(id)}
             className={`flex items-center gap-2 p-3 rounded-lg transition ${activeTab === id ? 'bg-accent text-white' : 'hover:bg-accent hover:bg-opacity-10'}`}
@@ -789,6 +1041,15 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                     isSummarizing={isSummarizing}
                     setPost={setEditingPost}
                     aiEnabled={config.aiConfig?.enabled}
+                    theme={config.currentTheme}
+                />
+
+                <ImagePickerModal 
+                    isOpen={showLogoPicker}
+                    images={images}
+                    onSelect={(filename) => setConfig({...config, siteLogo: filename})}
+                    onClose={() => setShowLogoPicker(false)}
+                    onUpload={handleFileUpload}
                 />
 
                 {activeTab === 'appearance' && (
@@ -813,7 +1074,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="space-y-4">
                                     <h3 className="text-sm font-bold uppercase text-accent mb-2">Color Variables</h3>
-                                    {['--primary', '--secondary', '--accent', '--text', '--bg'].map(key => (
+                                    {['--primary', '--secondary', '--accent', '--text', '--bg', '--border', '--hover', '--site-name-color'].map(key => (
                                         <div key={key} className="flex items-center justify-between gap-4">
                                             <label className="text-sm font-medium">{getThemeLabel(key)}</label>
                                             <div className="flex gap-2 items-center">
@@ -853,6 +1114,41 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                     value={config.siteName} onChange={e => setConfig({...config, siteName: e.target.value})}
                                     autoComplete="off"
                                 />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label htmlFor="site-logo" className="block text-xs font-bold uppercase text-accent">Site Logo</label>
+                                <div className="flex gap-2">
+                                    <div className="flex-1 p-3 bg-bg border border-accent border-opacity-30 rounded text-text flex items-center justify-between group overflow-hidden">
+                                        <div className="flex items-center gap-3 truncate">
+                                            {config.siteLogo ? (
+                                                <div className="h-8 w-8 rounded overflow-hidden bg-secondary flex items-center justify-center border border-accent border-opacity-20">
+                                                    <img src={`/api/images/${config.siteLogo}`} className="max-h-full max-w-full object-contain" alt="Logo preview" />
+                                                </div>
+                                            ) : (
+                                                <div className="h-8 w-8 rounded bg-accent bg-opacity-10 flex items-center justify-center border border-accent border-opacity-20 text-accent">
+                                                    <ImageIcon size={16} />
+                                                </div>
+                                            )}
+                                            <span className="truncate text-sm font-medium">{config.siteLogo || 'No logo selected'}</span>
+                                        </div>
+                                        <button 
+                                            onClick={() => setConfig({...config, siteLogo: ''})}
+                                            className={`p-1 hover:bg-red-500 hover:bg-opacity-10 rounded text-red-500 transition-opacity ${config.siteLogo ? 'opacity-100' : 'opacity-0'}`}
+                                            title="Clear logo"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setShowLogoPicker(true)}
+                                        className="p-3 bg-accent text-white rounded font-bold hover:bg-opacity-90 transition flex items-center gap-2 whitespace-nowrap"
+                                    >
+                                        <Plus size={18} /> Select Image
+                                    </button>
+                                </div>
+                                <p className="text-[10px] opacity-50 italic">If set, this image will be used in the header instead of the site name text. Defaults to logo.webp if available.</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
@@ -923,7 +1219,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                     checked={config.aiConfig?.enabled || false}
                                     onChange={e => {
                                         const isChecked = e.target.checked;
-                                        setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '', modelId: '' }), enabled: isChecked}}));
+                                        setConfig((prev: any) => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '', modelId: '' }), enabled: isChecked}}));
                                     }}
                                 />
                                 <label htmlFor="ai-enabled" className="text-sm font-bold uppercase text-accent cursor-pointer">Enable AI Features</label>
@@ -972,7 +1268,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                         value={config.aiConfig?.baseUrl || ''} 
                                         onChange={e => {
                                             const newVal = e.target.value;
-                                            setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', apiKey: '', modelId: '', enabled: true }), baseUrl: newVal}}));
+                                            setConfig((prev: any) => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', apiKey: '', modelId: '', enabled: true }), baseUrl: newVal}}));
                                         }}
                                         autoComplete="off"
                                     />
@@ -988,7 +1284,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                                 value={config.aiConfig?.modelId || ''} 
                                                 onChange={e => {
                                                     const newVal = e.target.value;
-                                                    setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '', enabled: true }), modelId: newVal}}));
+                                                    setConfig((prev: any) => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', apiKey: '', enabled: true }), modelId: newVal}}));
                                                 }}
                                             >
                                                 <option value="" className="bg-secondary">Select a model...</option>
@@ -1008,7 +1304,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                                 value={config.aiConfig?.modelId || ''} 
                                                 onChange={e => {
                                                     const newVal = e.target.value;
-                                                    setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'openai', baseUrl: '', apiKey: '', enabled: true }), modelId: newVal}}));
+                                                    setConfig((prev: any) => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'openai', baseUrl: '', apiKey: '', enabled: true }), modelId: newVal}}));
                                                 }}
                                                 autoComplete="off"
                                             />
@@ -1045,7 +1341,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                         value={config.aiConfig?.apiKey || ''} 
                                         onChange={e => {
                                             const newVal = e.target.value;
-                                            setConfig(prev => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', modelId: '', enabled: true }), apiKey: newVal}}));
+                                            setConfig((prev: any) => ({...prev, aiConfig: {...(prev.aiConfig || { provider: 'ollama', baseUrl: '', modelId: '', enabled: true }), apiKey: newVal}}));
                                         }}
                                         autoComplete="new-password"
                                     />
@@ -1068,7 +1364,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                     value={config.service?.port || 5173} 
                                     onChange={e => {
                                         const newVal = parseInt(e.target.value, 10);
-                                        setConfig(prev => ({...prev, service: {...(prev.service || {}), port: newVal}}));
+                                        setConfig((prev: any) => ({...prev, service: {...(prev.service || {}), port: newVal}}));
                                     }}
                                     autoComplete="off"
                                     disabled={!isWritable}
@@ -1146,25 +1442,52 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                 )}
 
                 {activeTab === 'images' && (
-                    <div>
+                    <div 
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        className={`min-h-[400px] rounded-xl transition-all duration-300 ${isDragging ? 'bg-accent bg-opacity-10 border-2 border-dashed border-accent p-4' : ''}`}
+                    >
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-bold">Image Manager</h2>
-                            <label className="bg-accent p-2 px-4 rounded font-bold flex items-center gap-2 hover:bg-opacity-80 transition cursor-pointer">
-                                <Upload size={18} /> Upload Image
-                                <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
-                            </label>
+                            <div className="flex items-center gap-4">
+                                <h2 className="text-2xl font-bold">Image Manager</h2>
+                                <div className="flex items-center gap-2 bg-secondary p-1 px-3 rounded text-xs border border-accent border-opacity-20">
+                                    <span className="opacity-60">Show:</span>
+                                    <select 
+                                        value={imagesPerPage} 
+                                        onChange={(e) => {
+                                            setImagesPerPage(e.target.value);
+                                            setImagePage(1);
+                                        }}
+                                        className="bg-transparent font-bold outline-none cursor-pointer"
+                                    >
+                                        <option value="30" className="bg-secondary">30</option>
+                                        <option value="50" className="bg-secondary">50</option>
+                                        <option value="100" className="bg-secondary">100</option>
+                                        <option value="all" className="bg-secondary">All</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                {isDragging && <span className="text-accent font-bold animate-pulse flex items-center mr-4">Drop images here...</span>}
+                                <label className="bg-accent p-2 px-4 rounded font-bold flex items-center gap-2 hover:bg-opacity-80 transition cursor-pointer shadow-md">
+                                    <Upload size={18} /> Upload Image
+                                    <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" multiple />
+                                </label>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                             {images.map(img => (
-                                <div key={img} className="group relative bg-bg rounded overflow-hidden border border-accent border-opacity-20 aspect-square">
-                                    <img src={`/api/images/${img}`} className="w-full h-full object-cover" />
+                                <div key={img.filename} className="group relative bg-bg rounded overflow-hidden border border-accent border-opacity-20 aspect-square">
+                                    <img src={`/api/images/${img.filename}`} className="w-full h-full object-cover" />
                                     <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center p-2 text-center gap-2">
-                                        <p className="text-[10px] text-white truncate w-full">{img}</p>
+                                        <p className="text-[10px] text-white font-bold truncate w-full px-1" title={img.originalName}>{img.originalName}</p>
+                                        <p className="text-[8px] text-white opacity-60 truncate w-full px-1">{img.filename}</p>
                                         <div className="flex gap-2">
                                             <button 
                                                 onClick={() => {
-                                                    navigator.clipboard.writeText(`![${img}](/api/images/${img})`);
+                                                    navigator.clipboard.writeText(`![${img.originalName}](/api/images/${img.filename})`);
                                                     showAlert('Markdown link copied to clipboard!');
                                                 }}
                                                 className="bg-accent text-white p-1 px-2 rounded text-[10px] font-bold flex items-center gap-1"
@@ -1175,7 +1498,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                             {editingPost && (
                                                 <button 
                                                     onClick={() => {
-                                                        const imgLink = `\n![${img}](/api/images/${img})\n`;
+                                                        const imgLink = `\n![${img.originalName}](/api/images/${img.filename})\n`;
                                                         setEditingPost({
                                                             ...editingPost,
                                                             content: editingPost.content + imgLink
@@ -1188,7 +1511,7 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                                                 </button>
                                             )}
                                             <button 
-                                                onClick={() => handleDeleteImage(img)}
+                                                onClick={() => handleDeleteImage(img.filename)}
                                                 className="bg-red-600 text-white p-1 px-2 rounded text-[10px] font-bold flex items-center gap-1"
                                                 title="Delete Image"
                                             >
@@ -1200,6 +1523,26 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
                             ))}
                         </div>
                         {images.length === 0 && <p className="text-center text-gray-500 mt-8">No images uploaded yet.</p>}
+                        
+                        {images.length > 0 && imagesPerPage !== 'all' && (
+                            <div className="flex justify-center items-center gap-4 mt-8">
+                                <button 
+                                    disabled={imagePage === 1}
+                                    onClick={() => setImagePage(p => Math.max(1, p - 1))}
+                                    className="p-2 px-4 bg-secondary border border-accent border-opacity-20 rounded disabled:opacity-30 hover:bg-accent hover:bg-opacity-10 transition"
+                                >
+                                    Previous
+                                </button>
+                                <span className="font-bold">Page {imagePage} of {Math.max(1, Math.ceil(totalImages / parseInt(imagesPerPage)))}</span>
+                                <button 
+                                    disabled={imagePage >= Math.ceil(totalImages / parseInt(imagesPerPage))}
+                                    onClick={() => setImagePage(p => p + 1)}
+                                    className="p-2 px-4 bg-secondary border border-accent border-opacity-20 rounded disabled:opacity-30 hover:bg-accent hover:bg-opacity-10 transition"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -1208,9 +1551,10 @@ const Admin = ({ user, siteName, setSiteName, showAlert, showConfirm }) => {
 };
 
 export default function App() {
-    const [user, setUser] = useState(null);
+    const [user, setUser] = useState<User | null>(null);
     const [siteName, setSiteName] = useState('MDWeb');
-    const [notifications, setNotifications] = useState([]);
+    const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
+    const [notifications, setNotifications] = useState<AlertType[]>([]);
 
     useEffect(() => {
         const initTheme = async () => {
@@ -1239,17 +1583,30 @@ export default function App() {
                 setSiteName(res.data.siteName);
                 document.title = res.data.siteName;
             }
+            if (res.data.siteLogo) {
+                setSiteLogo(res.data.siteLogo);
+            }
         });
         const token = localStorage.getItem('token');
         const role = localStorage.getItem('role');
         const username = localStorage.getItem('username');
         if (token) {
             const localTheme = localStorage.getItem('theme');
-            setUser({ role, username, theme: (localTheme === 'light' || localTheme === 'dark') ? localTheme : null }); 
+            setUser({ 
+                role: role || 'contributor', 
+                username: username || 'unknown', 
+                theme: (localTheme === 'light' || localTheme === 'dark') ? localTheme : undefined 
+            }); 
         }
     }, []);
 
-    const [modal, setModal] = useState({
+    const [modal, setModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        type: string;
+        onConfirm: () => void;
+    }>({
         isOpen: false,
         title: '',
         message: '',
@@ -1257,16 +1614,16 @@ export default function App() {
         onConfirm: () => {}
     });
 
-    const showAlert = (message, title = '') => {
+    const showAlert = (message: string, title = '') => {
         const id = Date.now();
-        setNotifications(prev => [...prev, { id, message, title }]);
+        setNotifications((prev: AlertType[]) => [...prev, { id, message, title }]);
     };
 
-    const removeNotification = (id) => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
+    const removeNotification = (id: number) => {
+        setNotifications((prev: AlertType[]) => prev.filter(n => n.id !== id));
     };
 
-    const showConfirm = (message, onConfirm, title = '') => {
+    const showConfirm = (message: string, onConfirm: () => void, title = '') => {
         setModal({
             isOpen: true,
             title,
@@ -1274,7 +1631,7 @@ export default function App() {
             type: 'confirm',
             onConfirm: () => {
                 onConfirm();
-                setModal(prev => ({ ...prev, isOpen: false }));
+                setModal((prev: any) => ({ ...prev, isOpen: false }));
             }
         });
     };
@@ -1282,12 +1639,12 @@ export default function App() {
     return (
         <Router>
             <div className="min-h-screen bg-bg text-text">
-                <Navbar user={user} setUser={setUser} siteName={siteName} />
+                <Navbar user={user} setUser={setUser} siteName={siteName} siteLogo={siteLogo} />
                 <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/post/:slug" element={<PostDetail />} />
                     <Route path="/login" element={<Login setUser={setUser} />} />
-                    <Route path="/admin" element={<Admin user={user} siteName={siteName} setSiteName={setSiteName} showAlert={showAlert} showConfirm={showConfirm} />} />
+                    <Route path="/admin" element={<Admin user={user} siteName={siteName} setSiteName={setSiteName} siteLogo={siteLogo} setSiteLogo={setSiteLogo} showAlert={showAlert} showConfirm={showConfirm} />} />
                 </Routes>
                 <footer className="p-8 text-center opacity-50 text-sm mt-12 border-t border-secondary">
                     © 2026 {siteName}. All rights reserved. Built with Vite + React.
