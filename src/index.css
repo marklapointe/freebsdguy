@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   --color-primary: var(--primary);
@@ -39,12 +40,4 @@ a {
 
 a:hover {
   text-decoration: underline;
-}
-
-.prose {
-    color: var(--color-text);
-}
-
-.prose h1, .prose h2, .prose h3 {
-    color: var(--color-primary);
 }

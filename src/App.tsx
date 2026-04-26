@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import 'highlight.js/styles/github-dark.css';
 import DOMPurify from 'dompurify';
 import axios from 'axios';
 import { MdEditor } from 'md-editor-rt';
@@ -304,7 +310,12 @@ const PostDetail = () => {
                     {post.author && <span>by {post.author}</span>}
                 </div>
                 <div className="prose max-w-none prose-headings:text-primary prose-a:text-accent prose-p:text-text prose-strong:text-text prose-code:text-accent">
-                    <ReactMarkdown>{DOMPurify.sanitize(post.content)}</ReactMarkdown>
+                    <ReactMarkdown 
+                        remarkPlugins={[remarkGfm, remarkMath]} 
+                        rehypePlugins={[rehypeHighlight, rehypeKatex]}
+                    >
+                        {DOMPurify.sanitize(post.content)}
+                    </ReactMarkdown>
                 </div>
                 <div className="mt-12">
                     <Link to="/" className="text-accent hover:underline">← Back to home</Link>
@@ -519,6 +530,22 @@ const PostModal = ({
                                 </button>
                             )}
                         </div>
+
+                        {isSummarizing && (
+                            <div className="mb-2 p-3 bg-accent bg-opacity-5 border border-accent border-dashed rounded-lg animate-in fade-in duration-300">
+                                <div className="flex items-center justify-center gap-3">
+                                    <div className="flex gap-1">
+                                        <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                                        <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                                        <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></div>
+                                    </div>
+                                    <div className="text-xs font-bold text-accent flex items-center gap-2">
+                                        AI is generating summary...
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <textarea 
                             id="post-summary"
                             placeholder="Summary (short description)" 
@@ -541,6 +568,22 @@ const PostModal = ({
                                 </button>
                             )}
                         </div>
+
+                        {isEnhancing && (
+                            <div className="mb-4 p-6 bg-accent bg-opacity-5 border border-accent border-dashed rounded-lg animate-in fade-in duration-300">
+                                <div className="flex flex-col items-center justify-center gap-3">
+                                    <div className="flex gap-2">
+                                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce"></div>
+                                    </div>
+                                    <div className="text-sm font-bold text-accent flex items-center gap-2 uppercase tracking-wider">
+                                        <Sparkles className="animate-pulse" size={18} /> Processing Enhancement...
+                                    </div>
+                                    <p className="text-[10px] opacity-60 italic text-center">AI is analyzing and rewriting your content for better flow and engagement.</p>
+                                </div>
+                            </div>
+                        )}
 
                         {enhancedPreview && (
                             <div className="mb-4 p-4 bg-accent bg-opacity-5 border border-accent rounded-lg animate-in fade-in slide-in-from-top-2 duration-300">
@@ -1008,7 +1051,11 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                 baseUrl,
                 modelId
             });
-            setEditingPost({ ...editingPost, summary: res.data.summary });
+            if (res.data.summary) {
+                setEditingPost({ ...editingPost, summary: res.data.summary });
+            } else {
+                showAlert('AI returned an empty summary. This might happen if the model is not responding correctly.', 'Warning');
+            }
         } catch (error) {
             console.error('Summarization error:', error);
             const errorMsg = (error as any).response?.data?.message || 'Failed to generate summary. Please check your AI configuration on the backend.';
@@ -1032,7 +1079,11 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                 baseUrl,
                 modelId
             });
-            setEnhancedPreview(res.data.enhanced);
+            if (res.data.enhanced) {
+                setEnhancedPreview(res.data.enhanced);
+            } else {
+                showAlert('AI returned an empty response. This might happen if the model is not responding correctly.', 'Warning');
+            }
         } catch (error) {
             console.error('Enhancement error:', error);
             const errorMsg = (error as any).response?.data?.message || 'Failed to enhance content. Please check your AI configuration on the backend.';
