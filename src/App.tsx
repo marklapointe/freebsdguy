@@ -16,7 +16,7 @@ import axios from 'axios';
 import { MdEditor } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
 import mermaid from 'mermaid';
-import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon } from 'lucide-react';
+import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon, Check, ChevronDown } from 'lucide-react';
 
 interface Post {
     slug: string;
@@ -331,6 +331,82 @@ const Mermaid = ({ chart }: { chart: string }) => {
     return <div className="mermaid-chart flex justify-center my-6 overflow-hidden" dangerouslySetInnerHTML={{ __html: svg }} />;
 };
 
+const CodeBlock = ({ language, children, value }: { language: string; children: React.ReactNode; value: string }) => {
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const copyToClipboard = () => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(value).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        } else {
+            // Fallback for non-https or older browsers
+            const textArea = document.createElement("textarea");
+            textArea.value = value;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textArea);
+        }
+    };
+
+    return (
+        <div className="not-prose group relative rounded-xl overflow-hidden border border-accent border-opacity-20 my-8 bg-[#0d1117] shadow-2xl transition-all hover:border-opacity-40">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-secondary bg-opacity-80 backdrop-blur-md border-b border-accent border-opacity-10 select-none">
+                <div className="flex gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#ff5f56] shadow-sm"></div>
+                    <div className="w-3 h-3 rounded-full bg-[#ffbd2e] shadow-sm"></div>
+                    <div className="w-3 h-3 rounded-full bg-[#27c93f] shadow-sm"></div>
+                </div>
+                <div className="flex items-center gap-4">
+                    {language && <span className="text-[10px] font-black opacity-40 uppercase tracking-[0.2em] text-primary">{language}</span>}
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={copyToClipboard}
+                            className="p-1.5 hover:bg-accent hover:bg-opacity-20 rounded-md transition text-accent opacity-50 hover:opacity-100 focus:outline-none"
+                            title="Copy code"
+                        >
+                            {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                        </button>
+                        <button 
+                            onClick={() => setIsCollapsed(!isCollapsed)}
+                            className="p-1.5 hover:bg-accent hover:bg-opacity-20 rounded-md transition text-accent opacity-50 hover:opacity-100 focus:outline-none"
+                            title={isCollapsed ? "Expand" : "Collapse"}
+                        >
+                            <ChevronDown size={14} className={`transition-transform duration-300 ${isCollapsed ? '' : 'rotate-180'}`} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div className={`transition-all duration-300 ease-in-out ${isCollapsed ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-[2000px] opacity-100'}`}>
+                <div className="p-0 overflow-x-auto scrollbar-thin scrollbar-thumb-accent scrollbar-track-transparent">
+                    <pre className="!m-0 !p-4 !bg-transparent !border-none text-sm font-mono leading-relaxed">
+                        {children}
+                    </pre>
+                </div>
+            </div>
+            {isCollapsed && (
+                <div 
+                    className="px-4 py-3 text-[10px] opacity-30 italic text-center cursor-pointer hover:opacity-50 hover:bg-accent hover:bg-opacity-5 transition-all text-primary" 
+                    onClick={() => setIsCollapsed(false)}
+                >
+                    Code block collapsed - click to expand
+                </div>
+            )}
+        </div>
+    );
+};
+
 const PostDetail = () => {
     const { slug } = useParams<{ slug: string }>();
     const [post, setPost] = useState<Post | null>(null);
@@ -355,15 +431,31 @@ const PostDetail = () => {
                         rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeKatex, rehypeSlug, [rehypeAutolinkHeadings, { behavior: 'wrap' }]]}
                         components={{
                             code({ className, children, ...props }: any) {
-                                const match = /language-(\w+)/.exec(className || '');
-                                if (match && match[1] === 'mermaid') {
-                                    return <Mermaid chart={String(children).replace(/\n$/, '')} />;
-                                }
                                 return (
                                     <code className={className} {...props}>
                                         {children}
                                     </code>
                                 );
+                            },
+                            pre({ children }: any) {
+                                if (React.isValidElement(children) && children.type === 'code') {
+                                    const codeProps = children.props as any;
+                                    const className = codeProps.className || '';
+                                    const match = /language-(\w+)/.exec(className);
+                                    const language = match ? match[1] : '';
+                                    const value = String(codeProps.children).replace(/\n$/, '');
+
+                                    if (language === 'mermaid') {
+                                        return <Mermaid chart={value} />;
+                                    }
+
+                                    return (
+                                        <CodeBlock language={language} value={value}>
+                                            {children}
+                                        </CodeBlock>
+                                    );
+                                }
+                                return <pre className="p-4 bg-bg rounded-lg overflow-x-auto">{children}</pre>;
                             }
                         }}
                     >
