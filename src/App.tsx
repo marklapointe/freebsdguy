@@ -1,22 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import remarkEmoji from 'remark-emoji';
-import rehypeHighlight from 'rehype-highlight';
-import rehypeKatex from 'rehype-katex';
-import rehypeRaw from 'rehype-raw';
-import rehypeSlug from 'rehype-slug';
-import rehypeAutolinkHeadings from 'rehype-autolink-headings';
-import 'katex/dist/katex.min.css';
-import 'highlight.js/styles/github-dark.css';
-import DOMPurify from 'dompurify';
 import axios from 'axios';
-import { MdEditor } from 'md-editor-rt';
+import { MdEditor, MdPreview, MdCatalog } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
-import mermaid from 'mermaid';
-import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon, Check, ChevronDown } from 'lucide-react';
+import 'md-editor-rt/lib/preview.css';
+import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon } from 'lucide-react';
 
 interface Post {
     slug: string;
@@ -296,174 +284,50 @@ const Home = () => {
     );
 };
 
-const Mermaid = ({ chart }: { chart: string }) => {
-    const [svg, setSvg] = useState('');
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        const isLight = document.documentElement.style.getPropertyValue('--primary').includes('0, 0, 0') || 
-                       localStorage.getItem('theme') === 'light';
-        
-        mermaid.initialize({
-            startOnLoad: false,
-            theme: isLight ? 'default' : 'dark',
-            securityLevel: 'loose',
-            fontFamily: 'inherit'
-        });
-
-        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
-        try {
-            mermaid.render(id, chart).then(({ svg }) => {
-                setSvg(svg);
-                setError(null);
-            }).catch(err => {
-                console.error('Mermaid render error:', err);
-                setError('Failed to render Mermaid diagram');
-            });
-        } catch (e) {
-            console.error('Mermaid exception:', e);
-            setError('Mermaid initialization error');
-        }
-    }, [chart]);
-
-    if (error) return <pre className="p-4 bg-red-500 bg-opacity-10 text-red-500 rounded text-xs overflow-auto">{error}</pre>;
-    if (!svg) return <div className="flex justify-center p-8 opacity-50 animate-pulse"><RefreshCw className="animate-spin" /></div>;
-    return <div className="mermaid-chart flex justify-center my-6 overflow-hidden" dangerouslySetInnerHTML={{ __html: svg }} />;
-};
-
-const CodeBlock = ({ language, children, value }: { language: string; children: React.ReactNode; value: string }) => {
-    const [isCollapsed, setIsCollapsed] = useState(false);
-    const [copied, setCopied] = useState(false);
-
-    const copyToClipboard = () => {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(value).then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-            }).catch(err => {
-                console.error('Failed to copy text: ', err);
-            });
-        } else {
-            // Fallback for non-https or older browsers
-            const textArea = document.createElement("textarea");
-            textArea.value = value;
-            document.body.appendChild(textArea);
-            textArea.select();
-            try {
-                document.execCommand('copy');
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-            } catch (err) {
-                console.error('Fallback copy failed', err);
-            }
-            document.body.removeChild(textArea);
-        }
-    };
-
-    return (
-        <div className="not-prose group relative rounded-xl overflow-hidden border border-accent border-opacity-20 my-8 bg-[#0d1117] shadow-2xl transition-all hover:border-opacity-40">
-            <div className="flex items-center justify-between px-4 py-2.5 bg-secondary bg-opacity-80 backdrop-blur-md border-b border-accent border-opacity-10 select-none">
-                <div className="flex gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#ff5f56] shadow-sm"></div>
-                    <div className="w-3 h-3 rounded-full bg-[#ffbd2e] shadow-sm"></div>
-                    <div className="w-3 h-3 rounded-full bg-[#27c93f] shadow-sm"></div>
-                </div>
-                <div className="flex items-center gap-4">
-                    {language && <span className="text-[10px] font-black opacity-40 uppercase tracking-[0.2em] text-primary">{language}</span>}
-                    <div className="flex items-center gap-2">
-                        <button 
-                            onClick={copyToClipboard}
-                            className="p-1.5 hover:bg-accent hover:bg-opacity-20 rounded-md transition text-accent opacity-50 hover:opacity-100 focus:outline-none"
-                            title="Copy code"
-                        >
-                            {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-                        </button>
-                        <button 
-                            onClick={() => setIsCollapsed(!isCollapsed)}
-                            className="p-1.5 hover:bg-accent hover:bg-opacity-20 rounded-md transition text-accent opacity-50 hover:opacity-100 focus:outline-none"
-                            title={isCollapsed ? "Expand" : "Collapse"}
-                        >
-                            <ChevronDown size={14} className={`transition-transform duration-300 ${isCollapsed ? '' : 'rotate-180'}`} />
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div className={`transition-all duration-300 ease-in-out ${isCollapsed ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-[2000px] opacity-100'}`}>
-                <div className="p-0 overflow-x-auto scrollbar-thin scrollbar-thumb-accent scrollbar-track-transparent">
-                    <pre className="!m-0 !p-4 !bg-transparent !border-none text-sm font-mono leading-relaxed">
-                        {children}
-                    </pre>
-                </div>
-            </div>
-            {isCollapsed && (
-                <div 
-                    className="px-4 py-3 text-[10px] opacity-30 italic text-center cursor-pointer hover:opacity-50 hover:bg-accent hover:bg-opacity-5 transition-all text-primary" 
-                    onClick={() => setIsCollapsed(false)}
-                >
-                    Code block collapsed - click to expand
-                </div>
-            )}
-        </div>
-    );
-};
-
 const PostDetail = () => {
     const { slug } = useParams<{ slug: string }>();
     const [post, setPost] = useState<Post | null>(null);
+    const [id] = useState('preview-only');
+    const scrollElement = document.documentElement;
 
     useEffect(() => {
         api.get(`/posts/${slug}`).then(res => setPost(res.data));
     }, [slug]);
 
-    if (!post) return <div className="p-8 text-center">Loading...</div>;
+    if (!post) return <div className="p-8 text-center text-primary">Loading...</div>;
+
+    const theme = (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
 
     return (
-        <div className="container mx-auto p-4 max-w-[85%] bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden">
+        <div className="container mx-auto p-4 max-w-[90%] bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden border border-accent border-opacity-10">
             <div className="p-8">
-                <h1 className="text-4xl font-extrabold mb-4 border-b border-accent border-opacity-30 pb-4">{post.title}</h1>
-                <div className="flex gap-4 text-sm opacity-70 mb-8">
+                <h1 className="text-4xl font-extrabold mb-4 border-b border-accent border-opacity-30 pb-4 text-primary">{post.title}</h1>
+                <div className="flex gap-4 text-sm opacity-70 mb-8 text-primary">
                     <span>{new Date(post.date).toLocaleDateString()}</span>
                     {post.author && <span>by {post.author}</span>}
                 </div>
-                <div className="prose max-w-none prose-headings:text-primary prose-a:text-accent prose-p:text-text prose-strong:text-text prose-code:text-accent prose-img:rounded-lg prose-img:shadow-md prose-blockquote:border-accent prose-blockquote:bg-accent prose-blockquote:bg-opacity-5 prose-blockquote:p-4 prose-blockquote:rounded-r-lg">
-                    <ReactMarkdown 
-                        remarkPlugins={[remarkGfm, remarkMath, remarkEmoji]} 
-                        rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeKatex, rehypeSlug, [rehypeAutolinkHeadings, { behavior: 'wrap' }]]}
-                        components={{
-                            code({ className, children, ...props }: any) {
-                                return (
-                                    <code className={className} {...props}>
-                                        {children}
-                                    </code>
-                                );
-                            },
-                            pre({ children }: any) {
-                                if (React.isValidElement(children) && children.type === 'code') {
-                                    const codeProps = children.props as any;
-                                    const className = codeProps.className || '';
-                                    const match = /language-(\w+)/.exec(className);
-                                    const language = match ? match[1] : '';
-                                    const value = String(codeProps.children).replace(/\n$/, '');
-
-                                    if (language === 'mermaid') {
-                                        return <Mermaid chart={value} />;
-                                    }
-
-                                    return (
-                                        <CodeBlock language={language} value={value}>
-                                            {children}
-                                        </CodeBlock>
-                                    );
-                                }
-                                return <pre className="p-4 bg-bg rounded-lg overflow-x-auto">{children}</pre>;
-                            }
-                        }}
-                    >
-                        {DOMPurify.sanitize(post.content)}
-                    </ReactMarkdown>
+                
+                <div className="flex flex-col lg:flex-row gap-8">
+                    <div className="flex-1 min-w-0">
+                        <MdPreview 
+                            id={id} 
+                            modelValue={post.content} 
+                            theme={theme}
+                            language="en-US"
+                        />
+                    </div>
+                    <div className="hidden lg:block w-64 shrink-0 border-l border-accent border-opacity-10 pl-6">
+                        <div className="sticky top-8">
+                            <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-4 text-accent opacity-60">Contents</h3>
+                            <MdCatalog editorId={id} scrollElement={scrollElement} />
+                        </div>
+                    </div>
                 </div>
-                <div className="mt-12">
-                    <Link to="/" className="text-accent hover:underline">← Back to home</Link>
+
+                <div className="mt-12 pt-8 border-t border-accent border-opacity-10">
+                    <Link to="/" className="text-accent hover:underline flex items-center gap-2 font-bold transition-all hover:gap-3">
+                        <span>←</span> Back to home
+                    </Link>
                 </div>
             </div>
         </div>
