@@ -14,6 +14,7 @@ export abstract class AIService {
     }
 
     abstract summarize(content: string): Promise<string>;
+    abstract enhance(content: string): Promise<string>;
     abstract getModels(): Promise<string[]>;
 }
 
@@ -43,6 +44,34 @@ export class OllamaService extends AIService {
                 throw new Error(`Model '${this.config.modelId}' not found on the Ollama server. Please check your AI settings and ensure the model is pulled.`);
             }
             throw new Error(`Ollama summarization failed: ${error.message}`);
+        }
+    }
+
+    async enhance(content: string): Promise<string> {
+        console.log(`[OllamaProxy] Enhancing with model ${this.config.modelId} at ${this.config.baseUrl}`);
+        try {
+            const response = await axios.post(`${this.config.baseUrl}/api/chat`, {
+                model: this.config.modelId,
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are a helpful assistant that enhances blog post content. Improve the flow, grammar, and engagement of the following markdown content while preserving its original meaning and markdown formatting. Return only the enhanced content.'
+                    },
+                    {
+                        role: 'user',
+                        content: content
+                    }
+                ],
+                stream: false
+            }, { timeout: 60000 });
+            
+            return response.data.message.content.trim();
+        } catch (error: any) {
+            console.error('[OllamaProxy] Enhancement failed:', error.message);
+            if (error.response?.status === 404) {
+                throw new Error(`Model '${this.config.modelId}' not found on the Ollama server. Please check your AI settings and ensure the model is pulled.`);
+            }
+            throw new Error(`Ollama enhancement failed: ${error.message}`);
         }
     }
 
@@ -92,6 +121,42 @@ export class OpenAIService extends AIService {
                 throw new Error(`OpenAI model '${this.config.modelId}' not found or endpoint incorrect.`);
             }
             throw new Error(`OpenAI summarization failed: ${error.message}`);
+        }
+    }
+
+    async enhance(content: string): Promise<string> {
+        console.log(`[OpenAIProxy] Enhancing with model ${this.config.modelId} at ${this.config.baseUrl}`);
+        try {
+            const url = `${this.config.baseUrl}/chat/completions`;
+            const response = await axios.post(url, {
+                model: this.config.modelId,
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are a helpful assistant that enhances blog post content. Improve the flow, grammar, and engagement of the following markdown content while preserving its original meaning and markdown formatting. Return only the enhanced content.'
+                    },
+                    {
+                        role: 'user',
+                        content: content
+                    }
+                ]
+            }, {
+                headers: {
+                    'Authorization': this.config.apiKey ? `Bearer ${this.config.apiKey}` : undefined,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 60000
+            });
+            return response.data.choices[0].message.content.trim();
+        } catch (error: any) {
+            console.error('[OpenAIProxy] Enhancement failed:', error.message);
+            if (error.response?.status === 401) {
+                throw new Error('OpenAI API Key is invalid or missing.');
+            }
+            if (error.response?.status === 404) {
+                throw new Error(`OpenAI model '${this.config.modelId}' not found or endpoint incorrect.`);
+            }
+            throw new Error(`OpenAI enhancement failed: ${error.message}`);
         }
     }
 

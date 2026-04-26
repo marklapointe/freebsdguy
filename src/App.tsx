@@ -436,13 +436,33 @@ const Notification = ({ id, message, title, onClose }: { id: number; message: st
     );
 };
 
-const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummarizing, setPost, aiEnabled, theme = 'dark' }: { 
+const PostModal = ({ 
+    isOpen, 
+    post, 
+    onSave, 
+    onCancel, 
+    onAutoSummarize, 
+    isSummarizing, 
+    onAutoEnhance,
+    isEnhancing,
+    enhancedPreview,
+    onApplyEnhancement,
+    onDismissEnhancement,
+    setPost, 
+    aiEnabled, 
+    theme = 'dark' 
+}: { 
     isOpen: boolean; 
     post: any; 
     onSave: (e: any) => void; 
     onCancel: () => void; 
     onAutoSummarize: () => void; 
     isSummarizing: boolean; 
+    onAutoEnhance: () => void;
+    isEnhancing: boolean;
+    enhancedPreview: string | null;
+    onApplyEnhancement: () => void;
+    onDismissEnhancement: () => void;
     setPost: (post: any) => void; 
     aiEnabled: boolean;
     theme?: 'light' | 'dark';
@@ -508,7 +528,50 @@ const PostModal = ({ isOpen, post, onSave, onCancel, onAutoSummarize, isSummariz
                         />
                     </div>
                     <div className="space-y-1">
-                        <label className="block text-xs font-bold uppercase text-accent mb-2">Content</label>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="block text-xs font-bold uppercase text-accent">Content</label>
+                            {aiEnabled && (
+                                <button 
+                                    type="button"
+                                    onClick={onAutoEnhance}
+                                    className="text-xs flex items-center gap-1 text-accent hover:underline disabled:opacity-50"
+                                    disabled={isEnhancing || !post.content}
+                                >
+                                    <Sparkles size={14} /> {isEnhancing ? 'Enhancing...' : 'Auto-Enhance'}
+                                </button>
+                            )}
+                        </div>
+
+                        {enhancedPreview && (
+                            <div className="mb-4 p-4 bg-accent bg-opacity-5 border border-accent rounded-lg animate-in fade-in slide-in-from-top-2 duration-300">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h4 className="text-sm font-bold text-accent flex items-center gap-2">
+                                        <Sparkles size={16} /> Enhanced Content Preview
+                                    </h4>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            type="button"
+                                            onClick={onApplyEnhancement}
+                                            className="p-1 px-3 bg-accent text-white rounded text-xs font-bold hover:bg-opacity-80 transition"
+                                        >
+                                            Apply Changes
+                                        </button>
+                                        <button 
+                                            type="button"
+                                            onClick={onDismissEnhancement}
+                                            className="p-1 px-3 bg-secondary border border-accent border-opacity-30 rounded text-xs font-bold hover:bg-bg transition"
+                                        >
+                                            Dismiss
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="max-h-60 overflow-y-auto p-3 bg-bg rounded text-sm opacity-80 border border-accent border-opacity-10 whitespace-pre-wrap font-mono">
+                                    {enhancedPreview}
+                                </div>
+                                <p className="text-[10px] mt-2 opacity-50 italic">Review the AI-enhanced content above. Clicking 'Apply' will replace your current content.</p>
+                            </div>
+                        )}
+
                         <MdEditor
                             modelValue={post.content}
                             onChange={(val) => setPost({...post, content: val})}
@@ -648,6 +711,8 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     const [isWritable, setIsWritable] = useState(true);
     const [editingPost, setEditingPost] = useState<any>(null);
     const [isSummarizing, setIsSummarizing] = useState(false);
+    const [isEnhancing, setIsEnhancing] = useState(false);
+    const [enhancedPreview, setEnhancedPreview] = useState<string | null>(null);
     const [availableModels, setAvailableModels] = useState<string[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
@@ -953,6 +1018,30 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
         }
     };
 
+    const handleAutoEnhance = async () => {
+        if (!editingPost || !editingPost.content) return;
+        setIsEnhancing(true);
+        try {
+            const provider = config.aiConfig?.provider || 'ollama';
+            const baseUrl = config.aiConfig?.baseUrl || (provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1');
+            const modelId = config.aiConfig?.modelId || (provider === 'ollama' ? 'llama3' : 'gpt-3.5-turbo');
+
+            const res = await api.post('/ai/enhance', { 
+                content: editingPost.content,
+                provider,
+                baseUrl,
+                modelId
+            });
+            setEnhancedPreview(res.data.enhanced);
+        } catch (error) {
+            console.error('Enhancement error:', error);
+            const errorMsg = (error as any).response?.data?.message || 'Failed to enhance content. Please check your AI configuration on the backend.';
+            showAlert(errorMsg, 'Error');
+        } finally {
+            setIsEnhancing(false);
+        }
+    };
+
     if (!user || (user.role !== 'admin' && user.role !== 'contributor')) return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
     const TabButton = ({ id, icon: Icon, label }: { id: string; icon: LucideIcon; label: string }) => (
@@ -1017,11 +1106,11 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <div className="flex gap-2">
                                         <button onClick={() => {
                                             api.get(`/posts/${post.slug}`).then(res => setEditingPost(res.data));
-                                        }} className="p-2 hover:bg-accent rounded transition text-accent hover:text-white">
+                                        }} className="p-2 hover:bg-accent rounded transition text-accent hover:text-white" title="Edit Post">
                                             <Edit size={18} />
                                         </button>
                                         {user.role === 'admin' && (
-                                            <button onClick={() => handleDeletePost(post.slug)} className="p-2 hover:bg-red-500 rounded transition text-red-500 hover:text-white">
+                                            <button onClick={() => handleDeletePost(post.slug)} className="p-2 hover:bg-red-500 rounded transition text-red-500 hover:text-white" title="Delete Post">
                                                 <Trash2 size={18} />
                                             </button>
                                         )}
@@ -1036,9 +1125,19 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                     isOpen={!!editingPost}
                     post={editingPost || {}}
                     onSave={handleSavePost}
-                    onCancel={() => setEditingPost(null)}
+                    onCancel={() => { setEditingPost(null); setEnhancedPreview(null); }}
                     onAutoSummarize={handleAutoSummarize}
                     isSummarizing={isSummarizing}
+                    onAutoEnhance={handleAutoEnhance}
+                    isEnhancing={isEnhancing}
+                    enhancedPreview={enhancedPreview}
+                    onApplyEnhancement={() => {
+                        if (enhancedPreview) {
+                            setEditingPost({ ...editingPost, content: enhancedPreview });
+                            setEnhancedPreview(null);
+                        }
+                    }}
+                    onDismissEnhancement={() => setEnhancedPreview(null)}
                     setPost={setEditingPost}
                     aiEnabled={config.aiConfig?.enabled}
                     theme={config.currentTheme}

@@ -270,6 +270,37 @@ app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, re
     }
 });
 
+// AI: Enhance post content
+app.post('/api/ai/enhance', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+    const aiConfig = loadAIConfig();
+    if (!aiConfig?.enabled) {
+        return res.status(403).json({ message: 'AI features are disabled' });
+    }
+    const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
+    if (!content) return res.status(400).json({ message: 'No content provided' });
+
+    const provider = (overrideProvider || aiConfig?.provider) as 'ollama' | 'openai';
+    const baseUrl = overrideBaseUrl || aiConfig?.baseUrl;
+    const modelId = overrideModelId || aiConfig?.modelId;
+
+    if (!provider || !baseUrl || !modelId) {
+        return res.status(503).json({ message: 'AI configuration not found' });
+    }
+
+    try {
+        const service = AIServiceFactory.create(provider, { 
+            baseUrl, 
+            modelId, 
+            apiKey: aiConfig?.apiKey 
+        });
+        const enhanced = await service.enhance(content);
+        res.json({ enhanced });
+    } catch (error: any) {
+        console.error('AI Enhancement failed:', error.message);
+        res.status(500).json({ message: error.message || 'Failed to enhance content via proxy' });
+    }
+});
+
 // AI: Fetch available models
 app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: Response) => {
     const aiConfig = loadAIConfig();
