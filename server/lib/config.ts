@@ -83,6 +83,17 @@ export interface Config {
     aiConfig?: AIConfig;
     service?: ServiceConfig;
     jwtSecret?: string;
+    security?: SecurityConfig;
+}
+
+export interface SecurityConfig {
+    apiRateLimitWindow?: number;
+    apiRateLimitMax?: number;
+    loginRateLimitWindow?: number;
+    loginRateLimitMax?: number;
+    disableAI?: boolean;
+    disableImages?: boolean;
+    disablePublicSearch?: boolean;
 }
 
 export interface AIConfig {

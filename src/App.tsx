@@ -4,7 +4,7 @@ import axios from 'axios';
 import { MdEditor, MdPreview, MdCatalog } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
 import 'md-editor-rt/lib/preview.css';
-import { Search, Eye, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon, Pin } from 'lucide-react';
+import { Search, Eye, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon, Pin, CheckSquare, Square, Shield } from 'lucide-react';
 
 interface Post {
     slug: string;
@@ -170,7 +170,7 @@ const Navbar = ({ user, setUser, siteName, siteLogo }: { user: User | null; setU
         <nav className="p-4 bg-secondary text-text flex justify-between items-center shadow-md">
             <Link to="/" className="text-2xl font-bold flex items-center gap-2">
                 {siteLogo ? (
-                    <img src={`/api/images/${siteLogo}`} alt={siteName} className="h-10 w-auto" />
+                    <img src={`/api/getimage?fileName=${siteLogo}`} alt={siteName} className="h-10 w-auto" />
                 ) : (
                     <>
                         <span style={{ color: 'var(--site-name-color, var(--accent))' }}>{firstPart}</span> {restParts}
@@ -732,7 +732,7 @@ const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload, onPrevi
                     <div className="flex items-center gap-4">
                         <label className="bg-accent bg-opacity-10 text-accent p-2 px-4 rounded-lg font-bold border border-accent border-opacity-30 hover:bg-opacity-20 transition cursor-pointer flex items-center gap-2">
                             <Upload size={18} /> Upload New
-                            <input type="file" className="hidden" accept="image/*" onChange={onUpload} />
+                            <input type="file" className="hidden" accept="image/*" onChange={onUpload} multiple />
                         </label>
                         <button onClick={onClose} className="p-2 hover:bg-accent hover:bg-opacity-10 rounded-lg transition text-accent"><X size={28} /></button>
                     </div>
@@ -748,7 +748,7 @@ const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload, onPrevi
                                 className="aspect-square rounded-lg overflow-hidden bg-bg flex items-center justify-center mb-2 border border-accent border-opacity-5 group-hover:border-opacity-20 relative"
                             >
                                 <img 
-                                    src={`/api/images/${img.filename}`} 
+                                    src={`/api/getimage?fileName=${img.filename}`} 
                                     alt={img.originalName} 
                                     className="max-h-full max-w-full object-contain transition-transform group-hover:scale-105" 
                                     onError={(e) => {
@@ -797,7 +797,7 @@ const ImagePreviewModal = ({ image, onClose }: { image: ImageInfo | null; onClos
             <div className="relative max-w-5xl max-h-full flex flex-col items-center" onClick={e => e.stopPropagation()}>
                 <button onClick={onClose} className="absolute -top-12 right-0 p-2 text-white hover:text-accent transition bg-black bg-opacity-50 rounded-full"><X size={32} /></button>
                 <div className="bg-bg p-2 rounded-xl shadow-2xl border border-accent border-opacity-20">
-                    <img src={`/api/images/${image.filename}`} alt={image.originalName} className="max-w-full max-h-[80vh] rounded-lg object-contain" />
+                    <img src={`/api/getimage?fileName=${image.filename}`} alt={image.originalName} className="max-w-full max-h-[80vh] rounded-lg object-contain" />
                 </div>
                 <div className="mt-4 p-4 bg-secondary bg-opacity-80 backdrop-blur-md rounded-xl border border-accent border-opacity-20 text-center min-w-[300px]">
                     <h3 className="text-xl font-bold text-white mb-1">{image.originalName}</h3>
@@ -832,6 +832,8 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     const [showLogoPicker, setShowLogoPicker] = useState(false);
     const [pickerImages, setPickerImages] = useState<ImageInfo[]>([]);
     const [previewImage, setPreviewImage] = useState<ImageInfo | null>(null);
+    const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [config, setConfig] = useState<any>({
         siteName: siteName,
         siteLogo: siteLogo || 'logo.webp',
@@ -953,7 +955,18 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
             apiKey: '',
             modelId: 'llama3'
         };
+        // Ensure security exists and has defaults for the UI
+        const defaultSecurity = {
+            apiRateLimitWindow: 15 * 60 * 1000,
+            apiRateLimitMax: 100,
+            loginRateLimitWindow: 15 * 60 * 1000,
+            loginRateLimitMax: 10,
+            disableAI: false,
+            disableImages: false,
+            disablePublicSearch: false
+        };
         data.aiConfig = { ...defaultAiConfig, ...data.aiConfig };
+        data.security = { ...defaultSecurity, ...data.security };
         setConfig(data);
         if (data.service?.port) {
             localStorage.setItem('lastPort', data.service.port.toString());
@@ -1051,8 +1064,45 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                 if (config.siteLogo === filename) {
                     setConfig((prev: any) => ({...prev, siteLogo: ''}));
                 }
+                if (selectedImages.has(filename)) {
+                    const newSelection = new Set(selectedImages);
+                    newSelection.delete(filename);
+                    setSelectedImages(newSelection);
+                }
             });
         }, 'Delete Image');
+    };
+
+    const toggleImageSelection = (filename: string) => {
+        const newSelection = new Set(selectedImages);
+        if (newSelection.has(filename)) {
+            newSelection.delete(filename);
+        } else {
+            newSelection.add(filename);
+        }
+        setSelectedImages(newSelection);
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedImages.size === 0) return;
+        
+        showConfirm(`Are you sure you want to delete ${selectedImages.size} images? This action cannot be undone.`, () => {
+            api.post('/admin/images/delete-bulk', { filenames: Array.from(selectedImages) }).then(res => {
+                showAlert(res.data.message, 'Success');
+                const deletedFilenames = Array.from(selectedImages);
+                setSelectedImages(new Set());
+                setIsSelectionMode(false);
+                fetchImages();
+                if (showLogoPicker) {
+                    api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
+                }
+                if (deletedFilenames.includes(config.siteLogo)) {
+                    setConfig((prev: any) => ({...prev, siteLogo: ''}));
+                }
+            }).catch(err => {
+                showAlert('Failed to delete some images: ' + (err.response?.data?.message || err.message), 'Error');
+            });
+        }, 'Bulk Delete');
     };
 
     const handleSavePost = (e: React.FormEvent) => {
@@ -1069,6 +1119,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
         let successCount = 0;
         let failCount = 0;
         let duplicateCount = 0;
+        const uploadedFilenames: string[] = [];
 
         for (const file of fileArray) {
             if (!file.type.startsWith('image/')) continue;
@@ -1087,6 +1138,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                     } else {
                         successCount++;
                     }
+                    uploadedFilenames.push(res.data.filename);
                     uploadSuccess = true;
                 } catch (error: any) {
                     if (error.response?.status === 409) {
@@ -1116,6 +1168,11 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                 api.get('/admin/images?limit=all').then(res => {
                     setPickerImages(res.data.images);
                 }).catch(err => console.error('Failed to refresh picker images:', err));
+
+                // Auto-select the first successfully uploaded image as logo if we're in the picker
+                if (uploadedFilenames.length > 0) {
+                    setConfig((prev: any) => ({ ...prev, siteLogo: uploadedFilenames[0] }));
+                }
             }
             
             if (failCount === 0) {
@@ -1244,6 +1301,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                         <TabButton id="layout" icon={Layout} label="Layout" />
                         <TabButton id="ai" icon={Cpu} label="AI Settings" />
                         <TabButton id="service" icon={Server} label="Service" />
+                        <TabButton id="security" icon={Shield} label="Security" />
                         <TabButton id="users" icon={Users} label="Users" />
                     </>
                 )}
@@ -1408,7 +1466,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                             {config.siteLogo ? (
                                                 <div className="h-8 w-8 rounded overflow-hidden bg-secondary flex items-center justify-center border border-accent border-opacity-20">
                                                     <img 
-                                                        src={`/api/images/${config.siteLogo}`} 
+                                                        src={`/api/getimage?fileName=${config.siteLogo}`} 
                                                         className="max-h-full max-w-full object-contain" 
                                                         alt="Logo preview" 
                                                         onError={(e) => {
@@ -1674,6 +1732,97 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                     </div>
                 )}
 
+                {activeTab === 'security' && (
+                    <div className="max-w-2xl mx-auto">
+                        <h2 className="text-2xl font-bold mb-6">Security & Rate Limiting</h2>
+                        <div className="space-y-6 bg-bg p-6 rounded-lg border border-accent border-opacity-20">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                    <h3 className="font-bold border-b border-accent border-opacity-20 pb-2">General API</h3>
+                                    <div className="space-y-1">
+                                        <label className="block text-xs font-bold uppercase text-accent">Window (ms)</label>
+                                        <input 
+                                            type="number" className="w-full p-3 bg-secondary border border-accent rounded text-text"
+                                            value={config.security?.apiRateLimitWindow || 900000} 
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), apiRateLimitWindow: parseInt(e.target.value, 10)}}))}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="block text-xs font-bold uppercase text-accent">Max Requests</label>
+                                        <input 
+                                            type="number" className="w-full p-3 bg-secondary border border-accent rounded text-text"
+                                            value={config.security?.apiRateLimitMax || 100} 
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), apiRateLimitMax: parseInt(e.target.value, 10)}}))}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <h3 className="font-bold border-b border-accent border-opacity-20 pb-2">Login API</h3>
+                                    <div className="space-y-1">
+                                        <label className="block text-xs font-bold uppercase text-accent">Window (ms)</label>
+                                        <input 
+                                            type="number" className="w-full p-3 bg-secondary border border-accent rounded text-text"
+                                            value={config.security?.loginRateLimitWindow || 900000} 
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), loginRateLimitWindow: parseInt(e.target.value, 10)}}))}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="block text-xs font-bold uppercase text-accent">Max Attempts</label>
+                                        <input 
+                                            type="number" className="w-full p-3 bg-secondary border border-accent rounded text-text"
+                                            value={config.security?.loginRateLimitMax || 10} 
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), loginRateLimitMax: parseInt(e.target.value, 10)}}))}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-accent bg-opacity-10 border border-accent border-opacity-20 rounded text-xs opacity-80">
+                                <p><strong>Note:</strong> Changes to "Max Requests" and "Max Attempts" take effect immediately. Changes to "Window" settings may require a service restart.</p>
+                            </div>
+
+                            <div className="space-y-4 pt-6 border-t border-accent border-opacity-20">
+                                <h3 className="font-bold">Feature Management</h3>
+                                <p className="text-xs opacity-60">Disable major application features for security or maintenance.</p>
+                                
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            id="disable-ai" type="checkbox" className="w-4 h-4 rounded border-accent text-accent focus:ring-accent bg-bg"
+                                            checked={config.security?.disableAI || false}
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), disableAI: e.target.checked}}))}
+                                        />
+                                        <label htmlFor="disable-ai" className="text-sm font-bold uppercase text-accent cursor-pointer">Disable AI Features</label>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            id="disable-images" type="checkbox" className="w-4 h-4 rounded border-accent text-accent focus:ring-accent bg-bg"
+                                            checked={config.security?.disableImages || false}
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), disableImages: e.target.checked}}))}
+                                        />
+                                        <label htmlFor="disable-images" className="text-sm font-bold uppercase text-accent cursor-pointer">Disable Image Uploads</label>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            id="disable-search" type="checkbox" className="w-4 h-4 rounded border-accent text-accent focus:ring-accent bg-bg"
+                                            checked={config.security?.disablePublicSearch || false}
+                                            onChange={e => setConfig((prev: any) => ({...prev, security: {...(prev.security || {}), disablePublicSearch: e.target.checked}}))}
+                                        />
+                                        <label htmlFor="disable-search" className="text-sm font-bold uppercase text-accent cursor-pointer">Disable Public Search</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={handleSaveConfig} 
+                                className={`w-full bg-accent p-3 rounded font-bold shadow-lg hover:bg-opacity-90 transition text-white ${!isWritable ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={!isWritable}
+                            >
+                                Save Security Settings
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {activeTab === 'users' && (
                     <div className="space-y-8">
                         <div className="flex justify-between items-center mb-6">
@@ -1762,30 +1911,86 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                             </div>
                             <div className="flex gap-2">
                                 {isDragging && <span className="text-accent font-bold animate-pulse flex items-center mr-4">Drop images here...</span>}
-                                <label className="bg-accent p-2 px-4 rounded font-bold flex items-center gap-2 hover:bg-opacity-80 transition cursor-pointer shadow-md">
+                                <button 
+                                    onClick={() => {
+                                        if (isSelectionMode) {
+                                            setSelectedImages(new Set());
+                                        }
+                                        setIsSelectionMode(!isSelectionMode);
+                                    }}
+                                    className={`${isSelectionMode ? 'bg-secondary border border-accent border-opacity-30' : 'bg-bg border border-accent border-opacity-20'} p-2 px-4 rounded font-bold flex items-center gap-2 hover:bg-opacity-80 transition shadow-md text-sm`}
+                                >
+                                    {isSelectionMode ? <X size={18} /> : <CheckSquare size={18} />}
+                                    {isSelectionMode ? 'Cancel Selection' : 'Select Images'}
+                                </button>
+                                <label className="bg-accent p-2 px-4 rounded font-bold flex items-center gap-2 hover:bg-opacity-80 transition cursor-pointer shadow-md text-sm">
                                     <Upload size={18} /> Upload Image
                                     <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" multiple />
                                 </label>
                             </div>
                         </div>
 
+                        {/* Bulk actions bar */}
+                        {images.length > 0 && isSelectionMode && (
+                            <div className="mb-4 flex items-center justify-between bg-accent bg-opacity-5 p-3 rounded-lg border border-accent border-opacity-30 backdrop-blur-sm animate-in slide-in-from-top duration-300">
+                                <div className="flex items-center gap-4">
+                                    <button 
+                                        onClick={() => {
+                                            if (selectedImages.size === images.length) {
+                                                setSelectedImages(new Set());
+                                            } else {
+                                                setSelectedImages(new Set(images.map(i => i.filename)));
+                                            }
+                                        }}
+                                        className="flex items-center gap-2 text-sm hover:text-accent transition font-bold"
+                                    >
+                                        {selectedImages.size === images.length ? <CheckSquare size={18} /> : <Square size={18} />}
+                                        {selectedImages.size === images.length ? 'Deselect All' : 'Select All'}
+                                    </button>
+                                    {selectedImages.size > 0 && (
+                                        <span className="text-sm opacity-60 font-medium">{selectedImages.size} selected</span>
+                                    )}
+                                </div>
+                                {selectedImages.size > 0 && (
+                                    <button 
+                                        onClick={handleBulkDelete}
+                                        className="bg-red-600 text-white p-2 px-4 rounded font-bold hover:bg-red-700 transition flex items-center gap-2 text-sm shadow-sm"
+                                    >
+                                        <Trash2 size={16} /> Delete Selected
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                             {images.map(img => (
-                                <div key={img.filename} className="group relative bg-bg rounded overflow-hidden border border-accent border-opacity-20 aspect-square">
+                                <div 
+                                    key={img.filename} 
+                                    className={`group relative bg-bg rounded overflow-hidden border transition-all duration-300 aspect-square ${selectedImages.has(img.filename) ? 'border-accent ring-2 ring-accent ring-opacity-50' : 'border-accent border-opacity-20'} ${isSelectionMode ? 'cursor-pointer' : ''}`}
+                                    onClick={() => isSelectionMode && toggleImageSelection(img.filename)}
+                                >
+                                    {(isSelectionMode || selectedImages.has(img.filename)) && (
+                                        <div className="absolute top-2 left-2 z-10">
+                                            {selectedImages.has(img.filename) ? 
+                                                <CheckSquare className="text-accent fill-accent fill-opacity-20 shadow-lg" size={22} /> : 
+                                                <Square className="text-white bg-black bg-opacity-40 rounded shadow-lg" size={22} />
+                                            }
+                                        </div>
+                                    )}
                                     <img 
-                                        src={`/api/images/${img.filename}`} 
+                                        src={`/api/getimage?fileName=${img.filename}`} 
                                         className="w-full h-full object-cover transition-transform group-hover:scale-105" 
                                         onError={(e) => {
                                             e.currentTarget.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%233a297a%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%222%22%20ry%3D%222%22%3E%3C%2Frect%3E%3Ccircle%20cx%3D%228.5%22%20cy%3D%228.5%22%20r%3D%221.5%22%3E%3C%2Fcircle%3E%3Cpolyline%20points%3D%2221%2015%2016%2010%205%2021%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E';
                                             e.currentTarget.className += ' opacity-40 p-8';
                                         }}
                                     />
-                                    <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center p-2 text-center gap-2">
+                                    <div className={`absolute inset-0 bg-black bg-opacity-50 transition flex flex-col items-center justify-center p-2 text-center gap-2 ${isSelectionMode ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
                                         <p className="text-[10px] text-white font-bold truncate w-full px-1" title={img.originalName}>{img.originalName}</p>
                                         <div className="flex flex-wrap justify-center gap-1">
                                             <button 
                                                 onClick={() => {
-                                                    navigator.clipboard.writeText(`![${img.originalName}](/api/images/${img.filename})`);
+                                                    navigator.clipboard.writeText(`![${img.originalName}](/api/getimage?fileName=${img.filename})`);
                                                     showAlert('Markdown link copied to clipboard!');
                                                 }}
                                                 className="bg-accent text-white p-1 px-2 rounded text-[10px] font-bold flex items-center gap-1"
@@ -1803,7 +2008,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                             {editingPost && (
                                                 <button 
                                                     onClick={() => {
-                                                        const imgLink = `\n![${img.originalName}](/api/images/${img.filename})\n`;
+                                                        const imgLink = `\n![${img.originalName}](/api/getimage?fileName=${img.filename})\n`;
                                                         setEditingPost({
                                                             ...editingPost,
                                                             content: editingPost.content + imgLink

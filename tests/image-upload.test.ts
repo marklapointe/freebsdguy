@@ -39,7 +39,7 @@ describe('Image Upload and Conversion', () => {
         expect(res.body).toHaveProperty('filename');
         expect(res.body.filename).toMatch(/\.webp$/);
         expect(res.body).toHaveProperty('url');
-        expect(res.body.url).toContain(res.body.filename);
+        expect(res.body.url).toBe(`/api/getimage?fileName=${res.body.filename}`);
 
         // Verify file exists on disk
         const config = loadConfig();

@@ -20,7 +20,8 @@ import { runPreflight } from './lib/preflight.ts';
 const isSafePath = (baseDir: string, targetPath: string) => {
     const resolvedBase = path.resolve(baseDir);
     const resolvedTarget = path.resolve(targetPath);
-    return resolvedTarget.startsWith(resolvedBase);
+    const relative = path.relative(resolvedBase, resolvedTarget);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 };
 
 import multer from 'multer';
@@ -49,9 +50,9 @@ if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
     process.exit(1);
 }
 
-const config = loadConfig();
-const PORT = cliPort || config.service?.port || process.env.PORT || 5173;
-const SECRET = config.jwtSecret || process.env.JWT_SECRET || 'freebsd_guy_secret_key';
+let activeConfig = loadConfig();
+const PORT = cliPort || activeConfig.service?.port || process.env.PORT || 5173;
+const SECRET = activeConfig.jwtSecret || process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
 // Configure Multer for image uploads (to memory first, then processed by sharp)
 const storage = multer.memoryStorage();
@@ -70,8 +71,8 @@ app.use(helmet({
 
 // Rate limiting
 const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 100,
+    windowMs: activeConfig.security?.apiRateLimitWindow || 15 * 60 * 1000,
+    limit: () => activeConfig.security?.apiRateLimitMax || 100,
     message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
     standardHeaders: 'draft-7',
     legacyHeaders: false,
@@ -79,8 +80,8 @@ const apiLimiter = rateLimit({
 });
 
 const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 10,
+    windowMs: activeConfig.security?.loginRateLimitWindow || 15 * 60 * 1000,
+    limit: () => activeConfig.security?.loginRateLimitMax || 10,
     message: { message: 'Too many login attempts, please try again after 15 minutes' },
     standardHeaders: 'draft-7',
     legacyHeaders: false,
@@ -216,6 +217,10 @@ app.delete('/api/admin/users/:username', authenticate, (req: AuthenticatedReques
 
 // Get posts
 app.get('/api/posts', (req: Request, res: Response) => {
+    const query = (req.query.q as string || '').toLowerCase();
+    if (query && activeConfig.security?.disablePublicSearch) {
+        return res.status(403).json({ message: 'Search is disabled by security policy' });
+    }
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
@@ -242,7 +247,7 @@ app.get('/api/posts', (req: Request, res: Response) => {
 // AI: Summarize post content
 app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, res: Response) => {
     const aiConfig = loadAIConfig();
-    if (!aiConfig?.enabled) {
+    if (!aiConfig?.enabled || activeConfig.security?.disableAI) {
         return res.status(403).json({ message: 'AI features are disabled' });
     }
     const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
@@ -273,7 +278,7 @@ app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, re
 // AI: Enhance post content
 app.post('/api/ai/enhance', authenticate, async (req: AuthenticatedRequest, res: Response) => {
     const aiConfig = loadAIConfig();
-    if (!aiConfig?.enabled) {
+    if (!aiConfig?.enabled || activeConfig.security?.disableAI) {
         return res.status(403).json({ message: 'AI features are disabled' });
     }
     const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
@@ -382,13 +387,21 @@ app.post('/api/posts', authenticate, (req: AuthenticatedRequest, res: Response) 
     res.json({ message: 'Post saved' });
 });
 
-// Serve images
-app.get('/api/images/:filename', (req: Request, res: Response) => {
+// Proxy images through a common endpoint
+app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
-    const filename = decodeURIComponent(req.params.filename as string);
+    
+    // Support both query param (preferred) and route param (legacy)
+    const filenameRaw = (req.query.fileName as string) || (req.params.filename as string) || '';
+    const filename = filenameRaw ? decodeURIComponent(filenameRaw) : '';
+    
+    if (!filename) {
+        return res.status(400).json({ message: 'No filename provided' });
+    }
+
     const filePath = path.join(imagesDir, filename);
 
     // Security check: ensure the resolved path is still within imagesDir
@@ -457,7 +470,8 @@ app.get('/api/config', (_req: Request, res: Response) => {
         sortOrder: config.sortOrder || 'desc',
         searchPlacement: config.searchPlacement || 'top',
         aiConfig: config.aiConfig,
-        service: config.service || { port: 3001 }
+        service: config.service || { port: 3001 },
+        security: config.security
     });
 });
 
@@ -519,11 +533,53 @@ app.delete('/api/admin/images/:filename', authenticate, (req: AuthenticatedReque
     }
 });
 
+// Admin: Bulk delete images
+app.post('/api/admin/images/delete-bulk', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
+    
+    const { filenames } = req.body;
+    if (!Array.isArray(filenames)) return res.status(400).json({ message: 'filenames must be an array' });
+
+    const config = loadConfig();
+    const configDir = path.dirname(configPath());
+    const postsDir = path.resolve(configDir, config.postsDir);
+    const imagesDir = path.join(postsDir, 'images');
+    const manifest = loadManifest(imagesDir);
+    
+    let deletedCount = 0;
+    const errors: string[] = [];
+
+    for (const filename of filenames) {
+        const filePath = path.join(imagesDir, filename);
+        if (!isSafePath(imagesDir, filePath)) {
+            errors.push(`${filename}: Invalid path`);
+            continue;
+        }
+
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+                if (manifest[filename]) {
+                    delete manifest[filename];
+                }
+                deletedCount++;
+            } catch (error: any) {
+                errors.push(`${filename}: ${error.message}`);
+            }
+        } else {
+            errors.push(`${filename}: Not found`);
+        }
+    }
+
+    saveManifest(imagesDir, manifest);
+    res.json({ message: `Deleted ${deletedCount} images`, deletedCount, errors });
+});
+
 // Admin: Update site config
 app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Response) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
-    const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service } = req.body;
+    const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security } = req.body;
 
     if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
     if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
@@ -549,7 +605,20 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
         };
     }
 
+    if (security) {
+        config.security = {
+            apiRateLimitWindow: Number(security.apiRateLimitWindow) || 15 * 60 * 1000,
+            apiRateLimitMax: Number(security.apiRateLimitMax) || 100,
+            loginRateLimitWindow: Number(security.loginRateLimitWindow) || 15 * 60 * 1000,
+            loginRateLimitMax: Number(security.loginRateLimitMax) || 10,
+            disableAI: !!security.disableAI,
+            disableImages: !!security.disableImages,
+            disablePublicSearch: !!security.disablePublicSearch
+        };
+    }
+
     saveConfig(config);
+    activeConfig = config;
     
     // Also update the theme if it changed
     if (currentTheme) {
@@ -661,6 +730,9 @@ app.delete('/api/posts/:slug', authenticate, (req: AuthenticatedRequest, res: Re
 
 // Image upload (with WebP conversion and renaming)
 app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: AuthenticatedRequest, res: Response) => {
+    if (activeConfig.security?.disableImages) {
+        return res.status(403).json({ message: 'Image uploads are disabled by security policy' });
+    }
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     try {
@@ -688,7 +760,7 @@ app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: 
                 console.log(`[INFO] Duplicate image upload detected: ${duplicate.filename} (Original: ${duplicate.originalName})`);
                 return res.json({ 
                     filename: duplicate.filename, 
-                    url: `/api/images/${duplicate.filename}`,
+                    url: `/api/getimage?fileName=${duplicate.filename}`,
                     duplicated: true,
                     message: 'Image already exists'
                 });
@@ -735,7 +807,7 @@ app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: 
         saveManifest(imagesDir, manifest);
 
         console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
-        res.json({ filename: newFilename, url: `/api/images/${newFilename}` });
+        res.json({ filename: newFilename, url: `/api/getimage?fileName=${newFilename}` });
     } catch (error) {
         console.error('[ERROR] Image processing failed:', error);
         res.status(500).json({ message: 'Image processing failed' });

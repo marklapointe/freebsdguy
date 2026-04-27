@@ -199,8 +199,8 @@ describe('API Endpoints', () => {
         expect(res.body.message).toBe('Theme dark saved');
     });
 
-    it('GET /api/images/:filename should return 404 for nonexistent image', async () => {
-        const res = await request(app).get('/api/images/nonexistent.png');
+    it('GET /api/getimage should return 404 for nonexistent image', async () => {
+        const res = await request(app).get('/api/getimage?fileName=nonexistent.png');
         expect(res.status).toBe(404);
         expect(res.body.message).toBe('Image not found');
     });

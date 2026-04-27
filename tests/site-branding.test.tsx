@@ -69,7 +69,7 @@ describe('Site Branding', () => {
         await waitFor(() => {
             const logo = screen.getByAltText('BrandingTest');
             expect(logo).toBeTruthy();
-            expect(logo.getAttribute('src')).toBe('/api/images/logo.webp');
+            expect(logo.getAttribute('src')).toBe('/api/getimage?fileName=logo.webp');
         });
 
         // Site name text should NOT be present (at least not as the main link text)

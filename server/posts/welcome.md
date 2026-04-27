@@ -15,7 +15,3 @@ This is the first post on the new MDWeb website, built with **React**, **Vite**,
 - Dynamic Theming
 - Admin mode for user management
 - Lightweight and fast
-
-![FreeBSD Logo](/api/images/freebsd-logo.png)
-
-Stay tuned for more updates on FreeBSD tips, tricks, and tutorials!
