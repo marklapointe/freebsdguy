@@ -357,7 +357,7 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
 
 // Create/Update post (Contributor or Admin)
 app.post('/api/posts', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    const { slug, title, content, summary, date } = req.body;
+    const { slug, title, content, summary, date, pinned } = req.body;
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
@@ -375,6 +375,7 @@ app.post('/api/posts', authenticate, (req: AuthenticatedRequest, res: Response) 
         content,
         summary,
         date,
+        pinned,
         author: req.user.username
     });
 

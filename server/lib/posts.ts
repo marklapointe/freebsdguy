@@ -9,6 +9,7 @@ export interface PostMetadata {
     summary: string;
     date: string;
     author: string;
+    pinned?: boolean;
     [key: string]: any;
 }
 
@@ -35,12 +36,14 @@ export const getPosts = (postsDir: string): PostMetadata[] => {
             }
             const content = fs.readFileSync(filePath, 'utf8');
             const { data, content: mdContent } = matter(content);
+            const pinned = data.pinned === true || data.pinned === 'true';
             return {
                 slug: filename.replace('.md', ''),
                 title: data.title || filename.replace('.md', ''),
                 summary: data.summary || mdContent.substring(0, 150) + '...',
                 date: data.date || '',
-                ...data
+                ...data,
+                pinned
             } as PostMetadata;
         } catch (error) {
             console.error(`Error parsing post ${filename}:`, error);
@@ -54,7 +57,13 @@ export const getPosts = (postsDir: string): PostMetadata[] => {
         }
     }).filter((p): p is PostMetadata => p !== null);
 
-    return posts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return posts.sort((a, b) => {
+        // Pinned posts first
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        // Then by date (descending)
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
 };
 
 export const getPost = (postsDir: string, slug: string): Post | null => {
@@ -66,6 +75,7 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
     const content = fs.readFileSync(filePath, 'utf8');
     try {
         const parsed = matter(content);
+        const pinned = parsed.data.pinned === true || parsed.data.pinned === 'true';
         return {
             title: parsed.data.title || slug,
             slug,
@@ -73,7 +83,8 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
             summary: parsed.data.summary || parsed.content.substring(0, 150) + '...',
             date: parsed.data.date || '',
             author: parsed.data.author || '',
-            ...parsed.data
+            ...parsed.data,
+            pinned
         };
     } catch (error) {
         console.error(`Error parsing post ${slug}:`, error);
@@ -101,22 +112,17 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
         title: cleanTitle,
         summary: cleanSummary,
         date: String(post.date || new Date().toISOString()),
-        author: String(post.author || '')
+        author: String(post.author || ''),
+        pinned: post.pinned === true
     };
 
-    // Ensure all values are strings for gray-matter stringify
-    const stringifiedData: any = {};
-    for (const [key, value] of Object.entries(frontmatter)) {
-        stringifiedData[key] = String(value);
-    }
-
     try {
-        const fileContent = matter.stringify(cleanContent, stringifiedData);
+        const fileContent = matter.stringify(cleanContent, frontmatter);
         fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), fileContent);
     } catch (error) {
         console.error(`Error saving post ${post.slug}:`, error);
         // Fallback to simple manual construction if matter.stringify fails for some reason
-        const manualContent = `---\ntitle: "${frontmatter.title.replace(/"/g, '\\"')}"\nsummary: "${frontmatter.summary.replace(/"/g, '\\"')}"\ndate: "${frontmatter.date}"\nauthor: "${frontmatter.author}"\n---\n${cleanContent}`;
+        const manualContent = `---\ntitle: "${frontmatter.title.replace(/"/g, '\\"')}"\nsummary: "${frontmatter.summary.replace(/"/g, '\\"')}"\ndate: "${frontmatter.date}"\nauthor: "${frontmatter.author}"\npinned: ${frontmatter.pinned}\n---\n${cleanContent}`;
         fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), manualContent);
     }
 };

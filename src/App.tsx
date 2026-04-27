@@ -4,7 +4,7 @@ import axios from 'axios';
 import { MdEditor, MdPreview, MdCatalog } from 'md-editor-rt';
 import 'md-editor-rt/lib/style.css';
 import 'md-editor-rt/lib/preview.css';
-import { Search, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon } from 'lucide-react';
+import { Search, Eye, LogOut, Settings, Trash2, Edit, Plus, Upload, Palette, Layout, Users, FileText, Image as ImageIcon, Copy, Sparkles, Sun, Moon, Cpu, RefreshCw, X, Server, AlertCircle, LucideIcon, Pin } from 'lucide-react';
 
 interface Post {
     slug: string;
@@ -14,6 +14,7 @@ interface Post {
     summary: string;
     content: string;
     category?: string;
+    pinned?: boolean;
 }
 
 interface ImageInfo {
@@ -208,6 +209,17 @@ const Home = () => {
     const [offset, setOffset] = useState(0);
     const [total, setTotal] = useState(0);
     const [limit] = useState(10);
+    const [theme, setTheme] = useState((localStorage.getItem('theme') as 'light' | 'dark') || 'dark');
+
+    useEffect(() => {
+        const handleThemeChanged = (e: CustomEvent) => {
+            if (e.detail && (e.detail === 'light' || e.detail === 'dark')) {
+                setTheme(e.detail);
+            }
+        };
+        window.addEventListener('themeChanged' as any, handleThemeChanged);
+        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
+    }, []);
 
     useEffect(() => {
         fetchPosts(0);
@@ -251,13 +263,20 @@ const Home = () => {
             <div className="grid gap-6">
                 {filteredPosts.map(post => (
                     <div key={post.slug} className="p-6 bg-secondary rounded-lg shadow-lg hover:shadow-xl transition border-l-4 border-accent">
-                        <h2 className="text-2xl font-bold mb-2">
+                        <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
+                            {post.pinned && <span title="Pinned Post"><Pin size={18} className="text-accent fill-accent" /></span>}
                             <Link to={`/post/${post.slug}`} className="hover:text-accent">
                                 {post.title}
                             </Link>
                         </h2>
                         <p className="opacity-70 text-sm mb-4">{new Date(post.date).toLocaleDateString()}</p>
-                        <p className="mb-4">{post.summary}</p>
+                        <div className="mb-4 prose-sm max-w-none">
+                            <MdPreview 
+                                modelValue={post.summary} 
+                                theme={theme}
+                                language="en-US"
+                            />
+                        </div>
                         <Link to={`/post/${post.slug}`} className="text-accent font-semibold hover:underline">
                             Read more →
                         </Link>
@@ -315,6 +334,7 @@ const PostDetail = () => {
                     <span>{new Date(post.date).toLocaleDateString()}</span>
                     {post.author && <span>by {post.author}</span>}
                 </div>
+
                 
                 <div className="flex flex-col lg:flex-row gap-8">
                     <div className="flex-1 min-w-0">
@@ -534,6 +554,18 @@ const PostModal = ({
                             />
                         </div>
                     </div>
+                    <div className="flex items-center gap-2 py-2">
+                        <input 
+                            id="post-pinned"
+                            type="checkbox" 
+                            className="w-4 h-4 accent-accent"
+                            checked={post.pinned || false}
+                            onChange={e => setPost({...post, pinned: e.target.checked})}
+                        />
+                        <label htmlFor="post-pinned" className="text-sm font-bold text-accent cursor-pointer flex items-center gap-1">
+                            <Pin size={14} /> Pin to Top of Home Page
+                        </label>
+                    </div>
                     <div className="space-y-1">
                         <div className="flex justify-between items-center">
                             <label htmlFor="post-summary" className="block text-xs font-bold uppercase text-accent">Summary</label>
@@ -626,8 +658,12 @@ const PostModal = ({
                                         </button>
                                     </div>
                                 </div>
-                                <div className="max-h-60 overflow-y-auto p-3 bg-bg rounded text-sm opacity-80 border border-accent border-opacity-10 whitespace-pre-wrap font-mono">
-                                    {enhancedPreview}
+                                <div className="max-h-60 overflow-y-auto p-1 bg-bg rounded text-sm border border-accent border-opacity-10">
+                                    <MdPreview 
+                                        modelValue={enhancedPreview} 
+                                        theme={theme}
+                                        language="en-US"
+                                    />
                                 </div>
                                 <p className="text-[10px] mt-2 opacity-50 italic">Review the AI-enhanced content above. Clicking 'Apply' will replace your current content.</p>
                             </div>
@@ -683,7 +719,7 @@ const PostModal = ({
     );
 };
 
-const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload }: { isOpen: boolean; images: ImageInfo[]; onSelect: (filename: string) => void; onClose: () => void; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }) => {
+const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload, onPreview }: { isOpen: boolean; images: ImageInfo[]; onSelect: (filename: string) => void; onClose: () => void; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onPreview: (img: ImageInfo) => void }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
@@ -705,14 +741,37 @@ const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload }: { isO
                     {images.map(img => (
                         <div 
                             key={img.filename} 
-                            onClick={() => { onSelect(img.filename); onClose(); }}
-                            className="group cursor-pointer rounded-xl border border-accent border-opacity-10 p-2 transition hover:border-opacity-100 hover:bg-accent hover:bg-opacity-5 relative"
+                            className="group cursor-pointer rounded-xl border border-accent border-opacity-10 p-2 transition hover:border-opacity-100 hover:bg-accent hover:bg-opacity-5 relative flex flex-col"
                         >
-                            <div className="aspect-square rounded-lg overflow-hidden bg-bg flex items-center justify-center mb-2 border border-accent border-opacity-5 group-hover:border-opacity-20">
-                                <img src={`/api/images/${img.filename}`} alt={img.originalName} className="max-h-full max-w-full object-contain transition-transform group-hover:scale-105" />
+                            <div 
+                                onClick={() => { onSelect(img.filename); onClose(); }}
+                                className="aspect-square rounded-lg overflow-hidden bg-bg flex items-center justify-center mb-2 border border-accent border-opacity-5 group-hover:border-opacity-20 relative"
+                            >
+                                <img 
+                                    src={`/api/images/${img.filename}`} 
+                                    alt={img.originalName} 
+                                    className="max-h-full max-w-full object-contain transition-transform group-hover:scale-105" 
+                                    onError={(e) => {
+                                        e.currentTarget.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%233a297a%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%222%22%20ry%3D%222%22%3E%3C%2Frect%3E%3Ccircle%20cx%3D%228.5%22%20cy%3D%228.5%22%20r%3D%221.5%22%3E%3C%2Fcircle%3E%3Cpolyline%20points%3D%2221%2015%2016%2010%205%2021%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E';
+                                        e.currentTarget.className += ' opacity-40';
+                                    }}
+                                />
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all flex items-center justify-center">
+                                    <span className="bg-accent text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg">
+                                        <Plus size={16} />
+                                    </span>
+                                </div>
                             </div>
-                            <p className="text-[10px] font-medium truncate opacity-70 group-hover:opacity-100" title={img.originalName}>{img.originalName}</p>
-                            <div className="absolute inset-0 bg-accent bg-opacity-0 group-hover:bg-opacity-5 transition-all rounded-xl pointer-events-none"></div>
+                            <div className="flex items-center justify-between gap-1">
+                                <p className="text-[10px] font-medium truncate opacity-70 group-hover:opacity-100 flex-1" title={img.originalName}>{img.originalName}</p>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); onPreview(img); }}
+                                    className="p-1 hover:bg-accent hover:bg-opacity-20 rounded text-accent opacity-0 group-hover:opacity-100 transition"
+                                    title="Preview"
+                                >
+                                    <Eye size={12} />
+                                </button>
+                            </div>
                         </div>
                     ))}
                     {images.length === 0 && (
@@ -725,6 +784,27 @@ const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload }: { isO
                 </div>
                 <div className="p-6 border-t border-accent border-opacity-20 flex justify-end bg-bg bg-opacity-50">
                     <button onClick={onClose} className="p-3 px-8 bg-secondary border border-accent border-opacity-30 rounded-lg font-bold hover:bg-opacity-80 transition">Close</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ImagePreviewModal = ({ image, onClose }: { image: ImageInfo | null; onClose: () => void }) => {
+    if (!image) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-[200] p-4 backdrop-blur-md cursor-zoom-out" onClick={onClose}>
+            <div className="relative max-w-5xl max-h-full flex flex-col items-center" onClick={e => e.stopPropagation()}>
+                <button onClick={onClose} className="absolute -top-12 right-0 p-2 text-white hover:text-accent transition bg-black bg-opacity-50 rounded-full"><X size={32} /></button>
+                <div className="bg-bg p-2 rounded-xl shadow-2xl border border-accent border-opacity-20">
+                    <img src={`/api/images/${image.filename}`} alt={image.originalName} className="max-w-full max-h-[80vh] rounded-lg object-contain" />
+                </div>
+                <div className="mt-4 p-4 bg-secondary bg-opacity-80 backdrop-blur-md rounded-xl border border-accent border-opacity-20 text-center min-w-[300px]">
+                    <h3 className="text-xl font-bold text-white mb-1">{image.originalName}</h3>
+                    <div className="flex items-center justify-center gap-4 text-xs text-gray-400">
+                        <span>{image.filename}</span>
+                        {image.size && <span>• {(image.size / 1024).toFixed(1)} KB</span>}
+                    </div>
                 </div>
             </div>
         </div>
@@ -750,6 +830,8 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     const [imagesPerPage, setImagesPerPage] = useState('30');
     const [totalImages, setTotalImages] = useState(0);
     const [showLogoPicker, setShowLogoPicker] = useState(false);
+    const [pickerImages, setPickerImages] = useState<ImageInfo[]>([]);
+    const [previewImage, setPreviewImage] = useState<ImageInfo | null>(null);
     const [config, setConfig] = useState<any>({
         siteName: siteName,
         siteLogo: siteLogo || 'logo.webp',
@@ -824,18 +906,30 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
 
     useEffect(() => {
         if (user && user.role === 'admin') {
-            fetchUsers();
-            fetchThemes();
-            fetchConfig();
-            fetchConfigStatus();
+            fetchUsers().catch(err => console.error('Failed to fetch users:', err));
+            fetchThemes().catch(err => console.error('Failed to fetch themes:', err));
+            fetchConfig().catch(err => console.error('Failed to fetch config:', err));
+            fetchConfigStatus().catch(err => console.error('Failed to fetch config status:', err));
         }
-        fetchPosts();
-        fetchImages();
+        fetchPosts().catch(err => console.error('Failed to fetch posts:', err));
+        fetchImages().catch(err => console.error('Failed to fetch images:', err));
     }, [user]);
 
     useEffect(() => {
-        if (user) fetchImages();
+        if (user) fetchImages().catch(err => console.error('Failed to fetch paged images:', err));
     }, [imagePage, imagesPerPage]);
+
+    useEffect(() => {
+        if (showLogoPicker) {
+            // When logo picker opens, fetch ALL images to ensure the user can find what they need
+            // regardless of the current pagination state in the main images tab.
+            api.get('/admin/images?limit=all').then(res => {
+                setPickerImages(res.data.images);
+            }).catch(err => {
+                console.error('Failed to fetch images for logo picker:', err);
+            });
+        }
+    }, [showLogoPicker]);
 
     const fetchUsers = () => api.get('/admin/users').then(res => { setUsers(res.data); return res; });
     const fetchPosts = () => api.get('/posts').then(res => { setPosts(res.data); return res; });
@@ -851,16 +945,15 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     };
     const fetchConfig = () => api.get('/config').then(res => {
         const data = res.data;
-        // Ensure aiConfig exists and has defaults for the UI
-        if (!data.aiConfig) {
-            data.aiConfig = {
-                enabled: false,
-                provider: 'ollama',
-                baseUrl: 'http://localhost:11434',
-                apiKey: '',
-                modelId: 'llama3'
-            };
-        }
+        // Ensure aiConfig exists and has ALL fields with defaults for the UI
+        const defaultAiConfig = {
+            enabled: false,
+            provider: 'ollama',
+            baseUrl: 'http://localhost:11434',
+            apiKey: '',
+            modelId: 'llama3'
+        };
+        data.aiConfig = { ...defaultAiConfig, ...data.aiConfig };
         setConfig(data);
         if (data.service?.port) {
             localStorage.setItem('lastPort', data.service.port.toString());
@@ -950,7 +1043,15 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
 
     const handleDeleteImage = (filename: string) => {
         showConfirm(`Are you sure you want to delete image "${filename}"? This action cannot be undone.`, () => {
-            api.delete(`/admin/images/${filename}`).then(fetchImages);
+            api.delete(`/admin/images/${filename}`).then(() => {
+                fetchImages();
+                if (showLogoPicker) {
+                    api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
+                }
+                if (config.siteLogo === filename) {
+                    setConfig((prev: any) => ({...prev, siteLogo: ''}));
+                }
+            });
         }, 'Delete Image');
     };
 
@@ -1009,6 +1110,12 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                 fetchImages();
             } else {
                 setImagePage(1);
+            }
+
+            if (showLogoPicker) {
+                api.get('/admin/images?limit=all').then(res => {
+                    setPickerImages(res.data.images);
+                }).catch(err => console.error('Failed to refresh picker images:', err));
             }
             
             if (failCount === 0) {
@@ -1168,9 +1275,12 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                         <div className="space-y-4">
                             {posts.map(post => (
                                 <div key={post.slug} className="flex justify-between items-center p-4 bg-bg rounded border border-accent border-opacity-20">
-                                    <div>
-                                        <h3 className="font-bold">{post.title}</h3>
-                                        <p className="text-xs opacity-70">{post.slug} • {post.date}</p>
+                                    <div className="flex items-center gap-3">
+                                        {post.pinned && <span title="Pinned Post"><Pin size={16} className="text-accent fill-accent" /></span>}
+                                        <div>
+                                            <h3 className="font-bold">{post.title}</h3>
+                                            <p className="text-xs opacity-70">{post.slug} • {post.date}</p>
+                                        </div>
                                     </div>
                                     <div className="flex gap-2">
                                         <button onClick={() => {
@@ -1214,10 +1324,16 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
 
                 <ImagePickerModal 
                     isOpen={showLogoPicker}
-                    images={images}
-                    onSelect={(filename) => setConfig({...config, siteLogo: filename})}
+                    images={pickerImages}
+                    onSelect={(filename) => setConfig((prev: any) => ({...prev, siteLogo: filename}))}
                     onClose={() => setShowLogoPicker(false)}
                     onUpload={handleFileUpload}
+                    onPreview={(img) => setPreviewImage(img)}
+                />
+
+                <ImagePreviewModal 
+                    image={previewImage}
+                    onClose={() => setPreviewImage(null)}
                 />
 
                 {activeTab === 'appearance' && (
@@ -1228,7 +1344,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                 {themes.map(t => (
                                     <button 
                                         key={t}
-                                        onClick={() => setConfig({...config, currentTheme: t})}
+                                        onClick={() => setConfig((prev: any) => ({...prev, currentTheme: t}))}
                                         className={`p-4 rounded-lg border-2 transition ${config.currentTheme === t ? 'border-accent bg-accent bg-opacity-10' : 'border-accent border-opacity-20 hover:border-opacity-100'}`}
                                     >
                                         {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -1279,7 +1395,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                 <input 
                                     id="site-name"
                                     type="text" className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                    value={config.siteName} onChange={e => setConfig({...config, siteName: e.target.value})}
+                                    value={config.siteName} onChange={e => setConfig((prev: any) => ({...prev, siteName: e.target.value}))}
                                     autoComplete="off"
                                 />
                             </div>
@@ -1291,7 +1407,15 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                         <div className="flex items-center gap-3 truncate">
                                             {config.siteLogo ? (
                                                 <div className="h-8 w-8 rounded overflow-hidden bg-secondary flex items-center justify-center border border-accent border-opacity-20">
-                                                    <img src={`/api/images/${config.siteLogo}`} className="max-h-full max-w-full object-contain" alt="Logo preview" />
+                                                    <img 
+                                                        src={`/api/images/${config.siteLogo}`} 
+                                                        className="max-h-full max-w-full object-contain" 
+                                                        alt="Logo preview" 
+                                                        onError={(e) => {
+                                                            e.currentTarget.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%233a297a%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%222%22%20ry%3D%222%22%3E%3C%2Frect%3E%3Ccircle%20cx%3D%228.5%22%20cy%3D%228.5%22%20r%3D%221.5%22%3E%3C%2Fcircle%3E%3Cpolyline%20points%3D%2221%2015%2016%2010%205%2021%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E';
+                                                            e.currentTarget.className += ' opacity-40 p-1';
+                                                        }}
+                                                    />
                                                 </div>
                                             ) : (
                                                 <div className="h-8 w-8 rounded bg-accent bg-opacity-10 flex items-center justify-center border border-accent border-opacity-20 text-accent">
@@ -1301,7 +1425,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                             <span className="truncate text-sm font-medium">{config.siteLogo || 'No logo selected'}</span>
                                         </div>
                                         <button 
-                                            onClick={() => setConfig({...config, siteLogo: ''})}
+                                            onClick={() => setConfig((prev: any) => ({...prev, siteLogo: ''}))}
                                             className={`p-1 hover:bg-red-500 hover:bg-opacity-10 rounded text-red-500 transition-opacity ${config.siteLogo ? 'opacity-100' : 'opacity-0'}`}
                                             title="Clear logo"
                                         >
@@ -1324,7 +1448,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <input 
                                         id="pagination"
                                         type="number" className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50"
-                                        value={config.pagination} onChange={e => setConfig({...config, pagination: Number(e.target.value)})}
+                                        value={config.pagination} onChange={e => setConfig((prev: any) => ({...prev, pagination: Number(e.target.value)}))}
                                         autoComplete="off"
                                     />
                                 </div>
@@ -1333,7 +1457,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <select 
                                         id="search-placement"
                                         className="w-full p-3 bg-bg border border-accent rounded text-text"
-                                        value={config.searchPlacement} onChange={e => setConfig({...config, searchPlacement: e.target.value})}
+                                        value={config.searchPlacement} onChange={e => setConfig((prev: any) => ({...prev, searchPlacement: e.target.value}))}
                                     >
                                         <option value="top" className="bg-secondary text-text">Top</option>
                                         <option value="bottom" className="bg-secondary text-text">Bottom</option>
@@ -1349,7 +1473,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <select 
                                         id="sort-by"
                                         className="w-full p-3 bg-bg border border-accent rounded text-text"
-                                        value={config.sortBy} onChange={e => setConfig({...config, sortBy: e.target.value})}
+                                        value={config.sortBy} onChange={e => setConfig((prev: any) => ({...prev, sortBy: e.target.value}))}
                                     >
                                         <option value="date" className="bg-secondary text-text">Date</option>
                                         <option value="title" className="bg-secondary text-text">Title</option>
@@ -1361,7 +1485,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <select 
                                         id="sort-order"
                                         className="w-full p-3 bg-bg border border-accent rounded text-text"
-                                        value={config.sortOrder} onChange={e => setConfig({...config, sortOrder: e.target.value})}
+                                        value={config.sortOrder} onChange={e => setConfig((prev: any) => ({...prev, sortOrder: e.target.value}))}
                                     >
                                         <option value="desc" className="bg-secondary text-text">Descending</option>
                                         <option value="asc" className="bg-secondary text-text">Ascending</option>
@@ -1412,15 +1536,15 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                                 ? { baseUrl: 'http://localhost:11434', modelId: 'llama3' }
                                                 : { baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-3.5-turbo' };
                                             
-                                            setConfig({
-                                                ...config, 
+                                            setConfig((prev: any) => ({
+                                                ...prev, 
                                                 aiConfig: {
-                                                    ...(config.aiConfig || { baseUrl: '', apiKey: '', modelId: '', enabled: true }), 
+                                                    ...(prev.aiConfig || { baseUrl: '', apiKey: '', modelId: '', enabled: true }), 
                                                     provider: newProvider as 'ollama' | 'openai',
                                                     baseUrl: defaults.baseUrl,
                                                     modelId: defaults.modelId
                                                 }
-                                            });
+                                            }));
                                         }}
                                     >
                                         <option value="ollama">Ollama (Local)</option>
@@ -1648,11 +1772,17 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                             {images.map(img => (
                                 <div key={img.filename} className="group relative bg-bg rounded overflow-hidden border border-accent border-opacity-20 aspect-square">
-                                    <img src={`/api/images/${img.filename}`} className="w-full h-full object-cover" />
+                                    <img 
+                                        src={`/api/images/${img.filename}`} 
+                                        className="w-full h-full object-cover transition-transform group-hover:scale-105" 
+                                        onError={(e) => {
+                                            e.currentTarget.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%233a297a%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%222%22%20ry%3D%222%22%3E%3C%2Frect%3E%3Ccircle%20cx%3D%228.5%22%20cy%3D%228.5%22%20r%3D%221.5%22%3E%3C%2Fcircle%3E%3Cpolyline%20points%3D%2221%2015%2016%2010%205%2021%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E';
+                                            e.currentTarget.className += ' opacity-40 p-8';
+                                        }}
+                                    />
                                     <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center p-2 text-center gap-2">
                                         <p className="text-[10px] text-white font-bold truncate w-full px-1" title={img.originalName}>{img.originalName}</p>
-                                        <p className="text-[8px] text-white opacity-60 truncate w-full px-1">{img.filename}</p>
-                                        <div className="flex gap-2">
+                                        <div className="flex flex-wrap justify-center gap-1">
                                             <button 
                                                 onClick={() => {
                                                     navigator.clipboard.writeText(`![${img.originalName}](/api/images/${img.filename})`);
@@ -1662,6 +1792,13 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                                 title="Copy Markdown Link"
                                             >
                                                 <Copy size={10} /> MD
+                                            </button>
+                                            <button 
+                                                onClick={() => setPreviewImage(img)}
+                                                className="bg-secondary text-white p-1 px-2 rounded text-[10px] font-bold flex items-center gap-1 border border-accent border-opacity-30"
+                                                title="Preview"
+                                            >
+                                                <Eye size={10} /> View
                                             </button>
                                             {editingPost && (
                                                 <button 
