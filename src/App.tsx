@@ -289,14 +289,23 @@ const PostDetail = () => {
     const [post, setPost] = useState<Post | null>(null);
     const [id] = useState('preview-only');
     const scrollElement = document.documentElement;
+    const [theme, setTheme] = useState((localStorage.getItem('theme') as 'light' | 'dark') || 'dark');
 
     useEffect(() => {
         api.get(`/posts/${slug}`).then(res => setPost(res.data));
     }, [slug]);
 
-    if (!post) return <div className="p-8 text-center text-primary">Loading...</div>;
+    useEffect(() => {
+        const handleThemeChanged = (e: CustomEvent) => {
+            if (e.detail && (e.detail === 'light' || e.detail === 'dark')) {
+                setTheme(e.detail);
+            }
+        };
+        window.addEventListener('themeChanged' as any, handleThemeChanged);
+        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
+    }, []);
 
-    const theme = (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
+    if (!post) return <div className="p-8 text-center text-primary">Loading...</div>;
 
     return (
         <div className="container mx-auto p-4 max-w-[90%] bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden border border-accent border-opacity-10">
