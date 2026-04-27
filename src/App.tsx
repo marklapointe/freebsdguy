@@ -519,8 +519,8 @@ const PostModal = ({
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
-            <div className="bg-secondary p-6 md:p-8 rounded-xl shadow-2xl border border-accent border-opacity-30 w-full max-w-5xl max-h-[95vh] overflow-y-auto text-text">
-                <div className="flex justify-between items-center mb-6 border-b border-accent border-opacity-20 pb-4">
+            <div className="bg-secondary rounded-xl shadow-2xl border border-accent border-opacity-30 w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden text-text">
+                <div className="flex justify-between items-center p-6 md:p-8 border-b border-accent border-opacity-20 pb-4">
                     <h2 className="text-2xl font-bold flex items-center gap-2">
                         <FileText className="text-accent" /> {post.slug ? 'Edit Post' : 'New Post'}
                     </h2>
@@ -529,31 +529,32 @@ const PostModal = ({
                     </button>
                 </div>
 
-                <form onSubmit={onSave} className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-1">
-                            <label htmlFor="post-slug" className="block text-xs font-bold uppercase text-accent">Slug (URL-friendly)</label>
-                            <input 
-                                id="post-slug"
-                                type="text" placeholder="Slug (URL-friendly)" 
-                                className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50 focus:ring-1 focus:ring-accent outline-none"
-                                value={post.slug} onChange={e => setPost({...post, slug: e.target.value})}
-                                required 
-                                autoComplete="off"
-                            />
+                <form onSubmit={onSave} className="flex-1 flex flex-col overflow-hidden">
+                    <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1">
+                                <label htmlFor="post-slug" className="block text-xs font-bold uppercase text-accent">Slug (URL-friendly)</label>
+                                <input 
+                                    id="post-slug"
+                                    type="text" placeholder="Slug (URL-friendly)" 
+                                    className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50 focus:ring-1 focus:ring-accent outline-none"
+                                    value={post.slug} onChange={e => setPost({...post, slug: e.target.value})}
+                                    required 
+                                    autoComplete="off"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label htmlFor="post-title" className="block text-xs font-bold uppercase text-accent">Title</label>
+                                <input 
+                                    id="post-title"
+                                    type="text" placeholder="Title" 
+                                    className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50 focus:ring-1 focus:ring-accent outline-none"
+                                    value={post.title} onChange={e => setPost({...post, title: e.target.value})}
+                                    required 
+                                    autoComplete="off"
+                                />
+                            </div>
                         </div>
-                        <div className="space-y-1">
-                            <label htmlFor="post-title" className="block text-xs font-bold uppercase text-accent">Title</label>
-                            <input 
-                                id="post-title"
-                                type="text" placeholder="Title" 
-                                className="w-full p-3 bg-bg border border-accent rounded text-text placeholder-text placeholder-opacity-50 focus:ring-1 focus:ring-accent outline-none"
-                                value={post.title} onChange={e => setPost({...post, title: e.target.value})}
-                                required 
-                                autoComplete="off"
-                            />
-                        </div>
-                    </div>
                     <div className="flex items-center gap-2 py-2">
                         <input 
                             id="post-pinned"
@@ -703,13 +704,12 @@ const PostModal = ({
                                 'pageFullscreen',
                                 'fullscreen',
                                 'preview',
-                                'htmlPreview',
-                                'catalog',
                                 'github'
                             ]}
                         />
                     </div>
-                    <div className="flex gap-4 pt-4 border-t border-accent border-opacity-20">
+                </div>
+                <div className="p-6 md:p-8 border-t border-accent border-opacity-20 flex gap-4 bg-bg bg-opacity-30">
                         <button type="submit" className="bg-accent p-3 px-8 rounded font-bold hover:bg-opacity-80 transition text-white shadow-lg">Save Post</button>
                         <button type="button" onClick={onCancel} className="p-3 px-8 border border-accent rounded font-bold hover:bg-accent hover:bg-opacity-10 transition">Cancel</button>
                     </div>
