@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { BrowserRouter } from 'react-router-dom';
 
-// Mock axios/api
 vi.mock('axios', () => {
     const mockAxiosInstance = {
         interceptors: {
@@ -22,7 +20,20 @@ vi.mock('axios', () => {
     };
 });
 
-import App, { api } from '../src/App';
+vi.mock('../src/lib/api', () => ({
+    api: {
+        get: vi.fn(),
+        post: vi.fn(),
+        interceptors: {
+            request: { use: vi.fn(), eject: vi.fn() },
+            response: { use: vi.fn(), eject: vi.fn() }
+        }
+    },
+    applyTheme: vi.fn()
+}));
+
+import App from '../src/App';
+import { api } from '../src/lib/api';
 
 const commonMocks = (url: string) => {
     if (url === '/config') return Promise.resolve({ data: { siteName: 'BrandingTest', currentTheme: 'dark' } });

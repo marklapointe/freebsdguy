@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-// Mock axios before importing App
 vi.mock('axios', () => {
     const mockAxiosInstance = {
         interceptors: {
@@ -22,7 +21,20 @@ vi.mock('axios', () => {
     };
 });
 
-import App, { api } from '../src/App';
+vi.mock('../src/lib/api', () => ({
+    api: {
+        get: vi.fn(),
+        post: vi.fn(),
+        interceptors: {
+            request: { use: vi.fn(), eject: vi.fn() },
+            response: { use: vi.fn(), eject: vi.fn() }
+        }
+    },
+    applyTheme: vi.fn()
+}));
+
+import App from '../src/App';
+import { api } from '../src/lib/api';
 
 const commonMocks = (url: string) => {
     if (url.startsWith('/posts?')) return Promise.resolve({ data: { posts: [], total: 0, limit: 10, offset: 0 } });
