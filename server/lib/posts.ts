@@ -17,7 +17,12 @@ export interface Post extends PostMetadata {
     content: string;
 }
 
-export const getPosts = (postsDir: string): PostMetadata[] => {
+export interface GetPostsOptions {
+    sortBy?: 'title' | 'date' | 'author';
+    sortOrder?: 'asc' | 'desc';
+}
+
+export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetadata[] => {
     if (!fs.existsSync(postsDir)) {
         try {
             fs.mkdirSync(postsDir, { recursive: true });
@@ -26,6 +31,9 @@ export const getPosts = (postsDir: string): PostMetadata[] => {
         }
         return [];
     }
+
+    const sortBy = options?.sortBy || 'date';
+    const sortOrder = options?.sortOrder || 'desc';
 
     const files = fs.readdirSync(postsDir);
     const posts = files.filter(f => f.endsWith('.md')).map(filename => {
@@ -42,6 +50,7 @@ export const getPosts = (postsDir: string): PostMetadata[] => {
                 title: data.title || filename.replace('.md', ''),
                 summary: data.summary || mdContent.substring(0, 150) + '...',
                 date: data.date || '',
+                author: data.author || '',
                 ...data,
                 pinned
             } as PostMetadata;
@@ -53,16 +62,38 @@ export const getPosts = (postsDir: string): PostMetadata[] => {
                 summary: 'This post could not be loaded due to a parsing error.',
                 date: '',
                 author: 'system'
-            } as any;
+            } as PostMetadata;
         }
     }).filter((p): p is PostMetadata => p !== null);
 
     return posts.sort((a, b) => {
-        // Pinned posts first
+        // Pinned posts always first
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
-        // Then by date (descending)
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
+
+        // Then sort by configured field
+        let aVal: string | number = '';
+        let bVal: string | number = '';
+
+        switch (sortBy) {
+            case 'title':
+                aVal = a.title.toLowerCase();
+                bVal = b.title.toLowerCase();
+                break;
+            case 'author':
+                aVal = a.author.toLowerCase();
+                bVal = b.author.toLowerCase();
+                break;
+            case 'date':
+            default:
+                aVal = new Date(a.date).getTime();
+                bVal = new Date(b.date).getTime();
+                break;
+        }
+
+        if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+        return 0;
     });
 };
 

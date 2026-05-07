@@ -95,6 +95,7 @@ app.use(express.json());
 app.use('/api/', apiLimiter);
 
 // Extend Request to include user and file
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface AuthenticatedRequest extends Request {
     user?: any;
     file?: any;
@@ -224,7 +225,10 @@ app.get('/api/posts', (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
-    const posts = getPosts(postsDir);
+    const posts = getPosts(postsDir, {
+        sortBy: config.sortBy as 'title' | 'date' | 'author' || 'date',
+        sortOrder: config.sortOrder as 'asc' | 'desc' || 'desc'
+    });
 
     const limit = parseInt(req.query.limit as string);
     const offset = parseInt(req.query.offset as string);

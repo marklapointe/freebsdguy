@@ -17,14 +17,17 @@ describe('Image Deduplication', () => {
     const imagesDir = path.join(postsDir, 'images');
     const manifestPath = path.join(imagesDir, 'metadata.json');
 
-    beforeEach(() => {
+    beforeEach(async () => {
         adminToken = jwt.sign({ username: 'admin', role: 'admin' }, SECRET);
-        // Ensure clean state
+        await request(app)
+            .post('/api/admin/config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ security: { disableImages: false } });
         if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
         if (fs.existsSync(imagesDir)) {
             const files = fs.readdirSync(imagesDir);
             for (const file of files) {
-                if (file !== '.keep') { // keep .keep if it exists
+                if (file !== '.keep') {
                     try {
                         fs.unlinkSync(path.join(imagesDir, file));
                     } catch (e) {}
