@@ -12,7 +12,7 @@ import { User, AlertType, Post, ImageInfo } from './types';
 import {
     Eye, Trash2, Edit, Plus, Upload, Palette,
     Users, FileText, Image as ImageIcon, Cpu,
-    Server, Pin, CheckSquare, Square
+    Server, Pin, CheckSquare, Square, RefreshCw
 } from 'lucide-react';
 
 const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, showConfirm }: {
@@ -50,6 +50,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [enhancedPreview, setEnhancedPreview] = useState<string | null>(null);
+    const [modelsList, setModelsList] = useState<string[]>([]);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
 
     const themeLabelMap: Record<string, string> = {
@@ -131,9 +132,18 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
         const provider = p || config.aiConfig?.provider || 'ollama';
         const baseUrl = b || config.aiConfig?.baseUrl || (provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1');
         const apiKey = k !== undefined ? k : (config.aiConfig?.apiKey || '');
-        if (provider !== 'ollama' || !baseUrl) return;
+        if (provider !== 'ollama' || !baseUrl) {
+            setModelsList([]);
+            return;
+        }
         api.get(`/ai/models?provider=${provider}&baseUrl=${encodeURIComponent(baseUrl)}&apiKey=${encodeURIComponent(apiKey)}`)
-            .catch(_err => showAlert('Could not connect to Ollama to fetch models. Please check your Base URL.', 'Connection Error'));
+            .then(res => {
+                setModelsList(res.data || []);
+            })
+            .catch(_err => {
+                setModelsList([]);
+                showAlert('Could not connect to Ollama to fetch models. Please check your Base URL.', 'Connection Error');
+            });
     };
 
     useEffect(() => {
@@ -365,9 +375,9 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                         <img src={`/api/getimage?fileName=${img.filename}`} alt={img.originalName} className="w-full h-32 object-cover rounded" onError={(e: any) => { e.target.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%3E%3C/svg%3E'; e.target.className += ' opacity-30'; }} />
                                         <p className="text-xs truncate mt-2">{img.originalName}</p>
                                         {!isSelectionMode && (
-                                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center gap-2 rounded">
-                                                <button onClick={() => setPreviewImage(img)} className="p-2 bg-white bg-opacity-80 rounded-full opacity-0 group-hover:opacity-100 transition"><Eye size={18} /></button>
-                                                <button onClick={() => handleDeleteImage(img.filename)} className="p-2 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition"><Trash2 size={18} /></button>
+                                            <div className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto pointer-events-none transition-all flex items-center justify-center gap-2 rounded">
+                                                <button onClick={() => setPreviewImage(img)} className="p-2 bg-accent text-white rounded-full z-20"><Eye size={18} /></button>
+                                                <button onClick={() => handleDeleteImage(img.filename)} className="p-2 bg-red-500 text-white rounded-full z-20"><Trash2 size={18} /></button>
                                             </div>
                                         )}
                                     </div>
@@ -463,7 +473,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">Provider</label>
-                                    <select value={config.aiConfig?.provider || 'ollama'} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, provider: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text">
+                                    <select value={config.aiConfig?.provider || 'ollama'} onChange={e => { setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, provider: e.target.value } })); if (e.target.value === 'openai') setModelsList([]); }} className="w-full p-3 bg-bg border border-accent rounded text-text">
                                         <option value="ollama">Ollama (Local)</option>
                                         <option value="openai">OpenAI</option>
                                     </select>
@@ -473,8 +483,30 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <input type="text" value={config.aiConfig?.baseUrl || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, baseUrl: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" placeholder="http://localhost:11434" />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold mb-2">Model ID</label>
-                                    <input type="text" value={config.aiConfig?.modelId || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, modelId: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" placeholder="llama3" />
+                                    <label className="block text-sm font-bold mb-2">
+                                        Model ID
+                                        {config.aiConfig?.provider === 'ollama' && (
+                                            <button onClick={() => fetchAIModels()} className="ml-2 p-1 hover:bg-accent hover:bg-opacity-20 rounded transition" title="Refresh models">
+                                                <RefreshCw className="w-4 h-4 inline" />
+                                            </button>
+                                        )}
+                                    </label>
+                                    {config.aiConfig?.provider === 'ollama' ? (
+                                        modelsList.length > 0 ? (
+                                            <select value={config.aiConfig?.modelId || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, modelId: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text">
+                                                <option value="">Select a model...</option>
+                                                {modelsList.map(model => (
+                                                    <option key={model} value={model}>{model}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <input type="text" value={config.aiConfig?.modelId || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, modelId: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" placeholder="No models found - enter manually" />
+                                            </div>
+                                        )
+                                    ) : (
+                                        <input type="text" value={config.aiConfig?.modelId || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, modelId: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" placeholder="gpt-4, gpt-3.5-turbo, etc." />
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">API Key (for OpenAI)</label>
