@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
 import { api } from '../lib/api';

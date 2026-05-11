@@ -25,14 +25,11 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     showConfirm: (msg: string, onConfirm: () => void, title?: string) => void;
 }) => {
     const [activeTab, setActiveTab] = useState('posts');
-    const [isDragging, setIsDragging] = useState(false);
     const [users, setUsers] = useState<any[]>([]);
     const [posts, setPosts] = useState<Post[]>([]);
-    const [themes, setThemes] = useState<string[]>([]);
     const [images, setImages] = useState<ImageInfo[]>([]);
-    const [imagePage, setImagePage] = useState(1);
-    const [imagesPerPage, setImagesPerPage] = useState('30');
-    const [totalImages, setTotalImages] = useState(0);
+    const imagePage = 1;
+    const imagesPerPage: string = '30';
     const [showLogoPicker, setShowLogoPicker] = useState(false);
     const [pickerImages, setPickerImages] = useState<ImageInfo[]>([]);
     const [previewImage, setPreviewImage] = useState<ImageInfo | null>(null);
@@ -49,13 +46,10 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
         aiConfig: { provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'llama3', enabled: true },
         service: { port: 3001 }
     });
-    const [isWritable, setIsWritable] = useState(true);
     const [editingPost, setEditingPost] = useState<any>(null);
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [enhancedPreview, setEnhancedPreview] = useState<string | null>(null);
-    const [availableModels, setAvailableModels] = useState<string[]>([]);
-    const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
 
     const themeLabelMap: Record<string, string> = {
@@ -105,10 +99,6 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
     }, [user]);
 
     useEffect(() => {
-        if (user) fetchImages().catch(err => console.error('Failed to fetch paged images:', err));
-    }, [imagePage, imagesPerPage]);
-
-    useEffect(() => {
         if (showLogoPicker) {
             api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
         }
@@ -116,13 +106,12 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
 
     const fetchUsers = () => api.get('/admin/users').then(res => { setUsers(res.data); return res; });
     const fetchPosts = () => api.get('/posts').then(res => { setPosts(res.data); return res; });
-    const fetchThemes = () => api.get('/admin/themes').then(res => { setThemes(res.data); return res; });
+    const fetchThemes = () => api.get('/admin/themes').then(res => { return res; });
     const fetchImages = () => {
         const limit = imagesPerPage;
         const offset = (imagePage - 1) * (limit === 'all' ? 0 : parseInt(limit));
         return api.get(`/admin/images?limit=${limit}&offset=${offset}`).then(res => {
             setImages(res.data.images);
-            setTotalImages(res.data.total);
             return res;
         });
     };
@@ -136,18 +125,15 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
         if (data.service?.port) localStorage.setItem('lastPort', data.service.port.toString());
         return res;
     });
-    const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { setIsWritable(res.data.isWritable); return res; });
+    const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { return res; });
 
     const fetchAIModels = (p?: string, b?: string, k?: string) => {
         const provider = p || config.aiConfig?.provider || 'ollama';
         const baseUrl = b || config.aiConfig?.baseUrl || (provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1');
         const apiKey = k !== undefined ? k : (config.aiConfig?.apiKey || '');
         if (provider !== 'ollama' || !baseUrl) return;
-        setIsLoadingModels(true);
         api.get(`/ai/models?provider=${provider}&baseUrl=${encodeURIComponent(baseUrl)}&apiKey=${encodeURIComponent(apiKey)}`)
-            .then(res => setAvailableModels(res.data))
-            .catch(err => showAlert('Could not connect to Ollama to fetch models. Please check your Base URL.', 'Connection Error'))
-            .finally(() => setIsLoadingModels(false));
+            .catch(_err => showAlert('Could not connect to Ollama to fetch models. Please check your Base URL.', 'Connection Error'));
     };
 
     useEffect(() => {
@@ -286,7 +272,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
         const file = files[0];
         const formData = new FormData();
         formData.append('image', file);
-        api.post('/admin/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => {
+        api.post('/admin/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(_res => {
             showAlert('Image uploaded successfully!', 'Success');
             fetchImages();
             if (showLogoPicker) api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));

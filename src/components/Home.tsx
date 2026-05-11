@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Plus, Pin } from 'lucide-react';
 import { MdPreview } from 'md-editor-rt';
-import { api, applyTheme } from '../lib/api';
+import { api } from '../lib/api';
 import { Post } from '../types';
 
 export const Home = () => {

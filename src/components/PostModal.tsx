@@ -1,4 +1,3 @@
-import React from 'react';
 import { X, FileText, Pin, Sparkles } from 'lucide-react';
 import { MdEditor, MdPreview } from 'md-editor-rt';
 
