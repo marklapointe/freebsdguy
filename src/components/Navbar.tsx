@@ -13,6 +13,13 @@ interface NavbarProps {
 
 export const Navbar = ({ user, setUser, siteName, siteLogo }: NavbarProps) => {
     const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+
+    useEffect(() => {
+        if (siteName) {
+            document.title = siteName;
+        }
+    }, [siteName]);
+
     useEffect(() => {
         const syncTheme = async () => {
             const localTheme = localStorage.getItem('theme');
