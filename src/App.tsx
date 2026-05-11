@@ -355,7 +355,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                         </div>
                     )}
                     {activeTab === 'images' && (
-                        <div>
+                        <div className="max-w-3xl">
                             <div className="flex justify-between items-center mb-6">
                                 <h1 className="text-3xl font-bold">Images</h1>
                                 <div className="flex gap-2">
@@ -364,7 +364,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                     <label className="bg-accent text-white px-4 py-2 rounded font-bold cursor-pointer flex items-center gap-2"><Upload size={18} /> Upload<input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} /></label>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-4 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 {images.map(img => (
                                     <div key={img.filename} className={`bg-secondary rounded-lg border border-accent border-opacity-20 p-2 relative group ${isSelectionMode ? 'cursor-pointer' : ''}`}>
                                         {isSelectionMode && (
@@ -372,7 +372,7 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                                 {selectedImages.has(img.filename) ? <CheckSquare size={20} className="text-accent" /> : <Square size={20} />}
                                             </button>
                                         )}
-                                        <img src={`/api/getimage?fileName=${img.filename}`} alt={img.originalName} className="w-full h-32 object-cover rounded" onError={(e: any) => { e.target.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%3E%3C/svg%3E'; e.target.className += ' opacity-30'; }} />
+                                        <img src={`/api/getimage?fileName=${img.filename}`} alt={img.originalName} className="w-full h-32 object-contain rounded" onError={(e: any) => { e.target.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%3E%3C/svg%3E'; e.target.className += ' opacity-30'; }} />
                                         <p className="text-xs truncate mt-2">{img.originalName}</p>
                                         {!isSelectionMode && (
                                             <div className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto pointer-events-none transition-all flex items-center justify-center gap-2 rounded">
@@ -578,7 +578,7 @@ function App() {
     return (
         <Router>
             <div className="min-h-screen bg-bg text-text">
-                <Navbar user={user} setUser={setUser} siteName={siteName} siteLogo={siteLogo} />
+                <Navbar user={user} setUser={setUser} />
                 <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/post/:slug" element={<PostDetail />} />

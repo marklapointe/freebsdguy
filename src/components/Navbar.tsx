@@ -1,24 +1,27 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Sun, Moon, LogOut, Settings } from 'lucide-react';
-import { api, applyTheme } from '../lib/api';
+import { api, applyTheme, siteConfig } from '../lib/api';
 import { User } from '../types';
 
 interface NavbarProps {
     user: User | null;
     setUser: (user: User | null) => void;
-    siteName: string;
-    siteLogo?: string;
 }
 
-export const Navbar = ({ user, setUser, siteName, siteLogo }: NavbarProps) => {
+export const Navbar = ({ user, setUser }: NavbarProps) => {
     const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+    const [siteName, setSiteName] = useState('MDWeb');
+    const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
+    const location = useLocation();
 
     useEffect(() => {
-        if (siteName) {
-            document.title = siteName;
-        }
-    }, [siteName]);
+        siteConfig.load().then(cfg => {
+            setSiteName(cfg.siteName);
+            setSiteLogo(cfg.siteLogo);
+            document.title = cfg.siteName;
+        });
+    }, [location]);
 
     useEffect(() => {
         const syncTheme = async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
-import { api } from '../lib/api';
+import { api, siteConfig } from '../lib/api';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -12,7 +12,16 @@ export const PostDetail = () => {
     const [theme, setTheme] = useState<'light' | 'dark'>(localStorage.getItem('theme') as 'light' | 'dark' || 'dark');
 
     useEffect(() => {
-        api.get(`/posts/${slug}`).then(res => setPost(res.data));
+        siteConfig.load();
+    }, []);
+
+    useEffect(() => {
+        api.get(`/posts/${slug}`).then(res => {
+            setPost(res.data);
+            siteConfig.load().then(cfg => {
+                document.title = res.data.title ? `${res.data.title} - ${cfg.siteName}` : cfg.siteName;
+            });
+        });
     }, [slug]);
 
     useEffect(() => {
