@@ -1,13 +1,7 @@
 # Makefile for MDWeb
-.PHONY: all build run clean install-deps package-port package
+.PHONY: all build run clean install-deps
 
 all: build
-
-package: package-port
-
-package-port:
-	@echo "Packaging FreeBSD port..."
-	cd ports/www/MDWeb && make package
 
 install-deps:
 	npm install
