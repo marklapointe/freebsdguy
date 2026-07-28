@@ -510,7 +510,14 @@ const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, showAlert, 
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">API Key (for OpenAI)</label>
-                                    <input type="password" value={config.aiConfig?.apiKey || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, apiKey: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" />
+                                    <input
+                                        type="password"
+                                        value={config.aiConfig?.apiKey || ''}
+                                        onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, apiKey: e.target.value } }))}
+                                        placeholder={config.aiConfig?.apiKeySet ? 'Key is set — leave blank to keep' : 'API key'}
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        autoComplete="off"
+                                    />
                                 </div>
                                 <button onClick={handleSaveAIConfig} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save AI Settings</button>
                             </div>

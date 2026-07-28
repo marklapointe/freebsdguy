@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import enquirer from 'enquirer';
 import { loadConfig, saveConfig, configPath, loadUsers } from './config.ts';
+import { INSECURE_DEFAULT_JWT_SECRET, isInsecureJwtSecret } from './jwt-secret.ts';
 
 export interface PreflightIssue {
     id: string;
@@ -44,12 +45,12 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
         });
     }
 
-    // 2. Check JWT Secret
-    const SECRET = config.jwtSecret || process.env.JWT_SECRET || 'freebsd_guy_secret_key';
-    if (SECRET === 'freebsd_guy_secret_key') {
+    // 2. Check JWT Secret (INV-SEC-2)
+    const SECRET = process.env.JWT_SECRET || config.jwtSecret || INSECURE_DEFAULT_JWT_SECRET;
+    if (isInsecureJwtSecret(SECRET)) {
         issues.push({
             id: 'JWT_SECRET_DEFAULT',
-            description: 'JWT secret is using the default insecure value.',
+            description: 'JWT secret is missing, too short, or using the default insecure value.',
             critical: process.env.NODE_ENV === 'production',
             fixable: true
         });

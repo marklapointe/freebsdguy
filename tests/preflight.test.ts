@@ -33,7 +33,7 @@ describe('Preflight Check', () => {
         vi.resetAllMocks();
         (config.loadConfig as any).mockReturnValue({
             postsDir: './posts',
-            jwtSecret: 'test_secret'
+            jwtSecret: 'test-secret-at-least-16'
         });
         (config.loadUsers as any).mockReturnValue({
             admin: { username: 'admin' },

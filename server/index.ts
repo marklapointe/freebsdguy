@@ -16,6 +16,8 @@ import { getPosts, getPost, savePost } from './lib/posts.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName } from './lib/images.ts';
 import { runPreflight } from './lib/preflight.ts';
+import { PublicConfigBuilder } from './lib/public-config.ts';
+import { JwtSecretFactory, JwtSecretError, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
 
 const isSafePath = (baseDir: string, targetPath: string) => {
     const resolvedBase = path.resolve(baseDir);
@@ -52,7 +54,27 @@ if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
 
 let activeConfig = loadConfig();
 const PORT = cliPort || activeConfig.service?.port || process.env.PORT || 5173;
-const SECRET = activeConfig.jwtSecret || process.env.JWT_SECRET || 'freebsd_guy_secret_key';
+
+// JwtSecretFactory: INV-SEC-2 — production never uses insecure default
+let SECRET: string;
+try {
+    const jwt = JwtSecretFactory.forMode()
+        .fromEnv(process.env.JWT_SECRET)
+        .fromConfig(activeConfig)
+        .create();
+    SECRET = jwt.secret;
+    if (!jwt.secure && !process.env.VITEST) {
+        console.warn(`[WARN] JWT secret is insecure (source=${jwt.source}). Set JWT_SECRET for production.`);
+    }
+} catch (e) {
+    if (e instanceof JwtSecretError) {
+        console.error(`[FATAL] ${e.message}`);
+        if (!process.env.VITEST) process.exit(1);
+        SECRET = INSECURE_DEFAULT_JWT_SECRET; // unreachable in production; tests may mock
+    } else {
+        throw e;
+    }
+}
 
 // Configure Multer for image uploads (to memory first, then processed by sharp)
 const storage = multer.memoryStorage();
@@ -462,21 +484,10 @@ if (fs.existsSync(distPath)) {
     });
 }
 
-// Get site config
+// Get site config — PublicConfigBuilder enforces INV-SEC-1 (no secrets)
 app.get('/api/config', (_req: Request, res: Response) => {
     const config = loadConfig();
-    res.json({
-        siteName: config.siteName || 'Generic Blog',
-        siteLogo: config.siteLogo || 'logo.webp',
-        currentTheme: config.currentTheme,
-        pagination: config.pagination || 10,
-        sortBy: config.sortBy || 'date',
-        sortOrder: config.sortOrder || 'desc',
-        searchPlacement: config.searchPlacement || 'top',
-        aiConfig: config.aiConfig,
-        service: config.service || { port: 3001 },
-        security: config.security
-    });
+    res.json(PublicConfigBuilder.from(config).build());
 });
 
 // Admin: Update AI config
@@ -484,16 +495,20 @@ app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: 
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     const config = loadConfig();
     const { enabled, provider, baseUrl, apiKey, modelId } = req.body;
+    // Empty apiKey means "keep existing" so public config redaction cannot wipe secrets
+    const previousKey = config.aiConfig?.apiKey || '';
+    const nextKey = typeof apiKey === 'string' && apiKey.length > 0 ? apiKey : previousKey;
 
     config.aiConfig = {
         enabled: !!enabled,
         provider: provider === 'openai' ? 'openai' : 'ollama',
         baseUrl: sanitizeHtml(baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-        apiKey: apiKey || '', // Do not sanitize API keys as it can corrupt them
+        apiKey: nextKey,
         modelId: sanitizeHtml(modelId || '', { allowedTags: [], allowedAttributes: {} })
     };
 
     saveConfig(config);
+    activeConfig = config;
     res.json({ message: 'AI Configuration updated' });
 });
 
@@ -594,11 +609,16 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
     if (searchPlacement) config.searchPlacement = sanitizeHtml(searchPlacement, { allowedTags: [], allowedAttributes: {} }) as 'top' | 'bottom' | 'left' | 'right' | 'none';
     
     if (aiConfig) {
+        const previousKey = config.aiConfig?.apiKey || '';
+        const nextKey =
+            typeof aiConfig.apiKey === 'string' && aiConfig.apiKey.length > 0
+                ? aiConfig.apiKey
+                : previousKey;
         config.aiConfig = {
             enabled: !!aiConfig.enabled,
             provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
             baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-            apiKey: aiConfig.apiKey || '', // Do not sanitize API keys
+            apiKey: nextKey,
             modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
         };
     }

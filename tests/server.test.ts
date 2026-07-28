@@ -22,6 +22,9 @@ describe('API Endpoints', () => {
         const res = await request(app).get('/api/config');
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('siteName');
+        // INV-SEC-1: never expose secrets on public config
+        expect(res.body).not.toHaveProperty('jwtSecret');
+        expect(JSON.stringify(res.body)).not.toMatch(/"apiKey"\s*:/);
     });
 
     it('GET /api/posts should return posts', async () => {
@@ -353,9 +356,16 @@ describe('API Endpoints', () => {
         expect(res.status).toBe(200);
         expect(res.body.message).toBe('AI Configuration updated');
 
-        // Verify it was saved by getting config
+        // Public config projects AI settings without the raw key (INV-SEC-1)
         const configRes = await request(app).get('/api/config');
-        expect(configRes.body.aiConfig).toEqual(aiConfig);
+        expect(configRes.body.aiConfig).toEqual({
+            enabled: true,
+            provider: 'ollama',
+            baseUrl: 'http://localhost:11434',
+            modelId: 'llama3',
+            apiKeySet: true
+        });
+        expect(configRes.body.aiConfig).not.toHaveProperty('apiKey');
     });
 
     it('POST /api/admin/ai-config should persist disabled state and return 403 on AI endpoints', async () => {
