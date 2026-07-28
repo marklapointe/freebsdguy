@@ -28,3 +28,12 @@ server/config/users.json
 
 # Test data
 tests/tmp
+
+# Coverage and test artifacts
+coverage/
+artifacts/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+*.pkg

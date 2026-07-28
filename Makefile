@@ -16,4 +16,4 @@ run-dev:
 	npm run dev
 
 clean:
-	rm -rf dist node_modules mdweb.rc mdweb.1
+	rm -rf dist node_modules tests/tmp artifacts

@@ -30,7 +30,13 @@ vi.mock('../src/lib/api', () => ({
             response: { use: vi.fn(), eject: vi.fn() }
         }
     },
-    applyTheme: vi.fn()
+    applyTheme: vi.fn(),
+    siteConfig: {
+        load: vi.fn().mockResolvedValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
+        get: vi.fn().mockReturnValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
+        subscribe: vi.fn().mockReturnValue(() => {}),
+        notify: vi.fn()
+    }
 }));
 
 import App from '../src/App';

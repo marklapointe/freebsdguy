@@ -37,12 +37,16 @@ npm install
 User settings and site configuration are stored in `server/config/config.json`.
 User credentials (usernames and password hashes) are stored in `server/config/users.json`.
 
-Default Admin credentials (stored in `users.json`):
+Default Admin credentials (created automatically if `users.json` is missing):
 - **Username**: `admin`
-- **Password**: `admin123`
+- **Password**: `admin`
 
-Posts are stored in `server/posts/`.
-Themes are stored in `server/themes/`.
+**Change this password immediately** before any network exposure (`npm run change-password admin <new_password>`). Production also requires a strong `JWT_SECRET` (never the development default).
+
+Posts are stored in `server/posts/` (development) or a configured data directory (package install).
+Themes are stored in `server/themes/` or the configured theme directory.
+
+FreeBSD package install (`www/mdweb`) is documented under [FreeBSD package install](#freebsd-package-install) once the port is available.
 
 ### 3. Running the Project
 
@@ -72,7 +76,20 @@ The site will be served at `http://localhost:5173`.
 
 ### 4. Deployment on FreeBSD
 
-A sample RC script `mdweb.rc` is provided. To use it:
+#### FreeBSD package install
+
+When the `www/mdweb` port is available (see `ports/www/mdweb/`):
+
+1. Build and install the package (or install from your package repository).
+2. Set a strong `JWT_SECRET` in `/usr/local/etc/mdweb.env` (mode `0600`).
+3. Change the admin password before exposing the service.
+4. Enable and start: `sysrc mdweb_enable=YES && service mdweb start`.
+
+Writable data lives under `/var/db/mdweb`; config under `/usr/local/etc/mdweb`.
+
+#### Manual RC script
+
+A sample RC script `mdweb.rc` is also provided for development installs:
 
 1. Copy the script to `/usr/local/etc/rc.d/mdweb`.
 2. Set the executable permission: `chmod +x /usr/local/etc/rc.d/mdweb`.
@@ -85,8 +102,19 @@ Build the container image using the provided `Containerfile`:
 
 ```bash
 podman build -t mdweb -f Containerfile .
-podman run -p 5173:5173 mdweb
+podman run -p 5173:5173 -e JWT_SECRET="$(openssl rand -hex 32)" mdweb
 ```
+
+Do not use the placeholder `JWT_SECRET` from the Containerfile in production.
+
+### 5b. Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `JWT_SECRET` | Required in production; signs auth tokens |
+| `CONFIG_DIR` / `CONFIG_PATH` / `USERS_PATH` | Config locations |
+| `PORT` | Listen port (default from config or 5173) |
+| `NODE_ENV` | Set `production` for package installs |
 
 ### 6. Changing User Passwords
 

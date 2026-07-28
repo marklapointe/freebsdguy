@@ -15,9 +15,10 @@ You are working on **MDWeb**, a personal website stack designed for FreeBSD.
 ## Key Files
 - `Makefile`: Build and deployment commands.
 - `mdweb.rc`: FreeBSD service script.
-- `ports/`: FreeBSD port definitions.
+- `ports/www/mdweb/`: FreeBSD port definitions (when present; see `.plan/4.0`).
 - `server/`: Backend source code.
- - `src/`: Frontend source code.
+- `src/`: Frontend source code.
+- Test host for package regression: `mlapointe@172.16.176.133` (see `.plan/4.1`).
 
 ## Mandatory Verification
 Before submitting any work, you **MUST**:
