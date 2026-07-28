@@ -129,13 +129,13 @@ describe('Theme Update with Admin Token', () => {
         expect(res.body.message).toContain('updated');
     });
 
-    it('POST /api/theme should handle invalid token gracefully', async () => {
+    it('POST /api/theme rejects invalid token', async () => {
         const res = await request(app)
             .post('/api/theme')
             .set('Authorization', `Bearer invalid_token`)
             .send({ currentTheme: 'dark' });
 
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(403);
     });
 });
 

@@ -135,9 +135,10 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
         fs.mkdirSync(postsDir, { recursive: true });
     }
 
+    // Metadata only is HTML-stripped; body stays Markdown (authors are authenticated).
     const cleanTitle = sanitizeHtml(String(post.title || ''), { allowedTags: [], allowedAttributes: {} });
     const cleanSummary = sanitizeHtml(String(post.summary || ''), { allowedTags: [], allowedAttributes: {} });
-    const cleanContent = sanitizeHtml(post.content);
+    const content = String(post.content ?? '');
 
     const frontmatter = {
         title: cleanTitle,
@@ -148,12 +149,12 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
     };
 
     try {
-        const fileContent = matter.stringify(cleanContent, frontmatter);
+        const fileContent = matter.stringify(content, frontmatter);
         fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), fileContent);
     } catch (error) {
         console.error(`Error saving post ${post.slug}:`, error);
         // Fallback to simple manual construction if matter.stringify fails for some reason
-        const manualContent = `---\ntitle: "${frontmatter.title.replace(/"/g, '\\"')}"\nsummary: "${frontmatter.summary.replace(/"/g, '\\"')}"\ndate: "${frontmatter.date}"\nauthor: "${frontmatter.author}"\npinned: ${frontmatter.pinned}\n---\n${cleanContent}`;
+        const manualContent = `---\ntitle: "${frontmatter.title.replace(/"/g, '\\"')}"\nsummary: "${frontmatter.summary.replace(/"/g, '\\"')}"\ndate: "${frontmatter.date}"\nauthor: "${frontmatter.author}"\npinned: ${frontmatter.pinned}\n---\n${content}`;
         fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), manualContent);
     }
 };

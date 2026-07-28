@@ -7,6 +7,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
+import sanitizeHtml from 'sanitize-html';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,18 +20,9 @@ import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName } f
 import { runPreflight } from './lib/preflight.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
 import { JwtSecretFactory, JwtSecretError, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
-
-const isSafePath = (baseDir: string, targetPath: string) => {
-    const resolvedBase = path.resolve(baseDir);
-    const resolvedTarget = path.resolve(targetPath);
-    const relative = path.relative(resolvedBase, resolvedTarget);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-};
-
-import multer from 'multer';
-import sharp from 'sharp';
-
-import sanitizeHtml from 'sanitize-html';
+import { isSafePath } from './lib/safe-path.ts';
+import { createDefaultImageUpload } from './lib/upload-options.ts';
+import { RoleGuardFactory, AuthenticatedRequest, isAllowedRole } from './middleware/auth.ts';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -76,9 +69,12 @@ try {
     }
 }
 
-// Configure Multer for image uploads (to memory first, then processed by sharp)
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+// UploadOptionsBuilder → multer with size/MIME policy
+const upload = createDefaultImageUpload();
+const guards = new RoleGuardFactory(SECRET);
+const authenticate = guards.authenticate();
+const requireAdmin = guards.requireAdmin();
+const requireWriter = guards.requireContributorOrAdmin();
 
 app.use(helmet({
     contentSecurityPolicy: {
@@ -116,29 +112,7 @@ app.use(express.json());
 // Apply general limiter to all API routes
 app.use('/api/', apiLimiter);
 
-// Extend Request to include user and file
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-interface AuthenticatedRequest extends Request {
-    user?: any;
-    file?: any;
-}
-
 // Routes
-
-// Auth middleware
-const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    const token = req.headers['authorization']?.split(' ')[1];
-    if (!token) return res.status(401).json({ message: 'No token' });
-
-    jwt.verify(token, SECRET, (err, decoded) => {
-        if (err) {
-            console.error(`[AUTH] JWT verification failed: ${err.message}`);
-            return res.status(403).json({ message: 'Failed to authenticate token' });
-        }
-        req.user = decoded;
-        next();
-    });
-};
 
 // Login
 app.post('/api/login', loginLimiter, async (req: Request, res: Response) => {
@@ -183,8 +157,7 @@ app.post('/api/login', loginLimiter, async (req: Request, res: Response) => {
 });
 
 // Admin: Get all users
-app.get('/api/admin/users', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.get('/api/admin/users', authenticate, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
     const usersConfig = loadUsers();
     const users = [
         { username: usersConfig.admin.username, role: usersConfig.admin.role },
@@ -194,13 +167,18 @@ app.get('/api/admin/users', authenticate, (req: AuthenticatedRequest, res: Respo
 });
 
 // Admin: Create user
-app.post('/api/admin/users', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
-
+app.post('/api/admin/users', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     const { username, password, role } = req.body;
     
     const cleanUsername = sanitizeHtml(username, { allowedTags: [], allowedAttributes: {} });
-    const cleanRole = sanitizeHtml(role, { allowedTags: [], allowedAttributes: {} });
+    if (!isAllowedRole(role)) {
+        return res.status(400).json({ message: 'Invalid role; allowed: admin, contributor' });
+    }
+    const cleanRole = role;
+
+    if (!password || String(password).length < 8) {
+        return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
 
     const usersConfig = loadUsers();
 
@@ -217,8 +195,7 @@ app.post('/api/admin/users', authenticate, async (req: AuthenticatedRequest, res
 });
 
 // Admin: Delete user
-app.delete('/api/admin/users/:username', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.delete('/api/admin/users/:username', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     const username = req.params.username;
     const usersConfig = loadUsers();
 
@@ -352,7 +329,7 @@ app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: R
         const service = AIServiceFactory.create(provider, { 
             baseUrl, 
             modelId: '', // modelId not needed for getting models
-            apiKey: req.query.apiKey as string || aiConfig?.apiKey 
+            apiKey: aiConfig?.apiKey // never accept API keys via query string
         });
         const models = await service.getModels();
         console.log(`[AI] Successfully fetched ${models.length} models`);
@@ -387,7 +364,7 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
 });
 
 // Create/Update post (Contributor or Admin)
-app.post('/api/posts', authenticate, (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const { slug, title, content, summary, date, pinned } = req.body;
     const config = loadConfig();
     const configDir = path.dirname(configPath());
@@ -491,8 +468,7 @@ app.get('/api/config', (_req: Request, res: Response) => {
 });
 
 // Admin: Update AI config
-app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     const config = loadConfig();
     const { enabled, provider, baseUrl, apiKey, modelId } = req.body;
     // Empty apiKey means "keep existing" so public config redaction cannot wipe secrets
@@ -513,10 +489,7 @@ app.post('/api/admin/ai-config', authenticate, (req: AuthenticatedRequest, res: 
 });
 
 // Admin: Delete image
-app.delete('/api/admin/images/:filename', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
-    
-    // Standardize directory traversal check
+app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const filename = decodeURIComponent(req.params.filename as string);
     const config = loadConfig();
     const configDir = path.dirname(configPath());
@@ -553,9 +526,7 @@ app.delete('/api/admin/images/:filename', authenticate, (req: AuthenticatedReque
 });
 
 // Admin: Bulk delete images
-app.post('/api/admin/images/delete-bulk', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
-    
+app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const { filenames } = req.body;
     if (!Array.isArray(filenames)) return res.status(400).json({ message: 'filenames must be an array' });
 
@@ -595,8 +566,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, (req: AuthenticatedReque
 });
 
 // Admin: Update site config
-app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     const config = loadConfig();
     const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security } = req.body;
 
@@ -693,15 +663,13 @@ app.post('/api/admin/config', authenticate, (req: AuthenticatedRequest, res: Res
 });
 
 // Admin: Get all themes
-app.get('/api/admin/themes', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.get('/api/admin/themes', authenticate, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
     // Strictly only light and dark themes are allowed
     res.json(['light', 'dark']);
 });
 
 // Admin: Update theme
-app.post('/api/admin/themes/:name', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     const name = req.params.name;
     
     if (name !== 'light' && name !== 'dark') {
@@ -731,8 +699,7 @@ app.post('/api/admin/themes/:name', authenticate, (req: AuthenticatedRequest, re
 });
 
 // Admin: Delete post
-app.delete('/api/posts/:slug', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
+app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const slug = req.params.slug;
     const config = loadConfig();
     const configDir = path.dirname(configPath());
@@ -753,7 +720,15 @@ app.delete('/api/posts/:slug', authenticate, (req: AuthenticatedRequest, res: Re
 });
 
 // Image upload (with WebP conversion and renaming)
-app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    upload.single('image')(req, res, (err: unknown) => {
+        if (err) {
+            const message = err instanceof Error ? err.message : 'Upload failed';
+            return res.status(400).json({ message });
+        }
+        next();
+    });
+}, async (req: AuthenticatedRequest, res: Response) => {
     if (activeConfig.security?.disableImages) {
         return res.status(403).json({ message: 'Image uploads are disabled by security policy' });
     }
@@ -839,8 +814,7 @@ app.post('/api/admin/upload', authenticate, upload.single('image'), async (req: 
 });
 
 // Get images with pagination
-app.get('/api/admin/images', authenticate, (req: AuthenticatedRequest, res: Response) => {
-    if (req.user.role !== 'admin' && req.user.role !== 'contributor') return res.status(403).json({ message: 'Forbidden' });
+app.get('/api/admin/images', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const postsDir = path.resolve(configDir, config.postsDir);
@@ -881,8 +855,7 @@ app.get('/api/admin/images', authenticate, (req: AuthenticatedRequest, res: Resp
 });
 
 // Theme support (just returns css variables)
-app.get('/api/admin/config-status', authenticate, (_req: AuthenticatedRequest, res: Response) => {
-    if (_req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+app.get('/api/admin/config-status', authenticate, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
     res.json({ isWritable: isConfigWritable() });
 });
 
@@ -926,47 +899,36 @@ app.get('/api/theme', (req: Request, res: Response) => {
     }
 });
 
-app.post('/api/theme', (req: Request, res: Response) => {
+// Theme write requires auth (INV-AUTH-2: only admin mutates global)
+app.post('/api/theme', authenticate, (req: AuthenticatedRequest, res: Response) => {
     const { currentTheme } = req.body;
-    if (!currentTheme) return res.status(400).json({ message: 'currentTheme required' });
-    
-    // Try to get user from token if available
-    const token = req.headers['authorization']?.split(' ')[1];
-    if (token) {
-        try {
-            const decoded = jwt.verify(token, SECRET) as any;
-            if (decoded && decoded.username) {
-                const usersConfig = loadUsers();
-                
-                // If user is Admin, update global config as well
-                if (usersConfig.admin.username === decoded.username) {
-                    usersConfig.admin.theme = currentTheme;
-                    saveUsers(usersConfig);
-                    
-                    const config = loadConfig();
-                    config.currentTheme = currentTheme;
-                    saveConfig(config);
-                    
-                    console.log(`[INFO] Admin updated global theme to: ${currentTheme}`);
-                    return res.json({ message: 'Global and Admin theme updated', currentTheme });
-                }
-                
-                const userIndex = usersConfig.users.findIndex(u => u.username === decoded.username);
-                if (userIndex !== -1) {
-                    usersConfig.users[userIndex].theme = currentTheme;
-                    saveUsers(usersConfig);
-                    return res.json({ message: 'User theme updated', currentTheme });
-                }
-            }
-        } catch (err) {
-            // Token invalid or expired, fall back to global config
-        }
+    if (!currentTheme || (currentTheme !== 'light' && currentTheme !== 'dark')) {
+        return res.status(400).json({ message: 'currentTheme must be light or dark' });
     }
 
-    const config = loadConfig();
-    config.currentTheme = currentTheme;
-    saveConfig(config);
-    res.json({ message: 'Global theme updated', currentTheme });
+    const usersConfig = loadUsers();
+    const username = req.user?.username as string | undefined;
+    if (!username) return res.status(401).json({ message: 'No token' });
+
+    // Admin updates personal + global theme
+    if (req.user.role === 'admin' || usersConfig.admin.username === username) {
+        usersConfig.admin.theme = currentTheme;
+        saveUsers(usersConfig);
+        const config = loadConfig();
+        config.currentTheme = currentTheme;
+        saveConfig(config);
+        activeConfig = config;
+        console.log(`[INFO] Admin updated global theme to: ${currentTheme}`);
+        return res.json({ message: 'Global and Admin theme updated', currentTheme });
+    }
+
+    const userIndex = usersConfig.users.findIndex(u => u.username === username);
+    if (userIndex === -1) {
+        return res.status(404).json({ message: 'User not found' });
+    }
+    usersConfig.users[userIndex].theme = currentTheme;
+    saveUsers(usersConfig);
+    res.json({ message: 'User theme updated', currentTheme });
 });
 
 if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {

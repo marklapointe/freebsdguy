@@ -267,9 +267,15 @@ describe('API Endpoints', () => {
         adminToken = res.body.token;
     });
 
-    it('POST /api/theme should update current theme', async () => {
+    it('POST /api/theme requires authentication', async () => {
+        const unauth = await request(app)
+            .post('/api/theme')
+            .send({ currentTheme: 'dark' });
+        expect(unauth.status).toBe(401);
+
         const res = await request(app)
             .post('/api/theme')
+            .set('Authorization', `Bearer ${adminToken}`)
             .send({ currentTheme: 'dark' });
         expect(res.status).toBe(200);
         expect(res.body.currentTheme).toBe('dark');
