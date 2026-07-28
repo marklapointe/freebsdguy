@@ -461,6 +461,15 @@ if (fs.existsSync(distPath)) {
     });
 }
 
+// Health probe for FreeBSD service / regression (no secrets)
+app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+        ok: true,
+        version: process.env.npm_package_version || '1.0.0',
+        env: process.env.NODE_ENV || 'development'
+    });
+});
+
 // Get site config — PublicConfigBuilder enforces INV-SEC-1 (no secrets)
 app.get('/api/config', (_req: Request, res: Response) => {
     const config = loadConfig();

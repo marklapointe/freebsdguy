@@ -18,6 +18,13 @@ describe('API Endpoints', () => {
         // For simplicity in this session, I will just test the public endpoints first
     });
 
+    it('GET /api/health should report ok', async () => {
+        const res = await request(app).get('/api/health');
+        expect(res.status).toBe(200);
+        expect(res.body.ok).toBe(true);
+        expect(res.body).toHaveProperty('version');
+    });
+
     it('GET /api/config should return site configuration', async () => {
         const res = await request(app).get('/api/config');
         expect(res.status).toBe(200);
