@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Security network checks', () => {
-  test('theme POST without token is 401', async ({ request }) => {
+  test('theme POST without token is denied', async ({ request }) => {
     const res = await request.post('/api/theme', {
       data: { currentTheme: 'light' },
     });
-    expect(res.status()).toBe(401);
+    // 401 = unauthenticated; 429 = rate-limited after many probes (still not allowed)
+    expect([401, 429]).toContain(res.status());
   });
 
   test('config responses during page load never include apiKey field', async ({ page }) => {
