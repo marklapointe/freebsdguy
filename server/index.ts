@@ -7,7 +7,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { fileURLToPath } from 'url';
-import sharp from 'sharp';
 import sanitizeHtml from 'sanitize-html';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -798,10 +797,18 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
         const newFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.webp`;
         const outputPath = path.join(imagesDir, newFilename);
 
-        // Convert to WebP using sharp
-        // We use animated: true to preserve animations if it's a GIF/WebP already
+        // Convert to WebP using sharp (lazy-load so FreeBSD can start without native sharp)
+        let sharp: typeof import('sharp');
+        try {
+            sharp = (await import('sharp')).default;
+        } catch (e) {
+            console.error('[ERROR] sharp unavailable on this platform:', e);
+            return res.status(503).json({
+                message: 'Image processing unavailable (sharp not built for this platform). Install libvips and rebuild sharp.'
+            });
+        }
         await sharp(req.file.buffer, { animated: true })
-            .webp({ effort: 4 }) // Effort 4 is a good balance
+            .webp({ effort: 4 })
             .toFile(outputPath);
 
         // Update manifest

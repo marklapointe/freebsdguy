@@ -1,0 +1,74 @@
+#!/bin/sh
+
+# PROVIDE: mdweb
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="mdweb"
+rcvar="mdweb_enable"
+
+load_rc_config $name
+
+: ${mdweb_enable:="NO"}
+: ${mdweb_user:="www"}
+: ${mdweb_group:="www"}
+: ${mdweb_dir:="%%WWWDIR%%"}
+: ${mdweb_port:="5173"}
+: ${mdweb_env_file:="/usr/local/etc/mdweb.env"}
+: ${mdweb_config_dir:="/usr/local/etc/mdweb"}
+
+pidfile="/var/run/mdweb/${name}.pid"
+procname="%%LOCALBASE%%/bin/node"
+command="/usr/sbin/daemon"
+
+# Load JWT_SECRET and friends from env file when present
+if [ -f "${mdweb_env_file}" ]; then
+	. "${mdweb_env_file}"
+fi
+
+export NODE_ENV=production
+export CONFIG_DIR="${mdweb_config_dir}"
+export PORT="${mdweb_port}"
+# JWT_SECRET must be set in mdweb.env for production
+
+command_args="-f -p ${pidfile} -r -u ${mdweb_user} \
+	/usr/bin/env NODE_ENV=production CONFIG_DIR=${mdweb_config_dir} PORT=${mdweb_port} JWT_SECRET=${JWT_SECRET} \
+	${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts -p ${mdweb_port}"
+
+start_precmd="mdweb_prestart"
+stop_postcmd="mdweb_postclean"
+
+mdweb_prestart()
+{
+	if [ -z "${JWT_SECRET}" ] || [ "${JWT_SECRET}" = "freebsd_guy_secret_key" ]; then
+		echo "${name}: JWT_SECRET is missing or insecure. Set it in ${mdweb_env_file}." >&2
+		return 1
+	fi
+
+	install -d -o root -g wheel -m 0755 /var/run/mdweb
+
+	# Ensure writable data dirs exist
+	for d in /var/db/mdweb/posts /var/db/mdweb/posts/images /var/db/mdweb/themes; do
+		if [ ! -d "${d}" ]; then
+			install -d -o ${mdweb_user} -g ${mdweb_group} -m 0755 "${d}"
+		fi
+	done
+
+	if [ -f "${pidfile}" ]; then
+		_pid=$(cat "${pidfile}")
+		if ! echo "${_pid}" | grep -q '^[0-9][0-9]*$'; then
+			rm -f "${pidfile}"
+		elif ! kill -0 "${_pid}" 2>/dev/null; then
+			rm -f "${pidfile}"
+		fi
+	fi
+}
+
+mdweb_postclean()
+{
+	rm -f "${pidfile}"
+}
+
+run_rc_command "$1"

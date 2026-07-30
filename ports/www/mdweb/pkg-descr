@@ -1,0 +1,8 @@
+MDWeb is a self-hosted Markdown blogging platform with a React frontend
+and Express (TypeScript) API. Posts and themes are stored as plain files;
+optional AI helpers can summarize or enhance content via Ollama or OpenAI.
+
+Features include admin/contributor roles, theming, image management with
+WebP conversion, feature toggles, and FreeBSD rc(8) service integration.
+
+WWW: https://github.com/marklapointe/freebsdguy

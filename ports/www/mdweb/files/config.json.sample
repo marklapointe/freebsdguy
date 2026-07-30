@@ -1,0 +1,30 @@
+{
+  "postsDir": "/var/db/mdweb/posts",
+  "themeDir": "/var/db/mdweb/themes",
+  "currentTheme": "dark",
+  "siteName": "MDWeb",
+  "siteLogo": "logo.webp",
+  "pagination": 10,
+  "sortBy": "date",
+  "sortOrder": "desc",
+  "searchPlacement": "top",
+  "service": {
+    "port": 5173
+  },
+  "aiConfig": {
+    "enabled": false,
+    "provider": "ollama",
+    "baseUrl": "http://127.0.0.1:11434",
+    "apiKey": "",
+    "modelId": "llama3"
+  },
+  "security": {
+    "apiRateLimitWindow": 900000,
+    "apiRateLimitMax": 100,
+    "loginRateLimitWindow": 900000,
+    "loginRateLimitMax": 10,
+    "disableAI": false,
+    "disableImages": false,
+    "disablePublicSearch": false
+  }
+}

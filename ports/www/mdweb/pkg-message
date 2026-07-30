@@ -1,0 +1,36 @@
+[
+{ type: install
+  message: <<EOM
+MDWeb has been installed.
+
+1. Set a strong JWT secret (required in production):
+
+     install -m 0600 /usr/local/etc/mdweb/mdweb.env.sample \
+       /usr/local/etc/mdweb.env
+     # edit /usr/local/etc/mdweb.env and set JWT_SECRET
+
+2. Copy sample config if needed:
+
+     cp /usr/local/etc/mdweb/config.json.sample \
+       /usr/local/etc/mdweb/config.json
+     cp /usr/local/etc/mdweb/users.json.sample \
+       /usr/local/etc/mdweb/users.json
+     chown www:www /usr/local/etc/mdweb/users.json
+     chmod 0600 /usr/local/etc/mdweb/users.json
+
+3. Change the default admin password immediately
+   (default is admin / admin until you change it):
+
+     cd /usr/local/www/mdweb && \
+       env CONFIG_DIR=/usr/local/etc/mdweb \
+       ./node_modules/.bin/tsx server/scripts/change-password.ts admin 'your-strong-password'
+
+4. Enable and start the service:
+
+     sysrc mdweb_enable=YES
+     service mdweb start
+
+Health check: curl http://127.0.0.1:5173/api/health
+EOM
+}
+]

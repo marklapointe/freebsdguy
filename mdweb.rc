@@ -13,23 +13,25 @@ load_rc_config $name
 
 : ${mdweb_enable:="NO"}
 : ${mdweb_user:="www"}
-: ${mdweb_dir:="/usr/local/www/MDWeb"}
-: ${mdweb_port:=""}
+: ${mdweb_dir:="/usr/local/www/mdweb"}
+: ${mdweb_port:="5173"}
+: ${mdweb_env_file:="/usr/local/etc/mdweb.env"}
+: ${mdweb_config_dir:="/usr/local/etc/mdweb"}
 
 pidfile="/var/run/${name}.pid"
 procname="/usr/local/bin/node"
 command="/usr/sbin/daemon"
 
-# Handle optional port argument
-if [ -n "${mdweb_port}" ]; then
-    port_arg="-p ${mdweb_port}"
+if [ -f "${mdweb_env_file}" ]; then
+	# shellcheck disable=SC1090
+	. "${mdweb_env_file}"
 fi
 
 # -f: run in foreground (daemon handles backgrounding)
 # -p: write child pid to pidfile
 # -r: restart child if it exits
 # -u: run as user
-command_args="-f -p ${pidfile} -r -u ${mdweb_user} /usr/bin/env NODE_ENV=production ${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts ${port_arg}"
+command_args="-f -p ${pidfile} -r -u ${mdweb_user} /usr/bin/env NODE_ENV=production CONFIG_DIR=${mdweb_config_dir} PORT=${mdweb_port} JWT_SECRET=${JWT_SECRET} ${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts -p ${mdweb_port}"
 
 start_precmd="mdweb_prestart"
 stop_postcmd="mdweb_postclean"
