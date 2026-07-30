@@ -24,42 +24,50 @@ scp -o BatchMode=yes -o ConnectTimeout=15 \
   "${ROOT}/ports/www/mdweb/files/mdweb.in" "${USER}@${HOST}:/tmp/mdweb.rc.in"
 
 echo "==> install + hard restart"
-ssh -o BatchMode=yes -o ConnectTimeout=15 "${USER}@${HOST}" "sudo bash -s" <<REMOTE
+ssh -o BatchMode=yes -o ConnectTimeout=15 "${USER}@${HOST}" "sudo bash -s" <<'REMOTE'
 set -e
-rsync -a --delete /tmp/mdweb-dist/ ${REMOTE_APP}/dist/
-rsync -a /tmp/mdweb-server/ ${REMOTE_APP}/server/
-chmod -R a+rX ${REMOTE_APP}/server ${REMOTE_APP}/dist
+REMOTE_APP=/usr/local/www/mdweb
+
+rsync -a --delete /tmp/mdweb-dist/ "${REMOTE_APP}/dist/"
+rsync -a /tmp/mdweb-server/ "${REMOTE_APP}/server/"
+chmod -R a+rX "${REMOTE_APP}/server" "${REMOTE_APP}/dist"
 
 sed -e 's|%%WWWDIR%%|/usr/local/www/mdweb|g' -e 's|%%LOCALBASE%%|/usr/local|g' \
   /tmp/mdweb.rc.in > /tmp/mdweb.rc
 install -o root -g wheel -m 0555 /tmp/mdweb.rc /usr/local/etc/rc.d/mdweb
 
 install -d -o www -g www -m 0755 /var/run/mdweb /var/db/mdweb/themes
-cp -f ${REMOTE_APP}/server/themes/*.json /var/db/mdweb/themes/ 2>/dev/null || true
+cp -f "${REMOTE_APP}/server/themes/"*.json /var/db/mdweb/themes/ 2>/dev/null || true
 chown -R www:www /var/db/mdweb
 
-# Free port + kill app tree (pidfile alone is not enough for tsx children)
+# Free port + kill app tree (tsx leaves children that outlive pidfile stops)
 if [ -s /var/run/mdweb/mdweb.pid ]; then
-  kill "\$(cat /var/run/mdweb/mdweb.pid)" 2>/dev/null || true
+  kill "$(cat /var/run/mdweb/mdweb.pid)" 2>/dev/null || true
 fi
-for p in \$(sockstat -4 -l | awk '/\\*:5173/ {print \$3}' | sort -u); do
-  kill "\$p" 2>/dev/null || true
+for p in $(sockstat -4 -l | awk '/\*:5173/ {print $3}' | sort -u); do
+  kill -9 "$p" 2>/dev/null || true
 done
-for p in \$(ps -axo pid,command | awk '/\\/usr\\/local\\/www\\/mdweb\\/server\\/index\\.ts/ {print \$1}'); do
-  kill "\$p" 2>/dev/null || true
-done
-sleep 1
-for p in \$(sockstat -4 -l | awk '/\\*:5173/ {print \$3}' | sort -u); do
-  kill -9 "\$p" 2>/dev/null || true
+for p in $(ps -axo pid,command | awk '/\/usr\/local\/www\/mdweb\/server\/index\.ts/ {print $1}'); do
+  kill -9 "$p" 2>/dev/null || true
 done
 rm -f /var/run/mdweb/mdweb.pid
 sleep 1
 
-service mdweb start
+# Root daemon -u www is the reliable path (rc.subr su -m + -u was broken historically)
+. /usr/local/etc/mdweb.env
+/usr/sbin/daemon -f -p /var/run/mdweb/mdweb.pid -o /tmp/mdweb.out -u www \
+  /usr/bin/env NODE_ENV=production CONFIG_DIR=/usr/local/etc/mdweb PORT=5173 JWT_SECRET="${JWT_SECRET}" \
+  "${REMOTE_APP}/node_modules/.bin/tsx" "${REMOTE_APP}/server/index.ts" -p 5173
 sleep 2
-service mdweb status
-curl -fsS http://127.0.0.1:5173/api/health
+if ! curl -fsS http://127.0.0.1:5173/api/health; then
+  echo
+  echo "FAILED start; log:"
+  cat /tmp/mdweb.out 2>/dev/null || true
+  exit 1
+fi
 echo
+echo "pid=$(cat /var/run/mdweb/mdweb.pid 2>/dev/null || echo none)"
+service mdweb status 2>/dev/null || true
 REMOTE
 
 echo "==> external check"
