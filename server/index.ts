@@ -78,21 +78,30 @@ app.use(helmet({
 // Defaults sized for a personal site + automated e2e; still overridable via config.security
 const apiLimiter = rateLimit({
     windowMs: configHolder.get().security?.apiRateLimitWindow || 15 * 60 * 1000,
-    limit: () => configHolder.get().security?.apiRateLimitMax || 2000,
+    limit: () => configHolder.get().security?.apiRateLimitMax || 5000,
     message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     validate: { ip: false },
     skip: (req) => {
-        // Never rate-limit health probes or static-ish public GETs used on every page load
-        const p = req.path || '';
-        return (
-            p === '/health' ||
-            p === '/config' ||
-            p === '/theme' ||
-            p.startsWith('/getimage') ||
-            p.startsWith('/images/')
-        );
+        // originalUrl is always full path (/api/...); req.path can vary by mount
+        const p = (req.originalUrl || req.url || req.path || '').split('?')[0];
+        // Login has its own limiter — do not double-count against the general bucket
+        if (p === '/api/login') return true;
+        // High-churn public GETs (every page load)
+        if (req.method === 'GET') {
+            if (
+                p === '/api/health' ||
+                p === '/api/config' ||
+                p === '/api/theme' ||
+                p.startsWith('/api/theme?') ||
+                p.startsWith('/api/getimage') ||
+                p.startsWith('/api/images/')
+            ) {
+                return true;
+            }
+        }
+        return false;
     },
 });
 
