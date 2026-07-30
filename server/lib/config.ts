@@ -2,6 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import {
+    DEFAULT_ADMIN_USERNAME,
+    DEFAULT_ADMIN_PASSWORD_HASH
+} from './default-credentials.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -188,8 +192,8 @@ export const loadUsers = (customPath?: string): UsersConfig => {
         // Provide a default admin if file doesn't exist
         const defaultConfig: UsersConfig = {
             admin: {
-                username: 'admin',
-                passwordHash: '$2b$10$aec45wHR7e4wuCbZDL2SNuzHTZ/5caQoygpy2dd6anaY4Bb9hi/sW', // admin
+                username: DEFAULT_ADMIN_USERNAME,
+                passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
                 role: 'admin'
             },
             users: []
@@ -205,8 +209,8 @@ export const loadUsers = (customPath?: string): UsersConfig => {
     } catch (e) {
         return {
             admin: {
-                username: 'admin',
-                passwordHash: '$2b$10$aec45wHR7e4wuCbZDL2SNuzHTZ/5caQoygpy2dd6anaY4Bb9hi/sW',
+                username: DEFAULT_ADMIN_USERNAME,
+                passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
                 role: 'admin'
             },
             users: []

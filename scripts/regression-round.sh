@@ -25,8 +25,8 @@ echo "==> API smoke" | tee -a "${ART}/SUMMARY.md"
 bash "${ROOT}/scripts/api-smoke.sh" | tee "${ART}/api-smoke.log"
 echo "api-smoke: PASS" >> "${ART}/SUMMARY.md"
 
-echo "==> Playwright e2e" | tee -a "${ART}/SUMMARY.md"
-(cd "${ROOT}" && npx playwright test) | tee "${ART}/playwright.log"
+echo "==> FULL Playwright suite (all specs)" | tee -a "${ART}/SUMMARY.md"
+(cd "${ROOT}" && npx playwright test --reporter=list) | tee "${ART}/playwright.log"
 echo "playwright: PASS" >> "${ART}/SUMMARY.md"
 
 echo "==> DONE ${ART}/SUMMARY.md"

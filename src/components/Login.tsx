@@ -34,8 +34,17 @@ export const Login = ({ setUser }: LoginProps) => {
             localStorage.setItem('username', userObj.username);
             setUser(userObj);
             navigate('/admin');
-        } catch (err) {
-            setError('Invalid credentials');
+        } catch (err: unknown) {
+            const ax = err as { response?: { status?: number; data?: { message?: string } } };
+            const status = ax.response?.status;
+            const serverMsg = ax.response?.data?.message;
+            if (status === 429) {
+                setError(serverMsg || 'Too many requests — wait a moment and try again');
+            } else if (serverMsg) {
+                setError(serverMsg);
+            } else {
+                setError('Invalid credentials');
+            }
         }
     };
 

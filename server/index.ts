@@ -75,18 +75,30 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
+// Defaults sized for a personal site + automated e2e; still overridable via config.security
 const apiLimiter = rateLimit({
     windowMs: configHolder.get().security?.apiRateLimitWindow || 15 * 60 * 1000,
-    limit: () => configHolder.get().security?.apiRateLimitMax || 100,
+    limit: () => configHolder.get().security?.apiRateLimitMax || 2000,
     message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     validate: { ip: false },
+    skip: (req) => {
+        // Never rate-limit health probes or static-ish public GETs used on every page load
+        const p = req.path || '';
+        return (
+            p === '/health' ||
+            p === '/config' ||
+            p === '/theme' ||
+            p.startsWith('/getimage') ||
+            p.startsWith('/images/')
+        );
+    },
 });
 
 const loginLimiter = rateLimit({
     windowMs: configHolder.get().security?.loginRateLimitWindow || 15 * 60 * 1000,
-    limit: () => configHolder.get().security?.loginRateLimitMax || 10,
+    limit: () => configHolder.get().security?.loginRateLimitMax || 50,
     message: { message: 'Too many login attempts, please try again after 15 minutes' },
     standardHeaders: 'draft-7',
     legacyHeaders: false,
@@ -95,6 +107,7 @@ const loginLimiter = rateLimit({
 
 app.use(cors());
 app.use(express.json());
+// Mount under /api so skip sees paths without /api prefix when using app.use('/api/', ...)
 app.use('/api/', apiLimiter);
 
 registerRoutes(app, {
