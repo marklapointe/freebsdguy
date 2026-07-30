@@ -36,7 +36,7 @@ vi.mock('../src/lib/api', () => ({
         { id: 'dark', label: 'Dark', mdEditorTheme: 'dark' },
         { id: 'light', label: 'Light', mdEditorTheme: 'light' }
     ]),
-    cycleTheme: vi.fn(),
+    setSiteTheme: vi.fn(),
     siteConfig: {
         load: vi.fn().mockResolvedValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
         get: vi.fn().mockReturnValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
@@ -91,7 +91,7 @@ describe('App Component', () => {
 
     it('handles login successfully', async () => {
         (api.post as any).mockResolvedValueOnce({ 
-            data: { token: 'fake-token', role: 'admin', username: 'admin', theme: 'dark' } 
+            data: { token: 'fake-token', role: 'admin', username: 'admin' } 
         });
         
         render(<App />);

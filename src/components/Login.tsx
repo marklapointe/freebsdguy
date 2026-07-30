@@ -21,16 +21,16 @@ export const Login = ({ setUser }: LoginProps) => {
             localStorage.setItem('role', res.data.role);
             const userObj = {
                 username: res.data.username || username,
-                role: res.data.role,
-                theme: res.data.theme
+                role: res.data.role
             };
-            if (res.data.theme && typeof res.data.theme === 'string') {
-                localStorage.setItem('theme', res.data.theme);
-                applyTheme(res.data.theme);
-            } else {
-                applyTheme();
-            }
             localStorage.setItem('username', userObj.username);
+            // Site theme is admin-owned; always load from public config (not per-user)
+            try {
+                const cfg = await api.get('/config');
+                await applyTheme(cfg.data.currentTheme || 'dark');
+            } catch {
+                await applyTheme('dark');
+            }
             setUser(userObj);
             navigate('/admin');
         } catch (err: unknown) {

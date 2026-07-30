@@ -17,6 +17,7 @@ describe('Theme catalog (pre-generated packs)', () => {
     it('validates theme ids', () => {
         expect(isValidThemeId('dark')).toBe(true);
         expect(isValidThemeId('miami-vice')).toBe(true);
+        expect(isValidThemeId('miami-cyberpunk')).toBe(true);
         expect(isValidThemeId('../etc/passwd')).toBe(false);
         expect(isValidThemeId('Bad Name')).toBe(false);
     });
@@ -27,10 +28,18 @@ describe('Theme catalog (pre-generated packs)', () => {
         expect(ids).toContain('dark');
         expect(ids).toContain('light');
         expect(ids).toContain('miami-vice');
+        expect(ids).toContain('miami-cyberpunk');
         expect(ids).toContain('c64-green');
         expect(ids).toContain('gameboy');
         expect(ids).toContain('doom');
         expect(ids).toContain('portal');
+    });
+
+    it('labels Miami Cyberpunk in the catalog', () => {
+        const cat = listThemeCatalog(themesDir);
+        const miami = cat.find((t) => t.id === 'miami-cyberpunk');
+        expect(miami?.label).toBe('Miami Cyberpunk');
+        expect(miami?.mdEditorTheme).toBe('dark');
     });
 
     it('every theme JSON has required CSS variables', () => {

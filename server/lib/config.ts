@@ -62,6 +62,7 @@ export interface User {
     username: string;
     passwordHash: string;
     role: string;
+    /** @deprecated Site theme is config.currentTheme only; ignored if present in old users.json */
     theme?: string;
 }
 

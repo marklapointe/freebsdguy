@@ -271,10 +271,12 @@ describe('API Endpoints', () => {
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('token');
         expect(res.body.role).toBe('admin');
+        // Theme is site-wide — not a login/session field
+        expect(res.body.theme).toBeUndefined();
         adminToken = res.body.token;
     });
 
-    it('POST /api/theme requires authentication', async () => {
+    it('POST /api/theme requires admin (not merely authenticated)', async () => {
         const unauth = await request(app)
             .post('/api/theme')
             .send({ currentTheme: 'dark' });

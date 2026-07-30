@@ -103,11 +103,41 @@ export function loadThemeColors(themeDir: string, id: string): ThemeColors | nul
     return null;
 }
 
+const THEME_LABELS: Record<string, string> = {
+    dark: 'Dark',
+    light: 'Light',
+    'miami-vice': 'Miami Vice',
+    'miami-cyberpunk': 'Miami Cyberpunk',
+    'retro-crt': 'Retro CRT',
+    win95: 'Windows 95',
+    sunos: 'SunOS',
+    cde: 'CDE / Motif',
+    'modern-glass': 'Modern Glass',
+    'c64-green': 'Commodore 64',
+    'zx-spectrum': 'ZX Spectrum',
+    'dos-prompt': 'DOS Prompt',
+    gameboy: 'Game Boy',
+    'nes-classic': 'NES Classic',
+    'snes-pastel': 'SNES Pastel',
+    doom: 'Doom',
+    matrix: 'Matrix',
+    vaporwave: 'Vaporwave',
+    'arcade-neon': 'Arcade Neon',
+    'star-wars': 'Star Wars',
+    portal: 'Portal / Aperture',
+    'zelda-green': 'Zelda Green',
+    'sonic-blue': 'Sonic Blue',
+    pokemon: 'Pokémon',
+    minecraft: 'Minecraft'
+};
+
 export function themeMetaFromId(id: string, colors?: ThemeColors | null): ThemeMeta {
-    const label = id
-        .split('-')
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(' ');
+    const label =
+        THEME_LABELS[id] ||
+        id
+            .split('-')
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
     const mdEditorTheme =
         colors?.mdEditorTheme === 'light' || colors?.mdEditorTheme === 'dark'
             ? colors.mdEditorTheme

@@ -465,6 +465,9 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     {activeTab === 'appearance' && user.role === 'admin' && (
                         <div>
                             <h1 className="text-3xl font-bold mb-6">Appearance</h1>
+                            <p className="text-sm opacity-60 mb-4">
+                                Site theme is admin-only. Visitors always see the theme you set here (no public theme switcher).
+                            </p>
                             <div className="bg-secondary rounded-lg p-6 space-y-6">
                                 <div>
                                     <label className="block text-sm font-bold mb-2">Theme preset ({themeCatalog.length || '…'} available)</label>
@@ -487,7 +490,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         ))}
                                     </select>
                                     <p className="text-xs opacity-50 mt-2">
-                                        Includes retro (Miami Vice, CRT, Win95, C64, ZX…) and game-inspired packs (Game Boy, NES, Doom, Portal, Zelda…).
+                                        Includes Miami Cyberpunk, Miami Vice, CRT, Win95, C64, ZX, and game packs (Game Boy, NES, Doom, Portal, Zelda…).
                                     </p>
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">

@@ -20,7 +20,6 @@ export interface ImageInfo {
 export interface User {
     username: string;
     role: string;
-    theme?: string;
 }
 
 export interface AlertType {

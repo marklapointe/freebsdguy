@@ -17,17 +17,17 @@ function App() {
     const [notifications, setNotifications] = useState<AlertType[]>([]);
 
     useEffect(() => {
+        // Site theme is always from config (admin Appearance) — never per-user / localStorage
         api.get('/config').then(res => {
             setSiteName(res.data.siteName || 'MDWeb');
             setSiteLogo(res.data.siteLogo);
-            if (!user) applyTheme(res.data.currentTheme);
+            applyTheme(res.data.currentTheme || 'dark');
         });
         const token = localStorage.getItem('token');
         const role = localStorage.getItem('role');
         const username = localStorage.getItem('username');
         if (token) {
-            const localTheme = localStorage.getItem('theme');
-            setUser({ role: role || 'contributor', username: username || 'unknown', theme: (localTheme === 'light' || localTheme === 'dark') ? localTheme : undefined });
+            setUser({ role: role || 'contributor', username: username || 'unknown' });
         }
     }, []);
 

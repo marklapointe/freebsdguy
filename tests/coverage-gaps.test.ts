@@ -99,7 +99,7 @@ describe('Theme Update with Admin Token', () => {
         adminToken = jwt.sign({ username: 'admin', role: 'admin' }, SECRET);
     });
 
-    it('POST /api/theme should update admin theme when admin is logged in', async () => {
+    it('POST /api/theme should update site currentTheme when admin is logged in', async () => {
         const res = await request(app)
             .post('/api/theme')
             .set('Authorization', `Bearer ${adminToken}`)
@@ -107,9 +107,10 @@ describe('Theme Update with Admin Token', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.message).toContain('updated');
+        expect(res.body.currentTheme).toBe('light');
     });
 
-    it('POST /api/theme should update user theme when regular user is logged in', async () => {
+    it('POST /api/theme rejects non-admin authenticated users', async () => {
         const users = loadUsers();
         users.users.push({
             username: 'themeuser',
@@ -125,8 +126,7 @@ describe('Theme Update with Admin Token', () => {
             .set('Authorization', `Bearer ${userToken}`)
             .send({ currentTheme: 'dark' });
 
-        expect(res.status).toBe(200);
-        expect(res.body.message).toContain('updated');
+        expect(res.status).toBe(403);
     });
 
     it('POST /api/theme rejects invalid token', async () => {

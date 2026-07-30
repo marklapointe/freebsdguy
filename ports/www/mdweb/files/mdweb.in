@@ -12,7 +12,9 @@ rcvar="mdweb_enable"
 load_rc_config $name
 
 : ${mdweb_enable:="NO"}
-: ${mdweb_user:="www"}
+# NOTE: do not set ${name}_user — FreeBSD rc.subr would su -m as that user,
+# and daemon -u then fails (empty pidfile). We drop privs only via daemon -u.
+: ${mdweb_runas:="www"}
 : ${mdweb_group:="www"}
 : ${mdweb_dir:="%%WWWDIR%%"}
 : ${mdweb_port:="5173"}
@@ -33,7 +35,8 @@ export CONFIG_DIR="${mdweb_config_dir}"
 export PORT="${mdweb_port}"
 # JWT_SECRET must be set in mdweb.env for production
 
-command_args="-f -p ${pidfile} -r -u ${mdweb_user} \
+# Root runs daemon; -u drops to www; -p writes child (node) pid for status
+command_args="-f -p ${pidfile} -u ${mdweb_runas} \
 	/usr/bin/env NODE_ENV=production CONFIG_DIR=${mdweb_config_dir} PORT=${mdweb_port} JWT_SECRET=${JWT_SECRET} \
 	${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts -p ${mdweb_port}"
 
@@ -48,11 +51,13 @@ mdweb_prestart()
 	fi
 
 	install -d -o root -g wheel -m 0755 /var/run/mdweb
+	# child process (www) must write the pidfile
+	chown ${mdweb_runas}:${mdweb_group} /var/run/mdweb
+	chmod 0755 /var/run/mdweb
 
-	# Ensure writable data dirs exist
 	for d in /var/db/mdweb/posts /var/db/mdweb/posts/images /var/db/mdweb/themes; do
 		if [ ! -d "${d}" ]; then
-			install -d -o ${mdweb_user} -g ${mdweb_group} -m 0755 "${d}"
+			install -d -o ${mdweb_runas} -g ${mdweb_group} -m 0755 "${d}"
 		fi
 	done
 

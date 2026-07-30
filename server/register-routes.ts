@@ -50,11 +50,11 @@ app.post('/api/login', loginLimiter, async (req: Request, res: Response) => {
         if (match) {
             console.log(`[AUTH] Admin login successful: ${username}`);
             const token = jwt.sign({ username: usersConfig.admin.username, role: usersConfig.admin.role }, SECRET, { expiresIn: '24h' });
-            return res.json({ 
-                token, 
-                role: usersConfig.admin.role, 
-                username: usersConfig.admin.username,
-                theme: usersConfig.admin.theme 
+            // Theme is site-wide (admin Appearance only) — not returned per-user on login
+            return res.json({
+                token,
+                role: usersConfig.admin.role,
+                username: usersConfig.admin.username
             });
         }
     }
@@ -66,11 +66,10 @@ app.post('/api/login', loginLimiter, async (req: Request, res: Response) => {
         if (match) {
             console.log(`[AUTH] User login successful: ${username}`);
             const token = jwt.sign({ username: user.username, role: user.role }, SECRET, { expiresIn: '24h' });
-            return res.json({ 
-                token, 
-                role: user.role, 
-                username: user.username,
-                theme: user.theme 
+            return res.json({
+                token,
+                role: user.role,
+                username: user.username
             });
         }
     }
@@ -833,8 +832,8 @@ app.get('/api/theme', (req: Request, res: Response) => {
     });
 });
 
-// Theme write requires auth (INV-AUTH-2: only admin mutates global site theme)
-app.post('/api/theme', authenticate, (req: AuthenticatedRequest, res: Response) => {
+// Theme write: admin-only site preference (config.currentTheme only — never per-user)
+app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     const { currentTheme } = req.body;
     if (!currentTheme || typeof currentTheme !== 'string' || !isValidThemeId(currentTheme)) {
         return res.status(400).json({ message: 'currentTheme must be a valid theme id' });
@@ -847,27 +846,11 @@ app.post('/api/theme', authenticate, (req: AuthenticatedRequest, res: Response) 
         return res.status(404).json({ message: `Theme not found: ${currentTheme}` });
     }
 
-    const usersConfig = loadUsers();
-    const username = req.user?.username as string | undefined;
-    if (!username) return res.status(401).json({ message: 'No token' });
-
-    if (req.user.role === 'admin' || usersConfig.admin.username === username) {
-        usersConfig.admin.theme = currentTheme;
-        saveUsers(usersConfig);
-        config.currentTheme = currentTheme;
-        saveConfig(config);
-        setActive(config);
-        console.log(`[INFO] Admin updated global theme to: ${currentTheme}`);
-        return res.json({ message: 'Global and Admin theme updated', currentTheme });
-    }
-
-    const userIndex = usersConfig.users.findIndex(u => u.username === username);
-    if (userIndex === -1) {
-        return res.status(404).json({ message: 'User not found' });
-    }
-    usersConfig.users[userIndex].theme = currentTheme;
-    saveUsers(usersConfig);
-    res.json({ message: 'User theme updated', currentTheme });
+    config.currentTheme = currentTheme;
+    saveConfig(config);
+    setActive(config);
+    console.log(`[INFO] Admin set site theme to: ${currentTheme}`);
+    res.json({ message: 'Site theme updated', currentTheme });
 });
 
 

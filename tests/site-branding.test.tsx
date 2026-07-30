@@ -37,7 +37,7 @@ vi.mock('../src/lib/api', () => ({
         { id: 'dark', label: 'Dark', mdEditorTheme: 'dark' },
         { id: 'light', label: 'Light', mdEditorTheme: 'light' }
     ]),
-    cycleTheme: vi.fn(),
+    setSiteTheme: vi.fn(),
     siteConfig: {
         load: (...args: unknown[]) => siteConfigLoad(...args),
         get: vi.fn().mockReturnValue(null),

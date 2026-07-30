@@ -112,15 +112,14 @@ export const applyTheme = async (themeName?: string): Promise<ThemeColors | null
         });
         root.setAttribute('data-theme', themeName || themeData.mdEditorTheme || 'dark');
 
-        if (themeName) {
-            localStorage.setItem('theme', themeName);
-        }
+        // Editor light/dark only — site theme lives in server config (admin Appearance)
         if (themeData.mdEditorTheme === 'light' || themeData.mdEditorTheme === 'dark') {
             localStorage.setItem('mdEditorTheme', themeData.mdEditorTheme);
         } else {
-            // Heuristic from bg luminance is server-side; default dark for editor
             localStorage.setItem('mdEditorTheme', 'dark');
         }
+        // Drop any legacy per-user theme override
+        localStorage.removeItem('theme');
         return themeData;
     } catch (error) {
         console.error('Failed to load theme', error);
@@ -146,17 +145,15 @@ export const fetchThemeCatalog = async (): Promise<ThemeMeta[]> => {
     }
 };
 
-/** Cycle to next theme in catalog; requires auth for POST /theme */
-export const cycleTheme = async (currentId: string, catalog: ThemeMeta[]): Promise<string | null> => {
-    if (!catalog.length) return null;
-    const idx = catalog.findIndex(t => t.id === currentId);
-    const next = catalog[(idx + 1) % catalog.length] || catalog[0];
+/** Admin-only: persist site-wide theme (POST /api/theme requires admin). */
+export const setSiteTheme = async (themeId: string): Promise<boolean> => {
     try {
-        await api.post('/theme', { currentTheme: next.id });
-    } catch {
-        // Anonymous users: still apply locally
+        await api.post('/theme', { currentTheme: themeId });
+        await applyTheme(themeId);
+        window.dispatchEvent(new CustomEvent('themeChanged', { detail: themeId }));
+        return true;
+    } catch (e) {
+        console.error('Failed to set site theme (admin only)', e);
+        return false;
     }
-    await applyTheme(next.id);
-    window.dispatchEvent(new CustomEvent('themeChanged', { detail: next.id }));
-    return next.id;
 };

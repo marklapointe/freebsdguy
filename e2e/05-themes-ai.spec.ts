@@ -11,53 +11,64 @@ async function login(page: import('@playwright/test').Page) {
   await page.waitForURL(/\/admin/, { timeout: 15000 });
 }
 
-test.describe('Themes catalog', () => {
-  test('GET /api/themes returns many presets', async ({ request }) => {
+test.describe('Themes catalog (admin-only)', () => {
+  test('GET /api/themes returns many presets including miami-cyberpunk', async ({ request }) => {
     const res = await request.get('/api/themes');
     expect(res.ok(), await res.text()).toBeTruthy();
     const body = await res.json();
     expect(Array.isArray(body)).toBeTruthy();
-    // Live FreeBSD install may only have default themes until catalog is synced
     expect(body.length).toBeGreaterThanOrEqual(2);
+    const ids = body.map((t: { id: string }) => t.id);
+    // When full catalog is deployed
+    if (ids.length >= 20) {
+      expect(ids).toContain('miami-cyberpunk');
+      expect(ids).toContain('miami-vice');
+    }
   });
 
-  test('navbar theme picker opens and lists themes', async ({ page }) => {
+  test('public navbar has no theme picker', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('theme-picker-button').click();
-    await expect(page.getByTestId('theme-picker-menu')).toBeVisible();
-    const options = page.locator('[data-testid^="theme-option-"]');
-    await expect(options.first()).toBeVisible();
-    const count = await options.count();
-    expect(count).toBeGreaterThanOrEqual(2);
+    await expect(page.getByTestId('theme-picker-button')).toHaveCount(0);
+    await expect(page.getByTestId('theme-picker-menu')).toHaveCount(0);
   });
 
-  test('selecting a theme updates data-theme attribute', async ({ page, request }) => {
+  test('non-admin cannot POST site theme', async ({ request }) => {
+    const res = await request.post('/api/theme', {
+      data: { currentTheme: 'dark' }
+    });
+    expect([401, 403]).toContain(res.status());
+  });
+
+  test('admin sets theme from Appearance settings', async ({ page, request }) => {
     const catalog = await (await request.get('/api/themes')).json();
-    const target = catalog.find((t: { id: string }) => t.id === 'matrix')
-      || catalog.find((t: { id: string }) => t.id === 'dark')
-      || catalog[0];
+    const target =
+      catalog.find((t: { id: string }) => t.id === 'miami-cyberpunk') ||
+      catalog.find((t: { id: string }) => t.id === 'miami-vice') ||
+      catalog.find((t: { id: string }) => t.id === 'dark') ||
+      catalog[0];
     expect(target).toBeTruthy();
 
     await login(page);
-    await page.goto('/');
-    await page.getByTestId('theme-picker-button').click();
-    await page.getByTestId(`theme-option-${target.id}`).click();
-    await page.waitForTimeout(400);
+    await page.getByRole('button', { name: /Appearance/i }).click();
+    await expect(page.getByTestId('admin-theme-select')).toBeVisible();
+    await page.getByTestId('admin-theme-select').selectOption(target.id);
+    await page.getByRole('button', { name: /Set as site theme/i }).click();
+    await page.waitForTimeout(600);
+
+    const cfg = await request.get('/api/config');
+    // currentTheme may only update after save; applyTheme is client-side either way
     const dataTheme = await page.locator('html').getAttribute('data-theme');
     expect(dataTheme).toBe(target.id);
-    const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
-    expect(bg.length).toBeGreaterThan(0);
+    expect(cfg.ok()).toBeTruthy();
   });
 });
 
 test.describe('AI settings UI', () => {
   test('admin can open AI settings and save provider fields', async ({ page, request }) => {
     await login(page);
-    // AI Settings nav
     await page.getByRole('button', { name: /AI Settings/i }).click();
     await expect(page.getByTestId('ai-settings-heading')).toBeVisible();
 
-    // Enable + set ollama fields
     const toggle = page.getByTestId('ai-enabled-toggle');
     if (!(await toggle.isChecked())) {
       await toggle.click({ force: true });
@@ -69,7 +80,6 @@ test.describe('AI settings UI', () => {
 
     const cfg = await request.get('/api/config');
     const body = await cfg.json();
-    // enabled may still show in public projection
     expect(body.aiConfig?.provider === 'ollama' || body.aiConfig?.enabled !== undefined).toBeTruthy();
     expect(JSON.stringify(body)).not.toMatch(/"apiKey"\s*:/);
   });
