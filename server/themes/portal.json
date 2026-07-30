@@ -1,0 +1,11 @@
+{
+  "mdEditorTheme": "dark",
+  "--primary": "#ff9a00",
+  "--secondary": "#1b2838",
+  "--accent": "#66c0f4",
+  "--text": "#c7d5e0",
+  "--bg": "#1b2838",
+  "--border": "#2a475e",
+  "--hover": "#2a475e",
+  "--site-name-color": "#66c0f4"
+}

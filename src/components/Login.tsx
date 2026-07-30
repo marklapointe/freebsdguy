@@ -24,11 +24,10 @@ export const Login = ({ setUser }: LoginProps) => {
                 role: res.data.role,
                 theme: res.data.theme
             };
-            if (res.data.theme && (res.data.theme === 'light' || res.data.theme === 'dark')) {
+            if (res.data.theme && typeof res.data.theme === 'string') {
                 localStorage.setItem('theme', res.data.theme);
                 applyTheme(res.data.theme);
             } else {
-                localStorage.removeItem('theme');
                 applyTheme();
             }
             localStorage.setItem('username', userObj.username);

@@ -18,6 +18,14 @@ import { PublicConfigBuilder } from './lib/public-config.ts';
 import { isSafePath } from './lib/safe-path.ts';
 import { isAllowedRole, AuthenticatedRequest } from './middleware/auth.ts';
 import type { AppContext } from './lib/app-context.ts';
+import {
+    isValidThemeId,
+    listThemeCatalog,
+    listThemeIds,
+    loadThemeColors,
+    resolveThemeDir,
+    themeFilePath
+} from './lib/themes.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -586,39 +594,51 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
     res.json({ message: 'Configuration updated' });
 });
 
-// Admin: Get all themes
-app.get('/api/admin/themes', authenticate, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-    // Strictly only light and dark themes are allowed
-    res.json(['light', 'dark']);
+const themeDirForConfig = () => {
+    const config = loadConfig();
+    const configDir = path.dirname(configPath());
+    return resolveThemeDir(path.resolve(configDir, config.themeDir || './themes'));
+};
+
+// Public theme catalog (ids + labels for pickers)
+app.get('/api/themes', (_req: Request, res: Response) => {
+    res.json(listThemeCatalog(themeDirForConfig()));
 });
 
-// Admin: Update theme
+// Admin: Get all themes (catalog with metadata)
+app.get('/api/admin/themes', authenticate, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
+    res.json(listThemeCatalog(themeDirForConfig()));
+});
+
+// Admin: Update theme colors for any valid theme id
 app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-    const name = req.params.name;
-    
-    if (name !== 'light' && name !== 'dark') {
-        return res.status(400).json({ message: 'Only light and dark themes can be modified' });
+    const name = String(req.params.name || '');
+    if (!isValidThemeId(name)) {
+        return res.status(400).json({ message: 'Invalid theme name' });
     }
 
-    const colors = req.body;
-    
-    // Basic validation and sanitization of theme colors
-    const sanitizedColors: any = {};
+    const colors = req.body as Record<string, unknown>;
+    const sanitizedColors: Record<string, string> = {};
     for (const [key, value] of Object.entries(colors)) {
         if (key.startsWith('--') && typeof value === 'string') {
             sanitizedColors[key] = sanitizeHtml(value, { allowedTags: [], allowedAttributes: {} });
         }
     }
+    if (colors.mdEditorTheme === 'light' || colors.mdEditorTheme === 'dark') {
+        sanitizedColors.mdEditorTheme = colors.mdEditorTheme;
+    }
 
     const config = loadConfig();
     const configDir = path.dirname(configPath());
     const themeDir = path.resolve(configDir, config.themeDir);
+    const themePath = themeFilePath(themeDir, name);
+    if (!themePath) return res.status(400).json({ message: 'Invalid theme path' });
 
     if (!fs.existsSync(themeDir)) {
         fs.mkdirSync(themeDir, { recursive: true });
     }
 
-    fs.writeFileSync(path.join(themeDir, `${name}.json`), JSON.stringify(sanitizedColors, null, 2));
+    fs.writeFileSync(themePath, JSON.stringify(sanitizedColors, null, 2));
     res.json({ message: `Theme ${name} saved` });
 });
 
@@ -793,60 +813,47 @@ app.get('/api/admin/config-status', authenticate, requireAdmin, (_req: Authentic
 
 app.get('/api/theme', (req: Request, res: Response) => {
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const themeDir = path.resolve(configDir, config.themeDir);
-    const themeName = (req.query.name as string) || config.currentTheme;
-    const themePath = path.join(themeDir, `${themeName}.json`);
-    
-    if (fs.existsSync(themePath)) {
-        try {
-            res.json(JSON.parse(fs.readFileSync(themePath, 'utf8')));
-        } catch (e) {
-            console.error(`Error reading theme file ${themePath}:`, e);
-            res.status(500).json({ message: 'Error reading theme file' });
-        }
-    } else if (themeName === 'dark') {
-        res.json({
-            "--primary": "#3b82f6",
-            "--secondary": "#1f2937",
-            "--accent": "#3a297a",
-            "--text": "#f3f4f6",
-            "--bg": "#111827",
-            "--border": "#374151",
-            "--hover": "#1f2937",
-            "--site-name-color": "#3b82f6"
-        });
-    } else {
-        // Default to light
-        res.json({
-            "--primary": "#2563eb",
-            "--secondary": "#f3f4f6",
-            "--accent": "#ef4444",
-            "--text": "#111827",
-            "--bg": "#ffffff",
-            "--border": "#e5e7eb",
-            "--hover": "#f3f4f6",
-            "--site-name-color": "#2563eb"
-        });
+    const themeDir = themeDirForConfig();
+    const themeName = String((req.query.name as string) || config.currentTheme || 'dark');
+    const colors = loadThemeColors(themeDir, themeName);
+    if (colors) {
+        return res.json(colors);
     }
+    // Fallback dark palette
+    res.json({
+        mdEditorTheme: 'dark',
+        '--primary': '#3b82f6',
+        '--secondary': '#1f2937',
+        '--accent': '#3a297a',
+        '--text': '#f3f4f6',
+        '--bg': '#111827',
+        '--border': '#374151',
+        '--hover': '#1f2937',
+        '--site-name-color': '#3b82f6'
+    });
 });
 
-// Theme write requires auth (INV-AUTH-2: only admin mutates global)
+// Theme write requires auth (INV-AUTH-2: only admin mutates global site theme)
 app.post('/api/theme', authenticate, (req: AuthenticatedRequest, res: Response) => {
     const { currentTheme } = req.body;
-    if (!currentTheme || (currentTheme !== 'light' && currentTheme !== 'dark')) {
-        return res.status(400).json({ message: 'currentTheme must be light or dark' });
+    if (!currentTheme || typeof currentTheme !== 'string' || !isValidThemeId(currentTheme)) {
+        return res.status(400).json({ message: 'currentTheme must be a valid theme id' });
+    }
+
+    const config = loadConfig();
+    const themeDir = themeDirForConfig();
+    const known = listThemeIds(themeDir);
+    if (!known.includes(currentTheme) && !loadThemeColors(themeDir, currentTheme)) {
+        return res.status(404).json({ message: `Theme not found: ${currentTheme}` });
     }
 
     const usersConfig = loadUsers();
     const username = req.user?.username as string | undefined;
     if (!username) return res.status(401).json({ message: 'No token' });
 
-    // Admin updates personal + global theme
     if (req.user.role === 'admin' || usersConfig.admin.username === username) {
         usersConfig.admin.theme = currentTheme;
         saveUsers(usersConfig);
-        const config = loadConfig();
         config.currentTheme = currentTheme;
         saveConfig(config);
         setActive(config);

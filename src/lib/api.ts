@@ -89,22 +89,74 @@ class SiteConfig {
 
 export const siteConfig = SiteConfig.getInstance();
 
-export const applyTheme = async (themeName?: string) => {
+export interface ThemeMeta {
+    id: string;
+    label: string;
+    mdEditorTheme: 'light' | 'dark';
+    description?: string;
+}
+
+export type ThemeColors = Record<string, string>;
+
+/** Apply CSS variables from a theme payload; only --* keys hit the DOM */
+export const applyTheme = async (themeName?: string): Promise<ThemeColors | null> => {
     try {
-        const url = themeName ? `/theme?name=${themeName}` : '/theme';
+        const url = themeName ? `/theme?name=${encodeURIComponent(themeName)}` : '/theme';
         const response = await api.get(url);
-        const themeData = response.data;
+        const themeData = response.data as ThemeColors;
         const root = document.documentElement;
         Object.entries(themeData).forEach(([key, value]) => {
-            root.style.setProperty(key, value as string);
+            if (key.startsWith('--') && typeof value === 'string') {
+                root.style.setProperty(key, value);
+            }
         });
+        root.setAttribute('data-theme', themeName || themeData.mdEditorTheme || 'dark');
 
-        if (themeName === 'light' || themeName === 'dark') {
+        if (themeName) {
             localStorage.setItem('theme', themeName);
-        } else if (themeName) {
-            localStorage.removeItem('theme');
         }
+        if (themeData.mdEditorTheme === 'light' || themeData.mdEditorTheme === 'dark') {
+            localStorage.setItem('mdEditorTheme', themeData.mdEditorTheme);
+        } else {
+            // Heuristic from bg luminance is server-side; default dark for editor
+            localStorage.setItem('mdEditorTheme', 'dark');
+        }
+        return themeData;
     } catch (error) {
         console.error('Failed to load theme', error);
+        return null;
     }
+};
+
+export const getMdEditorTheme = (): 'light' | 'dark' => {
+    const t = localStorage.getItem('mdEditorTheme');
+    return t === 'light' ? 'light' : 'dark';
+};
+
+export const fetchThemeCatalog = async (): Promise<ThemeMeta[]> => {
+    try {
+        const res = await api.get('/themes');
+        return Array.isArray(res.data) ? res.data : [];
+    } catch (e) {
+        console.error('Failed to load theme catalog', e);
+        return [
+            { id: 'dark', label: 'Dark', mdEditorTheme: 'dark' },
+            { id: 'light', label: 'Light', mdEditorTheme: 'light' }
+        ];
+    }
+};
+
+/** Cycle to next theme in catalog; requires auth for POST /theme */
+export const cycleTheme = async (currentId: string, catalog: ThemeMeta[]): Promise<string | null> => {
+    if (!catalog.length) return null;
+    const idx = catalog.findIndex(t => t.id === currentId);
+    const next = catalog[(idx + 1) % catalog.length] || catalog[0];
+    try {
+        await api.post('/theme', { currentTheme: next.id });
+    } catch {
+        // Anonymous users: still apply locally
+    }
+    await applyTheme(next.id);
+    window.dispatchEvent(new CustomEvent('themeChanged', { detail: next.id }));
+    return next.id;
 };

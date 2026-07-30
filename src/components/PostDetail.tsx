@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
-import { api, siteConfig } from '../lib/api';
+import { api, siteConfig, getMdEditorTheme } from '../lib/api';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -9,7 +9,7 @@ export const PostDetail = () => {
     const [post, setPost] = useState<Post | null>(null);
     const [id] = useState('preview-only');
     const scrollElement = document.documentElement;
-    const [theme, setTheme] = useState<'light' | 'dark'>(localStorage.getItem('theme') as 'light' | 'dark' || 'dark');
+    const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {
         siteConfig.load();
@@ -25,11 +25,7 @@ export const PostDetail = () => {
     }, [slug]);
 
     useEffect(() => {
-        const handleThemeChanged = (e: CustomEvent) => {
-            if (e.detail && (e.detail === 'light' || e.detail === 'dark')) {
-                setTheme(e.detail);
-            }
-        };
+        const handleThemeChanged = () => setEditorTheme(getMdEditorTheme());
         window.addEventListener('themeChanged' as any, handleThemeChanged);
         return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
     }, []);
@@ -50,7 +46,7 @@ export const PostDetail = () => {
                         <MdPreview
                             id={id}
                             modelValue={post.content}
-                            theme={theme}
+                            theme={editorTheme}
                             language="en-US"
                         />
                     </div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Plus, Pin } from 'lucide-react';
 import { MdPreview } from 'md-editor-rt';
-import { api } from '../lib/api';
+import { api, getMdEditorTheme } from '../lib/api';
 import { Post } from '../types';
 
 export const Home = () => {
@@ -11,14 +11,10 @@ export const Home = () => {
     const [offset, setOffset] = useState(0);
     const [total, setTotal] = useState(0);
     const [limit] = useState(10);
-    const [theme, setTheme] = useState<'light' | 'dark'>(localStorage.getItem('theme') as 'light' | 'dark' || 'dark');
+    const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {
-        const handleThemeChanged = (e: CustomEvent) => {
-            if (e.detail && (e.detail === 'light' || e.detail === 'dark')) {
-                setTheme(e.detail);
-            }
-        };
+        const handleThemeChanged = () => setEditorTheme(getMdEditorTheme());
         window.addEventListener('themeChanged' as any, handleThemeChanged);
         return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
     }, []);
@@ -75,7 +71,7 @@ export const Home = () => {
                         <div className="mb-4 prose-sm max-w-none">
                             <MdPreview
                                 modelValue={post.summary}
-                                theme={theme}
+                                theme={editorTheme}
                                 language="en-US"
                             />
                         </div>

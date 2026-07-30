@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, applyTheme } from '../../lib/api';
+import { api, applyTheme, getMdEditorTheme, type ThemeMeta } from '../../lib/api';
 import { PostModal } from '../PostModal';
 import { ImagePickerModal, ImagePreviewModal } from '../ImageModals';
 import { User, Post, ImageInfo } from '../../types';
@@ -49,6 +49,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const [enhancedPreview, setEnhancedPreview] = useState<string | null>(null);
     const [modelsList, setModelsList] = useState<string[]>([]);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
+    const [themeCatalog, setThemeCatalog] = useState<ThemeMeta[]>([]);
+    const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     const themeLabelMap: Record<string, string> = {
         '--primary': 'Primary', '--secondary': 'Secondary', '--accent': 'Accent',
@@ -58,18 +60,23 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
 
     const getThemeLabel = (key: string) => themeLabelMap[key] || key.replace(/^--/, '').charAt(0).toUpperCase() + key.replace(/^--/, '').slice(1);
 
+    const cssColorEntries = (colors: Record<string, string> | null) =>
+        Object.entries(colors || {}).filter(([k, v]) => k.startsWith('--') && typeof v === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v));
+
     useEffect(() => {
         if (themeColors) {
             const root = document.documentElement;
             Object.entries(themeColors).forEach(([key, value]) => {
-                root.style.setProperty(key, value as string);
+                if (key.startsWith('--') && typeof value === 'string') {
+                    root.style.setProperty(key, value);
+                }
             });
         }
     }, [themeColors]);
 
     useEffect(() => {
         if (activeTab === 'appearance' || !themeColors) {
-            api.get('/theme?name=' + config.currentTheme).then(res => setThemeColors(res.data));
+            api.get('/theme?name=' + encodeURIComponent(config.currentTheme)).then(res => setThemeColors(res.data));
         }
     }, [activeTab, config.currentTheme]);
 
@@ -78,7 +85,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             const newTheme = e.detail;
             if (newTheme && typeof newTheme === 'string') {
                 setConfig((prev: any) => ({ ...prev, currentTheme: newTheme }));
-                api.get('/theme?name=' + newTheme).then(res => setThemeColors(res.data));
+                setEditorTheme(getMdEditorTheme());
+                api.get('/theme?name=' + encodeURIComponent(newTheme)).then(res => setThemeColors(res.data));
             }
         };
         window.addEventListener('themeChanged' as any, handleThemeChanged);
@@ -104,7 +112,15 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
 
     const fetchUsers = () => api.get('/admin/users').then(res => { setUsers(res.data); return res; });
     const fetchPosts = () => api.get('/posts').then(res => { setPosts(res.data); return res; });
-    const fetchThemes = () => api.get('/admin/themes').then(res => { return res; });
+    const fetchThemes = () => api.get('/admin/themes').then(res => {
+        const data = res.data;
+        if (Array.isArray(data) && data.length && typeof data[0] === 'object') {
+            setThemeCatalog(data as ThemeMeta[]);
+        } else if (Array.isArray(data)) {
+            setThemeCatalog((data as string[]).map(id => ({ id, label: id, mdEditorTheme: 'dark' as const })));
+        }
+        return res;
+    });
     const fetchImages = () => {
         const limit = imagesPerPage;
         const offset = (imagePage - 1) * (limit === 'all' ? 0 : parseInt(limit, 10));
@@ -451,17 +467,60 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                             <h1 className="text-3xl font-bold mb-6">Appearance</h1>
                             <div className="bg-secondary rounded-lg p-6 space-y-6">
                                 <div>
-                                    <label className="block text-sm font-bold mb-2">Theme</label>
-                                    <select value={config.currentTheme} onChange={e => setConfig((prev: any) => ({ ...prev, currentTheme: e.target.value }))} className="w-full p-3 bg-bg border border-accent rounded text-text">
-                                        <option value="light">Light</option>
-                                        <option value="dark">Dark</option>
+                                    <label className="block text-sm font-bold mb-2">Theme preset ({themeCatalog.length || '…'} available)</label>
+                                    <select
+                                        data-testid="admin-theme-select"
+                                        value={config.currentTheme}
+                                        onChange={e => {
+                                            const id = e.target.value;
+                                            setConfig((prev: any) => ({ ...prev, currentTheme: id }));
+                                            applyTheme(id);
+                                            window.dispatchEvent(new CustomEvent('themeChanged', { detail: id }));
+                                        }}
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                    >
+                                        {(themeCatalog.length
+                                            ? themeCatalog
+                                            : [{ id: 'dark', label: 'Dark' }, { id: 'light', label: 'Light' }]
+                                        ).map(t => (
+                                            <option key={t.id} value={t.id}>{t.label}</option>
+                                        ))}
                                     </select>
+                                    <p className="text-xs opacity-50 mt-2">
+                                        Includes retro (Miami Vice, CRT, Win95, C64, ZX…) and game-inspired packs (Game Boy, NES, Doom, Portal, Zelda…).
+                                    </p>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                    {themeCatalog.map(t => (
+                                        <button
+                                            key={t.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setConfig((prev: any) => ({ ...prev, currentTheme: t.id }));
+                                                applyTheme(t.id);
+                                                window.dispatchEvent(new CustomEvent('themeChanged', { detail: t.id }));
+                                            }}
+                                            className={`p-3 rounded border text-left text-sm transition ${
+                                                config.currentTheme === t.id
+                                                    ? 'border-accent bg-accent text-white'
+                                                    : 'border-border hover:bg-hover'
+                                            }`}
+                                        >
+                                            <span className="font-bold block truncate">{t.label}</span>
+                                            <span className="text-xs opacity-60">{t.mdEditorTheme} editor</span>
+                                        </button>
+                                    ))}
                                 </div>
                                 {themeColors && (
                                     <div className="grid grid-cols-2 gap-4">
-                                        {Object.entries(themeColors).map(([key, value]) => (
+                                        {cssColorEntries(themeColors).map(([key, value]) => (
                                             <div key={key} className="flex items-center gap-4">
-                                                <input type="color" value={value as string} onChange={e => setThemeColors((prev: any) => ({ ...prev, [key]: e.target.value }))} className="w-12 h-12 rounded cursor-pointer" />
+                                                <input
+                                                    type="color"
+                                                    value={value as string}
+                                                    onChange={e => setThemeColors((prev: any) => ({ ...prev, [key]: e.target.value }))}
+                                                    className="w-12 h-12 rounded cursor-pointer"
+                                                />
                                                 <div>
                                                     <p className="font-bold text-sm">{getThemeLabel(key)}</p>
                                                     <p className="text-xs opacity-50">{key}</p>
@@ -470,7 +529,14 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         ))}
                                     </div>
                                 )}
-                                <button onClick={handleSaveTheme} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save Theme</button>
+                                <div className="flex flex-wrap gap-3">
+                                    <button onClick={handleSaveConfig} className="bg-primary text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">
+                                        Set as site theme
+                                    </button>
+                                    <button onClick={handleSaveTheme} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">
+                                        Save color overrides
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -495,29 +561,29 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     )}
                     {activeTab === 'ai' && user.role === 'admin' && (
                         <div>
-                            <h1 className="text-3xl font-bold mb-6">AI Settings</h1>
-                            <div className="bg-secondary rounded-lg p-6 space-y-6">
+                            <h1 className="text-3xl font-bold mb-6" data-testid="ai-settings-heading">AI Settings</h1>
+                            <div className="bg-secondary rounded-lg p-6 space-y-6" data-testid="ai-settings-panel">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <h3 className="font-bold">AI Features</h3>
                                         <p className="text-sm opacity-50">Enable AI-powered features like auto-summarize and enhance</p>
                                     </div>
                                     <label className="relative inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" checked={config.aiConfig?.enabled || false} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, enabled: e.target.checked } }))} className="sr-only peer" />
+                                        <input data-testid="ai-enabled-toggle" type="checkbox" checked={config.aiConfig?.enabled || false} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, enabled: e.target.checked } }))} className="sr-only peer" />
                                         <div className="w-11 h-6 bg-bg rounded-full peer peer-checked:bg-accent transition"></div>
                                         <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:translate-x-5 transition"></div>
                                     </label>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">Provider</label>
-                                    <select value={config.aiConfig?.provider || 'ollama'} onChange={e => { setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, provider: e.target.value } })); if (e.target.value === 'openai') setModelsList([]); }} className="w-full p-3 bg-bg border border-accent rounded text-text">
+                                    <select data-testid="ai-provider-select" value={config.aiConfig?.provider || 'ollama'} onChange={e => { setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, provider: e.target.value } })); if (e.target.value === 'openai') setModelsList([]); }} className="w-full p-3 bg-bg border border-accent rounded text-text">
                                         <option value="ollama">Ollama (Local)</option>
                                         <option value="openai">OpenAI</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">Base URL</label>
-                                    <input type="text" value={config.aiConfig?.baseUrl || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, baseUrl: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" placeholder="http://localhost:11434" />
+                                    <input data-testid="ai-baseurl-input" type="text" value={config.aiConfig?.baseUrl || ''} onChange={e => setConfig((prev: any) => ({ ...prev, aiConfig: { ...prev.aiConfig, baseUrl: e.target.value } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" placeholder="http://localhost:11434" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">
@@ -556,7 +622,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         autoComplete="off"
                                     />
                                 </div>
-                                <button onClick={handleSaveAIConfig} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save AI Settings</button>
+                                <button data-testid="ai-save-button" onClick={handleSaveAIConfig} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save AI Settings</button>
                             </div>
                         </div>
                     )}
@@ -576,6 +642,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 onApplyEnhancement={() => { setEditingPost((prev: any) => ({ ...prev, content: enhancedPreview })); setEnhancedPreview(null); }}
                 onDismissEnhancement={() => setEnhancedPreview(null)}
                 aiEnabled={config.aiConfig?.enabled || false}
+                theme={editorTheme}
             />
             <ImagePickerModal isOpen={showLogoPicker} images={pickerImages} onSelect={handleLogoSelect} onClose={() => setShowLogoPicker(false)} onUpload={handleImageUpload} onPreview={(img) => setPreviewImage(img)} />
             <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} />

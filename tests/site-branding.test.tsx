@@ -31,7 +31,13 @@ vi.mock('../src/lib/api', () => ({
             response: { use: vi.fn(), eject: vi.fn() }
         }
     },
-    applyTheme: vi.fn(),
+    applyTheme: vi.fn().mockResolvedValue(null),
+    getMdEditorTheme: vi.fn().mockReturnValue('dark'),
+    fetchThemeCatalog: vi.fn().mockResolvedValue([
+        { id: 'dark', label: 'Dark', mdEditorTheme: 'dark' },
+        { id: 'light', label: 'Light', mdEditorTheme: 'light' }
+    ]),
+    cycleTheme: vi.fn(),
     siteConfig: {
         load: (...args: unknown[]) => siteConfigLoad(...args),
         get: vi.fn().mockReturnValue(null),

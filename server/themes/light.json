@@ -6,5 +6,6 @@
   "--bg": "#ffffff",
   "--border": "#e5e7eb",
   "--hover": "#f3f4f6",
-  "--site-name-color": "#2563eb"
+  "--site-name-color": "#2563eb",
+  "mdEditorTheme": "light"
 }

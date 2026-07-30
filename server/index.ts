@@ -95,6 +95,7 @@ const apiLimiter = rateLimit({
                 p === '/api/config' ||
                 p === '/api/theme' ||
                 p.startsWith('/api/theme?') ||
+                p === '/api/themes' ||
                 p.startsWith('/api/getimage') ||
                 p.startsWith('/api/images/')
             ) {

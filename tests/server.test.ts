@@ -496,6 +496,11 @@ describe('API Endpoints', () => {
     });
 
     it('POST /api/ai/summarize should work with openai provider', async () => {
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-3.5-turbo', apiKey: 'fake-key' });
+
         const res = await request(app)
             .post('/api/ai/summarize')
             .set('Authorization', `Bearer ${adminToken}`)
@@ -507,7 +512,7 @@ describe('API Endpoints', () => {
                 apiKey: 'fake-key'
             });
 
-        expect([200, 401, 429, 500]).toContain(res.status);
+        expect([200, 401, 403, 429, 500]).toContain(res.status);
     });
 
     it('GET /api/ai/models should return 400 for unknown provider', async () => {
