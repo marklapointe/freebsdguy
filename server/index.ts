@@ -75,15 +75,22 @@ const authenticate = guards.authenticate();
 const requireAdmin = guards.requireAdmin();
 const requireWriter = guards.requireContributorOrAdmin();
 
+// Helmet: disable upgrade-insecure-requests so HTTP FreeBSD deploys (no TLS terminator
+// yet) can load assets. Enable HSTS only when MDWEB_TLS=1.
 app.use(helmet({
     contentSecurityPolicy: {
+        useDefaults: true,
         directives: {
-            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
             "img-src": ["'self'", "data:", "https:"],
-            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // unsafe-eval needed for some dev builds/vite
-            "connect-src": ["'self'", "https://api.openai.com", "http://localhost:*"], // Allow AI APIs and local Ollama
+            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+            "connect-src": ["'self'", "https://api.openai.com", "http://localhost:*", "http://127.0.0.1:*"],
+            // Do not upgrade HTTP→HTTPS unless TLS is terminated in front
+            "upgrade-insecure-requests": null,
         },
     },
+    hsts: process.env.MDWEB_TLS === '1' ? undefined : false,
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
 // Rate limiting

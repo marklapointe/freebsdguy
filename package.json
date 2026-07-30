@@ -12,9 +12,13 @@
     "setup": "tsx server/scripts/setup.ts",
     "change-password": "tsx server/scripts/change-password.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:api-smoke": "bash scripts/api-smoke.sh",
+    "regression:freebsd": "bash scripts/freebsd-package-round.sh"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
