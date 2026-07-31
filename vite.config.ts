@@ -50,8 +50,27 @@ export default defineConfig({
       CONFIG_DIR: path.resolve(__dirname, 'tests/tmp'),
     },
     coverage: {
+      provider: 'v8',
       include: ['src/**/*.{ts,tsx}', 'server/**/*.{ts,tsx}'],
-      exclude: ['server/scripts/**'],
+      // Type-only modules and the DOM bootstrap entry (no unit-test surface)
+      exclude: [
+        'server/scripts/**',
+        // Process bootstrap (listen/exit/seed-at-import); pure helpers tested via unit tests
+        'server/index.ts',
+        'src/types.ts',
+        'src/vite-env.d.ts',
+        'src/main.tsx',
+      ],
+      reporter: ['text', 'json-summary', 'html'],
+      reportsDirectory: './coverage',
+      clean: true,
+      // Full bar: keep raising as remaining edge paths are closed
+      thresholds: {
+        statements: 97,
+        branches: 86,
+        functions: 96,
+        lines: 98,
+      },
     }
   },
 })

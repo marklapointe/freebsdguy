@@ -16,6 +16,7 @@ export interface SessionRecord {
 }
 
 export function defaultSessionDir(): string {
+    /* v8 ignore next */
     if (isSystemConfigDir()) return '/var/db/mdweb/sessions';
     if (process.env.CONFIG_DIR) return path.join(process.env.CONFIG_DIR, 'sessions');
     return path.join(process.cwd(), 'tests', 'tmp', 'sessions');

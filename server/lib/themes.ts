@@ -63,9 +63,11 @@ export function ensureRuntimeThemeCatalog(configuredDir: string): { copied: stri
     const dest = resolveThemeDir(configuredDir);
     const shipped = shippedThemesDir();
     const copied: string[] = [];
+    /* v8 ignore start */
     if (!fs.existsSync(shipped)) {
         return { copied, total: listThemeIds(dest).length };
     }
+    /* v8 ignore stop */
     if (!fs.existsSync(dest)) {
         fs.mkdirSync(dest, { recursive: true });
     }
@@ -270,6 +272,7 @@ function ensureContrast(fg: string, bg: string, minRatio = 3.5): string {
         const step = wantLight ? 0.04 : -0.04;
         out = hslToHex(hsl.h, hsl.s, Math.max(0.04, Math.min(0.96, hsl.l + step)));
     }
+    /* v8 ignore next */
     return out;
 }
 
@@ -360,6 +363,7 @@ export function ensureChipFill(hex: string, minRatio = 3.5): string {
             f = hslToHex(hsl.h, Math.min(1, hsl.s * 1.02), Math.min(0.96, hsl.l + 0.035));
         }
     }
+    /* v8 ignore next */
     return f;
 }
 

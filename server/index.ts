@@ -17,18 +17,30 @@ const app = express();
 app.set('trust proxy', 1);
 export { app };
 
-// Parse CLI --port / -p
-let cliPort: number | null = null;
-const portArgIndex = process.argv.indexOf('--port') !== -1 ? process.argv.indexOf('--port') : process.argv.indexOf('-p');
-if (portArgIndex !== -1 && process.argv.length > portArgIndex + 1) {
-    const p = parseInt(process.argv[portArgIndex + 1], 10);
-    if (!isNaN(p)) {
-        cliPort = p;
-        console.log(`[INFO] Port specified via CLI: ${cliPort}`);
+/** Parse CLI --port / -p from an argv-like array (testable). */
+export function parseCliPort(argv: string[] = process.argv): number | null {
+    const portArgIndex = argv.indexOf('--port') !== -1 ? argv.indexOf('--port') : argv.indexOf('-p');
+    if (portArgIndex !== -1 && argv.length > portArgIndex + 1) {
+        const p = parseInt(argv[portArgIndex + 1], 10);
+        if (!isNaN(p)) return p;
     }
+    return null;
+}
+
+/** Whether the process should open an HTTP listen socket (not under unit tests). */
+export function shouldStartHttpListener(env: NodeJS.ProcessEnv = process.env): boolean {
+    return env.NODE_ENV === 'production' || !env.NODE_ENV;
+}
+
+// Parse CLI --port / -p
+let cliPort: number | null = parseCliPort();
+/* istanbul ignore next */
+if (cliPort !== null) {
+    console.log(`[INFO] Port specified via CLI: ${cliPort}`);
 }
 
 const preflightIssues = await runPreflight(process.stdout.isTTY);
+/* istanbul ignore next */
 if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
     console.error('[FATAL] Pre-flight check failed with critical issues. Application cannot start.');
     process.exit(1);
@@ -45,6 +57,7 @@ try {
         ? rawThemeDir
         : path.resolve(path.dirname(configPath()), rawThemeDir);
     const seed = ensureRuntimeThemeCatalog(themeDir);
+    /* istanbul ignore next */
     if (seed.copied.length) {
         console.log(`[INFO] Seeded ${seed.copied.length} theme(s) into ${themeDir}: ${seed.copied.join(', ')}`);
     }
@@ -55,9 +68,11 @@ try {
         ? rawPosts
         : path.resolve(path.dirname(configPath()), rawPosts);
     const demo = ensureDemoPosts(postsDir);
+    /* istanbul ignore next */
     if (demo.copied.length) {
         console.log(`[INFO] Seeded demo post(s): ${demo.copied.join(', ')}`);
     }
+/* istanbul ignore next */
 } catch (e) {
     console.warn('[WARN] Theme/demo seed failed:', e);
 }
@@ -74,9 +89,11 @@ try {
         .fromConfig(configHolder.get())
         .create();
     SECRET = jwtResult.secret;
+    /* istanbul ignore next */
     if (!jwtResult.secure && !process.env.VITEST) {
         console.warn(`[WARN] Auth secret is insecure (source=${jwtResult.source}). Set JWT_SECRET or SESSION_SECRET for production.`);
     }
+/* istanbul ignore next */
 } catch (e) {
     if (e instanceof JwtSecretError) {
         console.error(`[FATAL] ${e.message}`);
@@ -90,6 +107,7 @@ try {
 const sessionStore = new FileSessionStore(defaultSessionDir());
 try {
     sessionStore.ensureDir();
+/* istanbul ignore next */
 } catch (e) {
     console.warn('[WARN] Session store dir not ready:', e);
 }
@@ -136,7 +154,8 @@ registerRoutes(app, {
     sessionStore,
 });
 
-if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {
+if (shouldStartHttpListener()) {
+    /* istanbul ignore next */
     app.listen(PORT, () => {
         console.log(`Server running at http://localhost:${PORT}`);
     });

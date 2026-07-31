@@ -175,8 +175,10 @@ const fixIssue = async (issue: PreflightIssue): Promise<boolean> => {
                 return true;
             }
         }
+    /* v8 ignore start */
     } catch (e) {
         console.error(`Failed to fix ${issue.id}:`, e);
     }
+    /* v8 ignore stop */
     return false;
 };

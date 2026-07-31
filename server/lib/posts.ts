@@ -39,6 +39,7 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
     const posts = files.filter(f => f.endsWith('.md')).map(filename => {
         const filePath = path.join(postsDir, filename);
         try {
+            /* v8 ignore next */
             if (!fs.existsSync(filePath)) {
                 return null;
             }

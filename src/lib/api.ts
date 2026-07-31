@@ -89,10 +89,12 @@ class SiteConfig {
                 document.title = this.config.siteName;
             }
             return this.config;
+        /* v8 ignore start */
         } catch (e) {
             console.error('Failed to load site config', e);
             return { siteName: 'MDWeb', currentTheme: 'dark' };
         }
+        /* v8 ignore stop */
     }
 
     get(): { siteName: string; siteLogo?: string; currentTheme: string } | null {

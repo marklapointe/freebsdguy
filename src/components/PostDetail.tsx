@@ -7,6 +7,7 @@ import { Post } from '../types';
 export const PostDetail = () => {
     const { slug } = useParams<{ slug: string }>();
     const [post, setPost] = useState<Post | null>(null);
+    const [error, setError] = useState<string | null>(null);
     const [id] = useState('preview-only');
     const scrollElement = document.documentElement;
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
@@ -16,12 +17,22 @@ export const PostDetail = () => {
     }, []);
 
     useEffect(() => {
-        api.get(`/posts/${slug}`).then(res => {
-            setPost(res.data);
-            siteConfig.load().then(cfg => {
-                document.title = res.data.title ? `${res.data.title} - ${cfg.siteName}` : cfg.siteName;
+        setError(null);
+        setPost(null);
+        if (!slug) {
+            setError('Post not found');
+            return;
+        }
+        api.get(`/posts/${slug}`)
+            .then(res => {
+                setPost(res.data);
+                siteConfig.load().then(cfg => {
+                    document.title = res.data.title ? `${res.data.title} - ${cfg.siteName}` : cfg.siteName;
+                });
+            })
+            .catch(() => {
+                setError('Post not found');
             });
-        });
     }, [slug]);
 
     useEffect(() => {
@@ -29,6 +40,19 @@ export const PostDetail = () => {
         window.addEventListener('themeChanged' as any, handleThemeChanged);
         return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
     }, []);
+
+    if (error) {
+        return (
+            <div className="p-8 text-center text-primary" data-testid="post-not-found">
+                {error}
+                <div className="mt-4">
+                    <Link to="/" className="text-accent hover:underline font-bold">
+                        ← Back to home
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     if (!post) return <div className="p-8 text-center text-primary">Loading...</div>;
 

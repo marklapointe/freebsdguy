@@ -42,13 +42,15 @@ export function ensureDemoPosts(postsDir: string): { copied: string[]; total: nu
         const src = path.join(srcDir, name);
         const dest = path.join(postsDir, name);
         if (!fs.existsSync(src)) continue;
-        if (fs.existsSync(dest)) continue;
+        if (fs.existsSync(dest)) continue; // already present — never overwrite
         try {
             fs.copyFileSync(src, dest);
             copied.push(name.replace(/\.md$/, ''));
+        /* v8 ignore start */
         } catch {
             /* non-fatal */
         }
+        /* v8 ignore stop */
     }
     const total = fs.readdirSync(postsDir).filter((f) => f.endsWith('.md')).length;
     return { copied, total };

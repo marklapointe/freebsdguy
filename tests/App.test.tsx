@@ -144,4 +144,66 @@ describe('App Component', () => {
         expect(await screen.findByText('Test Post')).toBeTruthy();
         expect(screen.getByText('Test summary')).toBeTruthy();
     });
+
+    it('admin save triggers showAlert notification and confirm modal', async () => {
+        localStorage.setItem('token', 'stored-token');
+        localStorage.setItem('role', 'admin');
+        localStorage.setItem('username', 'admin');
+        window.history.pushState({}, 'Admin', '/admin');
+
+        (api.get as any).mockImplementation((url: string) => {
+            if (url === '/config')
+                return Promise.resolve({
+                    data: {
+                        siteName: 'MDWeb',
+                        currentTheme: 'dark',
+                        pagination: 10,
+                        footer: { show: true, copyrightText: '© {year}', creditText: '' },
+                        appearance: { themeMode: 'dark', crtEffects: true, textGlow: true },
+                        security: { authMode: 'jwt', sessionTtlSeconds: 86400 },
+                        service: { port: 5173 },
+                        aiConfig: { enabled: false, provider: 'ollama', baseUrl: 'http://x', modelId: 'm' }
+                    }
+                });
+            if (url === '/me') return Promise.resolve({ data: { username: 'admin', role: 'admin' } });
+            if (url === '/admin/users') return Promise.resolve({ data: [{ username: 'admin', role: 'admin' }] });
+            if (url.startsWith('/admin/images')) return Promise.resolve({ data: { images: [], total: 0 } });
+            if (url.includes('/posts')) return Promise.resolve({ data: { posts: [{ slug: 'p', title: 'P', date: '2026-01-01', pinned: false }], total: 1 } });
+            if (url.includes('/theme')) return Promise.resolve({ data: { '--bg': '#000', '--text': '#fff' } });
+            if (url === '/admin/config-status') return Promise.resolve({ data: { isWritable: true } });
+            const mock = commonMocks(url);
+            if (mock) return mock;
+            return Promise.resolve({ data: {} });
+        });
+        (api.post as any).mockResolvedValue({ data: { message: 'ok' } });
+        (api as any).delete = vi.fn().mockResolvedValue({ data: {} });
+
+        render(<App />);
+        await waitFor(() => expect(screen.getByText('Site')).toBeTruthy());
+        fireEvent.click(screen.getByText('Site'));
+        await waitFor(() => expect(screen.getByTestId('site-save-button')).toBeTruthy());
+        fireEvent.click(screen.getByTestId('site-save-button'));
+        // Notification from showAlert (title and/or message)
+        await waitFor(() =>
+            expect(screen.getAllByText(/Settings saved|successfully|Success/i).length).toBeGreaterThan(0)
+        );
+
+        // Delete post triggers showConfirm → Modal
+        fireEvent.click(screen.getByText('Posts'));
+        await waitFor(() => expect(screen.getByText('P')).toBeTruthy());
+        const row = screen.getByText('P').closest('div')!.parentElement!;
+        const buttons = row.querySelectorAll('button');
+        fireEvent.click(buttons[buttons.length - 1]);
+        await waitFor(() => expect(screen.getByText(/Are you sure/i)).toBeTruthy());
+        // Cancel closes modal (onCancel path)
+        fireEvent.click(screen.getByText('Cancel'));
+        // Open confirm again and OK
+        fireEvent.click(buttons[buttons.length - 1]);
+        await waitFor(() => expect(screen.getByText(/Are you sure/i)).toBeTruthy());
+        fireEvent.click(screen.getByText('OK'));
+        // close notification if present
+        const closeBtns = screen.queryAllByRole('button');
+        const xBtn = closeBtns.find(b => b.querySelector('svg') && b.closest('.fixed'));
+        if (xBtn) fireEvent.click(xBtn);
+    });
 });

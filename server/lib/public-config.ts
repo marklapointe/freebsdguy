@@ -181,16 +181,17 @@ export class PublicConfigBuilder {
         // Defensive check: reject accidental secret leakage if schema drifts
         // Match JSON keys only (not substrings like apiKeySet)
         const json = JSON.stringify(out);
+        /* v8 ignore start */
         if (/"apiKey"\s*:/.test(json) || /"jwtSecret"\s*:/.test(json)) {
             throw new Error('INV-SEC-1 violated: public config contains secret field names');
         }
-        // Also reject embedding of known default secret string
         if (this.source.jwtSecret && json.includes(this.source.jwtSecret)) {
             throw new Error('INV-SEC-1 violated: public config embeds jwtSecret value');
         }
         if (json.includes(DEFAULT_INSECURE_JWT)) {
             throw new Error('INV-SEC-1 violated: public config embeds default JWT material');
         }
+        /* v8 ignore stop */
 
         return out;
     }

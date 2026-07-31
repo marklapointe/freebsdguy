@@ -8,10 +8,12 @@ import { getPosts, getPost, savePost } from '../server/lib/posts';
 vi.mock('gray-matter', async () => {
     const actual = await vi.importActual('gray-matter') as any;
     const mockMatter = vi.fn(actual.default);
-    Object.assign(mockMatter, actual);
+    // keep stringify and other props on the mock fn without overwriting default export
+    mockMatter.stringify = actual.default.stringify.bind(actual.default);
+    mockMatter.clearFrontMatterCache = actual.default.clearFrontMatterCache;
     return {
-        default: mockMatter,
         ...actual,
+        default: mockMatter,
         __esModule: true
     };
 });
@@ -161,34 +163,35 @@ Paragraph.
         expect(fs.existsSync(path.join(deepDir, 'deep.md'))).toBe(true);
     });
 
-    it('getPosts handles parsing error', () => {
+    it('getPosts handles parsing error', async () => {
         fs.writeFileSync(path.join(tempDir, 'bad.md'), 'some content');
+        const actual = await vi.importActual<any>('gray-matter');
         const mockMatter = matter as any;
-        if (mockMatter.mockImplementationOnce) {
-            mockMatter.mockImplementationOnce(() => {
-                throw new Error('Mock parse error');
-            });
-        } else {
-            // Fallback if mocking failed
-            return;
-        }
+        expect(typeof mockMatter.mockImplementationOnce).toBe('function');
+        mockMatter.mockImplementationOnce(() => {
+            throw new Error('Mock parse error');
+        });
         const posts = getPosts(tempDir);
         expect(posts.length).toBe(1);
         expect(posts[0].title).toContain('Error');
+        expect(posts[0].author).toBe('system');
+        // ensure subsequent calls still work via default mock (actual)
+        mockMatter.mockImplementation((input: any, opts?: any) => actual.default(input, opts));
+        Object.assign(mockMatter, actual);
     });
 
-    it('getPost handles parsing error', () => {
+    it('getPost handles parsing error', async () => {
         fs.writeFileSync(path.join(tempDir, 'bad.md'), 'some content');
+        const actual = await vi.importActual<any>('gray-matter');
         const mockMatter = matter as any;
-        if (mockMatter.mockImplementationOnce) {
-            mockMatter.mockImplementationOnce(() => {
-                throw new Error('Mock parse error');
-            });
-        } else {
-            // Fallback if mocking failed
-            return;
-        }
+        mockMatter.mockImplementationOnce(() => {
+            throw new Error('Mock parse error');
+        });
         const post = getPost(tempDir, 'bad');
         expect(post?.title).toContain('Error');
+        expect(post?.author).toBe('system');
+        expect(post?.content).toMatch(/parsing error/i);
+        mockMatter.mockImplementation((input: any, opts?: any) => actual.default(input, opts));
+        Object.assign(mockMatter, actual);
     });
 });

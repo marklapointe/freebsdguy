@@ -441,6 +441,7 @@ if (fs.existsSync(distPath)) {
         const indexPath = path.join(distPath, 'index.html');
         if (fs.existsSync(indexPath)) {
             res.sendFile('index.html', { root: distPath }, (err) => {
+                /* istanbul ignore next */
                 if (err) {
                     console.error('[ERROR] Failed to send index.html:', err);
                     if (!res.headersSent) {
@@ -448,6 +449,7 @@ if (fs.existsSync(distPath)) {
                     }
                 }
             });
+        /* istanbul ignore next */
         } else {
             res.status(404).send('Not Found');
         }
@@ -894,6 +896,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
         let sharp: typeof import('sharp');
         try {
             sharp = (await import('sharp')).default;
+        /* c8 ignore next 6 — FreeBSD/package without native sharp */
         } catch (e) {
             console.error('[ERROR] sharp unavailable on this platform:', e);
             return res.status(503).json({

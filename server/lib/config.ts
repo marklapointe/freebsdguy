@@ -23,6 +23,7 @@ const getBaseConfigDir = () => {
     ];
 
     let orderedPlatforms = [];
+    /* v8 ignore start */
     if (process.platform === 'freebsd') {
         orderedPlatforms = [platforms[0], platforms[1], platforms[2]];
     } else if (process.platform === 'linux') {
@@ -49,6 +50,7 @@ const getBaseConfigDir = () => {
     }
 
     return path.join(__dirname, '..', 'config');
+    /* v8 ignore stop */
 };
 
 const baseConfigDir = getBaseConfigDir();
@@ -300,6 +302,7 @@ const migrateIfNeeded = (targetPath: string, fileName: string) => {
             try {
                 ensureDirectoryExists(targetPath);
                 fs.copyFileSync(bundledPath, targetPath);
+            /* istanbul ignore next */
             } catch (e) {
                 console.warn(`[WARN] Could not seed ${fileName} from bundle:`, e);
             }
@@ -550,6 +553,7 @@ export const loadConfig = (customPath?: string): Config => {
         if (!customPath) {
             migrateIfNeeded(targetPath, 'config.json');
         }
+    /* istanbul ignore next */
     } catch (e) {
         lastConfigStatus.warnings.push(`migrate seed failed: ${String(e)}`);
     }

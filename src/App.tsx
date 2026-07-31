@@ -136,9 +136,17 @@ function App() {
             <div className="fixed top-4 right-4 z-[100] pointer-events-none flex flex-col items-end">
                 {notifications.map(n => <Notification key={n.id} {...n} onClose={removeNotification} />)}
             </div>
-            <Modal isOpen={modal.isOpen} title={modal.title} message={modal.message} type={modal.type} onConfirm={modal.onConfirm} onCancel={() => setModal(prev => ({ ...prev, isOpen: false }))} />
+            <Modal
+                isOpen={modal.isOpen}
+                title={modal.title}
+                message={modal.message}
+                type={modal.type}
+                onConfirm={modal.onConfirm}
+                onCancel={() => setModal(prev => ({ ...prev, isOpen: false }))}
+            />
         </Router>
     );
 }
+
 
 export default App;

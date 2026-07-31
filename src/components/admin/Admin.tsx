@@ -1258,12 +1258,22 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 onAutoEnhance={handleAutoEnhance}
                 isEnhancing={isEnhancing}
                 enhancedPreview={enhancedPreview}
-                onApplyEnhancement={() => { setEditingPost((prev: any) => ({ ...prev, content: enhancedPreview })); setEnhancedPreview(null); }}
+                onApplyEnhancement={() => {
+                    setEditingPost((prev: any) => ({ ...prev, content: enhancedPreview }));
+                    setEnhancedPreview(null);
+                }}
                 onDismissEnhancement={() => setEnhancedPreview(null)}
                 aiEnabled={config.aiConfig?.enabled || false}
                 theme={editorTheme}
             />
-            <ImagePickerModal isOpen={showLogoPicker} images={pickerImages} onSelect={handleLogoSelect} onClose={() => setShowLogoPicker(false)} onUpload={handleImageUpload} onPreview={(img) => setPreviewImage(img)} />
+            <ImagePickerModal
+                isOpen={showLogoPicker}
+                images={pickerImages}
+                onSelect={handleLogoSelect}
+                onClose={() => setShowLogoPicker(false)}
+                onUpload={handleImageUpload}
+                onPreview={img => setPreviewImage(img)}
+            />
             <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} />
         </div>
     );
