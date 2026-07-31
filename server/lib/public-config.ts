@@ -7,8 +7,15 @@
  * Builder pattern: accumulate optional inclusions, validate at build().
  */
 
-import type { AIConfig, AppearanceConfig, AuthMode, Config, ServiceConfig } from './config.ts';
-import { resolveAuthMode } from './config.ts';
+import type {
+    AIConfig,
+    AppearanceConfig,
+    AuthMode,
+    Config,
+    FooterConfig,
+    ServiceConfig
+} from './config.ts';
+import { DEFAULT_FOOTER_COPYRIGHT, resolveAuthMode } from './config.ts';
 
 /** Public AI surface: capability flags only; never the raw secret. */
 export interface PublicAIConfig {
@@ -37,18 +44,37 @@ export interface PublicSecurity {
     disablePublicSearch: boolean;
 }
 
+export interface PublicFooter {
+    show: boolean;
+    copyrightText: string;
+    creditText: string;
+}
+
 export interface PublicConfig {
     siteName: string;
     siteLogo: string;
     currentTheme: string;
     appearance: PublicAppearance;
+    footer: PublicFooter;
     pagination: number;
     sortBy: string;
     sortOrder: string;
     searchPlacement: string;
+    /** Absolute or configured posts path (for advanced Site UI display). */
+    postsDir?: string;
+    themeDir?: string;
     aiConfig?: PublicAIConfig;
     service: ServiceConfig;
     security?: PublicSecurity;
+}
+
+export function projectFooter(f?: FooterConfig | null): PublicFooter {
+    return {
+        show: f?.show !== false,
+        copyrightText:
+            typeof f?.copyrightText === 'string' ? f.copyrightText : DEFAULT_FOOTER_COPYRIGHT,
+        creditText: typeof f?.creditText === 'string' ? f.creditText : ''
+    };
 }
 
 const DEFAULT_INSECURE_JWT = 'freebsd_guy_secret_key';
@@ -133,10 +159,13 @@ export class PublicConfigBuilder {
             siteLogo: this.source.siteLogo || 'logo.webp',
             currentTheme: this.source.currentTheme || 'dark',
             appearance: projectAppearance(this.source.appearance),
+            footer: projectFooter(this.source.footer),
             pagination: this.source.pagination || 10,
             sortBy: this.source.sortBy || 'date',
             sortOrder: this.source.sortOrder || 'desc',
             searchPlacement: this.source.searchPlacement || 'top',
+            postsDir: this.source.postsDir,
+            themeDir: this.source.themeDir,
             service: this.includeService
                 ? (this.source.service || { port: 3001 })
                 : { port: 3001 }

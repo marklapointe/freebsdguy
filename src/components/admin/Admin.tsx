@@ -61,6 +61,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const [themesLoading, setThemesLoading] = useState(false);
     const [themesError, setThemesError] = useState<string | null>(null);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
+    const [newUser, setNewUser] = useState({ username: '', password: '', role: 'contributor' });
+    const [showAdvancedSession, setShowAdvancedSession] = useState(false);
 
     const themeLabelMap: Record<string, string> = {
         '--primary': 'Primary', '--secondary': 'Secondary', '--accent': 'Accent',
@@ -191,9 +193,15 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             disablePublicSearch: false
         };
         const defaultAppearance = { themeMode: 'dark' as const, crtEffects: true, textGlow: true };
+        const defaultFooter = {
+            show: true,
+            copyrightText: '© {year} {siteName}. All rights reserved.',
+            creditText: ''
+        };
         data.aiConfig = { ...defaultAiConfig, ...data.aiConfig };
         data.security = { ...defaultSecurity, ...data.security };
         data.appearance = { ...defaultAppearance, ...data.appearance };
+        data.footer = { ...defaultFooter, ...data.footer };
         setConfig(data);
         if (data.service?.port) localStorage.setItem('lastPort', data.service.port.toString());
         return res;
@@ -419,7 +427,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                         <div className="mb-6">
                             <h2 className="text-xs font-black uppercase tracking-wider opacity-50 mb-3">Admin</h2>
                             <nav className="space-y-1">
-                                <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'settings' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Server size={18} /> Settings</button>
+                                <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'settings' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Server size={18} /> Site</button>
                                 <button onClick={() => setActiveTab('appearance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'appearance' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Palette size={18} /> Appearance</button>
                                 <button onClick={() => setActiveTab('users')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'users' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Users size={18} /> Users</button>
                                 <button onClick={() => setActiveTab('ai')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'ai' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Cpu size={18} /> AI Settings</button>
@@ -518,24 +526,274 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     )}
                     {activeTab === 'settings' && user.role === 'admin' && (
                         <div>
-                            <h1 className="text-3xl font-bold mb-6">Settings</h1>
-                            <div className="bg-secondary rounded-lg p-6 space-y-6">
-                                <div>
-                                    <label className="block text-sm font-bold mb-2">Site Name</label>
-                                    <input type="text" value={config.siteName || ''} onChange={e => setConfig((prev: any) => ({ ...prev, siteName: e.target.value }))} className="w-full p-3 bg-bg border border-accent rounded text-text" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold mb-2">Site Logo</label>
-                                    <div className="flex items-center gap-4">
-                                        {config.siteLogo && <img src={`/api/getimage?fileName=${config.siteLogo}`} alt="Logo" className="h-12 w-auto" />}
-                                        <button onClick={() => setShowLogoPicker(true)} className="bg-accent text-on-accent px-4 py-2 rounded font-bold">Choose Image</button>
+                            <h1 className="text-3xl font-bold mb-6" data-testid="site-settings-heading">Site</h1>
+                            <p className="text-sm opacity-60 mb-4">
+                                Branding, home page list, and footer. Everything here is saved as plain JSON in your config file.
+                            </p>
+                            <div className="bg-secondary rounded-lg p-6 space-y-8" data-testid="site-settings-panel">
+                                <section className="space-y-4">
+                                    <h2 className="text-lg font-bold border-b border-border pb-2">Identity</h2>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Site name</label>
+                                        <input
+                                            data-testid="site-name-input"
+                                            type="text"
+                                            value={config.siteName || ''}
+                                            onChange={e => setConfig((prev: any) => ({ ...prev, siteName: e.target.value }))}
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        />
+                                        <p className="text-xs opacity-50 mt-1">Shown in the header and browser title.</p>
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold mb-2">Service Port</label>
-                                    <input type="number" value={config.service?.port || 3001} onChange={e => setConfig((prev: any) => ({ ...prev, service: { ...prev.service, port: parseInt(e.target.value) } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" />
-                                </div>
-                                <button onClick={handleSaveConfig} className="bg-accent text-on-accent px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save Settings</button>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Site logo</label>
+                                        <div className="flex items-center gap-4">
+                                            {config.siteLogo && (
+                                                <img src={`/api/getimage?fileName=${config.siteLogo}`} alt="Logo" className="h-12 w-auto" />
+                                            )}
+                                            <button type="button" onClick={() => setShowLogoPicker(true)} className="bg-accent text-on-accent px-4 py-2 rounded font-bold">
+                                                Choose image
+                                            </button>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <section className="space-y-4">
+                                    <h2 className="text-lg font-bold border-b border-border pb-2">Home page</h2>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Posts per page</label>
+                                        <input
+                                            data-testid="site-pagination-input"
+                                            type="number"
+                                            min={1}
+                                            max={100}
+                                            value={config.pagination ?? 10}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    pagination: parseInt(e.target.value, 10) || 10
+                                                }))
+                                            }
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        />
+                                        <p className="text-xs opacity-50 mt-1">How many posts load at a time on the public home page.</p>
+                                    </div>
+                                    <div className="grid sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-bold mb-2">Sort posts by</label>
+                                            <select
+                                                data-testid="site-sortby-select"
+                                                value={config.sortBy || 'date'}
+                                                onChange={e => setConfig((prev: any) => ({ ...prev, sortBy: e.target.value }))}
+                                                className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                            >
+                                                <option value="date">Date</option>
+                                                <option value="title">Title</option>
+                                                <option value="author">Author</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold mb-2">Sort order</label>
+                                            <select
+                                                data-testid="site-sortorder-select"
+                                                value={config.sortOrder || 'desc'}
+                                                onChange={e => setConfig((prev: any) => ({ ...prev, sortOrder: e.target.value }))}
+                                                className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                            >
+                                                <option value="desc">Newest / Z–A first</option>
+                                                <option value="asc">Oldest / A–Z first</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Search box</label>
+                                        <select
+                                            data-testid="site-search-placement"
+                                            value={
+                                                config.searchPlacement === 'bottom' || config.searchPlacement === 'none'
+                                                    ? config.searchPlacement
+                                                    : 'top'
+                                            }
+                                            onChange={e => setConfig((prev: any) => ({ ...prev, searchPlacement: e.target.value }))}
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        >
+                                            <option value="top">Top of home page</option>
+                                            <option value="bottom">Bottom of home page</option>
+                                            <option value="none">Hidden</option>
+                                        </select>
+                                        <p className="text-xs opacity-50 mt-1">Public search can also be disabled entirely under Security.</p>
+                                    </div>
+                                </section>
+
+                                <section className="space-y-4">
+                                    <h2 className="text-lg font-bold border-b border-border pb-2">Footer &amp; copyright</h2>
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            data-testid="footer-show-toggle"
+                                            checked={config.footer?.show !== false}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    footer: { ...prev.footer, show: e.target.checked }
+                                                }))
+                                            }
+                                        />
+                                        <span className="text-sm font-bold">Show site footer</span>
+                                    </label>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Copyright line</label>
+                                        <input
+                                            data-testid="footer-copyright-input"
+                                            type="text"
+                                            value={config.footer?.copyrightText ?? '© {year} {siteName}. All rights reserved.'}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    footer: { ...prev.footer, copyrightText: e.target.value }
+                                                }))
+                                            }
+                                            placeholder="© {year} {siteName}. All rights reserved."
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        />
+                                        <p className="text-xs opacity-50 mt-1">
+                                            Use <code className="opacity-80">{'{year}'}</code> and{' '}
+                                            <code className="opacity-80">{'{siteName}'}</code>. Leave empty to remove this line.
+                                        </p>
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                            <button
+                                                type="button"
+                                                className="text-xs px-2 py-1 rounded border border-border hover:bg-hover"
+                                                onClick={() =>
+                                                    setConfig((prev: any) => ({
+                                                        ...prev,
+                                                        footer: {
+                                                            ...prev.footer,
+                                                            copyrightText: '© {year} {siteName}. All rights reserved.'
+                                                        }
+                                                    }))
+                                                }
+                                            >
+                                                Reset default
+                                            </button>
+                                            <button
+                                                type="button"
+                                                data-testid="footer-clear-copyright"
+                                                className="text-xs px-2 py-1 rounded border border-border hover:bg-hover"
+                                                onClick={() =>
+                                                    setConfig((prev: any) => ({
+                                                        ...prev,
+                                                        footer: { ...prev.footer, copyrightText: '' }
+                                                    }))
+                                                }
+                                            >
+                                                Clear copyright
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Extra credit line (optional)</label>
+                                        <input
+                                            data-testid="footer-credit-input"
+                                            type="text"
+                                            value={config.footer?.creditText || ''}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    footer: { ...prev.footer, creditText: e.target.value }
+                                                }))
+                                            }
+                                            placeholder="e.g. Hosted on FreeBSD"
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        />
+                                    </div>
+                                    <div className="p-3 rounded border border-border bg-bg text-sm opacity-80" data-testid="footer-preview">
+                                        <p className="text-xs font-bold opacity-50 mb-1">Preview</p>
+                                        {config.footer?.show === false ? (
+                                            <p className="italic opacity-50">(footer hidden)</p>
+                                        ) : (
+                                            <>
+                                                {(config.footer?.copyrightText ?? '© {year} {siteName}. All rights reserved.') && (
+                                                    <p>
+                                                        {(config.footer?.copyrightText ??
+                                                            '© {year} {siteName}. All rights reserved.')
+                                                            .replace(/\{year\}/g, String(new Date().getFullYear()))
+                                                            .replace(/\{siteName\}/g, config.siteName || 'MDWeb')}
+                                                    </p>
+                                                )}
+                                                {config.footer?.creditText ? (
+                                                    <p>
+                                                        {String(config.footer.creditText)
+                                                            .replace(/\{year\}/g, String(new Date().getFullYear()))
+                                                            .replace(/\{siteName\}/g, config.siteName || 'MDWeb')}
+                                                    </p>
+                                                ) : null}
+                                                {!config.footer?.copyrightText && !config.footer?.creditText && config.footer?.show !== false && (
+                                                    <p className="italic opacity-50">(no lines — footer will not render)</p>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                </section>
+
+                                <section className="space-y-4">
+                                    <h2 className="text-lg font-bold border-b border-border pb-2">Service</h2>
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Listen port</label>
+                                        <input
+                                            type="number"
+                                            value={config.service?.port || 5173}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    service: { ...prev.service, port: parseInt(e.target.value, 10) }
+                                                }))
+                                            }
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        />
+                                        <p className="text-xs text-amber-500/90 mt-1">
+                                            Changing the port requires restarting the mdweb service to take effect.
+                                        </p>
+                                    </div>
+                                </section>
+
+                                <details className="rounded border border-border p-4">
+                                    <summary className="font-bold cursor-pointer">Advanced paths</summary>
+                                    <p className="text-xs opacity-60 mt-2 mb-4">
+                                        Wrong paths make the site look empty. Prefer FreeBSD defaults under{' '}
+                                        <code>/var/db/mdweb</code>.
+                                    </p>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-bold mb-2">Posts directory</label>
+                                            <input
+                                                data-testid="site-posts-dir"
+                                                type="text"
+                                                value={config.postsDir || ''}
+                                                onChange={e => setConfig((prev: any) => ({ ...prev, postsDir: e.target.value }))}
+                                                className="w-full p-3 bg-bg border border-accent rounded text-text font-mono text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold mb-2">Themes directory</label>
+                                            <input
+                                                data-testid="site-theme-dir"
+                                                type="text"
+                                                value={config.themeDir || ''}
+                                                onChange={e => setConfig((prev: any) => ({ ...prev, themeDir: e.target.value }))}
+                                                className="w-full p-3 bg-bg border border-accent rounded text-text font-mono text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                </details>
+
+                                <button
+                                    type="button"
+                                    data-testid="site-save-button"
+                                    onClick={handleSaveConfig}
+                                    className="bg-accent text-on-accent px-6 py-3 rounded font-bold hover:bg-opacity-80 transition"
+                                >
+                                    Save site settings
+                                </button>
                             </div>
                         </div>
                     )}
@@ -723,26 +981,46 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                     </p>
                                 </div>
                                 {config.security?.authMode === 'session' && (
-                                    <div>
-                                        <label className="block text-sm font-bold mb-2">Session lifetime (hours)</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            max={168}
-                                            data-testid="session-ttl-hours"
-                                            value={Math.round((config.security?.sessionTtlSeconds || 86400) / 3600)}
-                                            onChange={e => {
-                                                const hours = Math.max(1, Math.min(168, parseInt(e.target.value, 10) || 24));
-                                                setConfig((prev: any) => ({
-                                                    ...prev,
-                                                    security: {
-                                                        ...prev.security,
-                                                        sessionTtlSeconds: hours * 3600
-                                                    }
-                                                }));
-                                            }}
-                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
-                                        />
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-bold mb-2">Session lifetime (hours)</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                max={168}
+                                                data-testid="session-ttl-hours"
+                                                value={Math.round((config.security?.sessionTtlSeconds || 86400) / 3600)}
+                                                onChange={e => {
+                                                    const hours = Math.max(1, Math.min(168, parseInt(e.target.value, 10) || 24));
+                                                    setConfig((prev: any) => ({
+                                                        ...prev,
+                                                        security: {
+                                                            ...prev.security,
+                                                            sessionTtlSeconds: hours * 3600
+                                                        }
+                                                    }));
+                                                }}
+                                                className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                            />
+                                        </div>
+                                        <details
+                                            open={showAdvancedSession}
+                                            onToggle={e => setShowAdvancedSession((e.target as HTMLDetailsElement).open)}
+                                        >
+                                            <summary className="text-sm font-bold cursor-pointer">Advanced cookie name</summary>
+                                            <input
+                                                data-testid="session-cookie-name"
+                                                type="text"
+                                                value={config.security?.sessionCookieName || 'mdweb.sid'}
+                                                onChange={e =>
+                                                    setConfig((prev: any) => ({
+                                                        ...prev,
+                                                        security: { ...prev.security, sessionCookieName: e.target.value }
+                                                    }))
+                                                }
+                                                className="w-full mt-2 p-3 bg-bg border border-accent rounded text-text font-mono text-sm"
+                                            />
+                                        </details>
                                     </div>
                                 )}
                                 <div className="space-y-3">
@@ -811,6 +1089,55 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     {activeTab === 'users' && user.role === 'admin' && (
                         <div>
                             <h1 className="text-3xl font-bold mb-6">Users</h1>
+                            <div className="bg-secondary rounded-lg p-6 mb-6 space-y-4" data-testid="user-create-panel">
+                                <h2 className="font-bold">Add user</h2>
+                                <div className="grid sm:grid-cols-3 gap-3">
+                                    <input
+                                        data-testid="new-user-username"
+                                        type="text"
+                                        placeholder="Username"
+                                        value={newUser.username}
+                                        onChange={e => setNewUser(u => ({ ...u, username: e.target.value }))}
+                                        className="p-3 bg-bg border border-accent rounded text-text"
+                                    />
+                                    <input
+                                        data-testid="new-user-password"
+                                        type="password"
+                                        placeholder="Password (min 8)"
+                                        value={newUser.password}
+                                        onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
+                                        className="p-3 bg-bg border border-accent rounded text-text"
+                                    />
+                                    <select
+                                        data-testid="new-user-role"
+                                        value={newUser.role}
+                                        onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}
+                                        className="p-3 bg-bg border border-accent rounded text-text"
+                                    >
+                                        <option value="contributor">Contributor</option>
+                                        <option value="admin">Admin</option>
+                                    </select>
+                                </div>
+                                <button
+                                    type="button"
+                                    data-testid="new-user-submit"
+                                    className="bg-accent text-on-accent px-4 py-2 rounded font-bold"
+                                    onClick={() => {
+                                        api.post('/admin/users', newUser)
+                                            .then(() => {
+                                                setNewUser({ username: '', password: '', role: 'contributor' });
+                                                fetchUsers();
+                                                showAlert('User created', 'Success');
+                                            })
+                                            .catch((err: unknown) => {
+                                                const ax = err as { response?: { data?: { message?: string } } };
+                                                showAlert(ax.response?.data?.message || 'Failed to create user', 'Error');
+                                            });
+                                    }}
+                                >
+                                    Create user
+                                </button>
+                            </div>
                             <div className="bg-secondary rounded-lg p-6">
                                 <table className="w-full">
                                     <thead><tr className="text-left border-b border-accent"><th className="pb-3">Username</th><th className="pb-3">Role</th><th className="pb-3">Actions</th></tr></thead>

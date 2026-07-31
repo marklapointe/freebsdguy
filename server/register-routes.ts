@@ -211,28 +211,27 @@ app.get('/api/posts', (req: Request, res: Response) => {
     }
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const posts = getPosts(postsDir, {
-        sortBy: config.sortBy as 'title' | 'date' | 'author' || 'date',
-        sortOrder: config.sortOrder as 'asc' | 'desc' || 'desc'
+        sortBy: (config.sortBy as 'title' | 'date' | 'author') || 'date',
+        sortOrder: (config.sortOrder as 'asc' | 'desc') || 'desc'
     });
 
-    const limit = parseInt(req.query.limit as string);
-    const offset = parseInt(req.query.offset as string);
+    // Always return paged shape so clients can honor config.pagination
+    const defaultLimit = config.pagination || 10;
+    const limitRaw = parseInt(String(req.query.limit ?? ''), 10);
+    const offsetRaw = parseInt(String(req.query.offset ?? ''), 10);
+    const l = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : defaultLimit;
+    const o = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
-    if (!isNaN(limit) || !isNaN(offset)) {
-        const l = isNaN(limit) ? (config.pagination || 10) : limit;
-        const o = isNaN(offset) ? 0 : offset;
-        
-        return res.json({
-            posts: posts.slice(o, o + l),
-            total: posts.length,
-            limit: l,
-            offset: o
-        });
-    }
-
-    res.json(posts);
+    return res.json({
+        posts: posts.slice(o, o + l),
+        total: posts.length,
+        limit: l,
+        offset: o
+    });
 });
 
 // AI: Summarize post content
@@ -601,15 +600,67 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
 app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     try {
         const config = loadConfig();
-        const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security, appearance } = req.body;
+        const {
+            siteName,
+            siteLogo,
+            currentTheme,
+            pagination,
+            sortBy,
+            sortOrder,
+            searchPlacement,
+            aiConfig,
+            service,
+            security,
+            appearance,
+            footer,
+            postsDir,
+            themeDir
+        } = req.body;
 
         if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
         if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
         if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
-        if (pagination !== undefined) config.pagination = Number(pagination);
-        if (sortBy) config.sortBy = sanitizeHtml(sortBy, { allowedTags: [], allowedAttributes: {} }) as 'title' | 'date' | 'author';
-        if (sortOrder) config.sortOrder = sanitizeHtml(sortOrder, { allowedTags: [], allowedAttributes: {} }) as 'desc' | 'asc';
-        if (searchPlacement) config.searchPlacement = sanitizeHtml(searchPlacement, { allowedTags: [], allowedAttributes: {} }) as 'top' | 'bottom' | 'left' | 'right' | 'none';
+        if (pagination !== undefined) {
+            const n = Number(pagination);
+            if (Number.isFinite(n)) config.pagination = Math.max(1, Math.min(100, Math.floor(n)));
+        }
+        if (sortBy === 'title' || sortBy === 'date' || sortBy === 'author') config.sortBy = sortBy;
+        if (sortOrder === 'asc' || sortOrder === 'desc') config.sortOrder = sortOrder;
+        if (
+            searchPlacement === 'top' ||
+            searchPlacement === 'bottom' ||
+            searchPlacement === 'left' ||
+            searchPlacement === 'right' ||
+            searchPlacement === 'none'
+        ) {
+            config.searchPlacement = searchPlacement;
+        }
+
+        // Advanced paths — reject empty / null-byte / traversal-ish values
+        if (typeof postsDir === 'string' && postsDir.trim() && !postsDir.includes('\0')) {
+            config.postsDir = postsDir.trim();
+        }
+        if (typeof themeDir === 'string' && themeDir.trim() && !themeDir.includes('\0')) {
+            config.themeDir = themeDir.trim();
+        }
+
+        if (footer && typeof footer === 'object') {
+            const prev = config.footer || {};
+            const clip = (s: string) => s.slice(0, 200);
+            config.footer = {
+                show: typeof footer.show === 'boolean' ? footer.show : prev.show !== false,
+                copyrightText:
+                    typeof footer.copyrightText === 'string'
+                        ? clip(sanitizeHtml(footer.copyrightText, { allowedTags: [], allowedAttributes: {} }))
+                        : prev.copyrightText !== undefined
+                          ? prev.copyrightText
+                          : '© {year} {siteName}. All rights reserved.',
+                creditText:
+                    typeof footer.creditText === 'string'
+                        ? clip(sanitizeHtml(footer.creditText, { allowedTags: [], allowedAttributes: {} }))
+                        : prev.creditText || ''
+            };
+        }
 
         if (appearance && typeof appearance === 'object') {
             const prev = config.appearance || {};

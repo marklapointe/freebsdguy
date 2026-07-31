@@ -120,7 +120,8 @@ Posts in development are ordinary Markdown files under `server/posts/`.
 | Write a post | Log in → Admin → New Post, or drop a `.md` file into the posts directory |
 | Change site look | Admin → **Appearance** → pick a theme → Set as site theme |
 | Light / dark | Anyone: sun/moon control in the navbar (applies to the current theme pack) |
-| Users | Admin → Users (admin only) |
+| Site name, home list, copyright | Admin → **Site** — posts per page, sort, search placement, footer text (or hide/clear copyright) |
+| Users | Admin → Users (admin only) — create or delete accounts |
 | Auth style | Admin → **Security** — JWT (default) or classical session cookies; see [docs/AUTH.md](docs/AUTH.md) |
 
 Showcase posts (math, code, Mermaid, kitchen-sink Markdown) can appear on first install; they are only copied if those files are not already present, so your writing is never overwritten. Markdown notes: [docs/MARKDOWN.md](docs/MARKDOWN.md).

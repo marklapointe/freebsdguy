@@ -27,11 +27,21 @@ function readStoredUser(): User | null {
     }
 }
 
+function expandFooterPlaceholders(template: string, siteName: string): string {
+    const year = String(new Date().getFullYear());
+    return template.replace(/\{year\}/g, year).replace(/\{siteName\}/g, siteName || 'MDWeb');
+}
+
 function App() {
     // Synchronous hydrate so refresh on /admin does not flash-redirect to login
     const [user, setUser] = useState<User | null>(() => readStoredUser());
     const [siteName, setSiteName] = useState('MDWeb');
     const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
+    const [footer, setFooter] = useState({
+        show: true,
+        copyrightText: '© {year} {siteName}. All rights reserved.',
+        creditText: ''
+    });
     const [notifications, setNotifications] = useState<AlertType[]>([]);
 
     useEffect(() => {
@@ -40,6 +50,16 @@ function App() {
             setSiteName(res.data.siteName || 'MDWeb');
             setSiteLogo(res.data.siteLogo);
             setAuthModeCache(res.data.security?.authMode);
+            if (res.data.footer) {
+                setFooter({
+                    show: res.data.footer.show !== false,
+                    copyrightText:
+                        typeof res.data.footer.copyrightText === 'string'
+                            ? res.data.footer.copyrightText
+                            : '© {year} {siteName}. All rights reserved.',
+                    creditText: typeof res.data.footer.creditText === 'string' ? res.data.footer.creditText : ''
+                });
+            }
             const appearance = res.data.appearance || {};
             applyTheme(res.data.currentTheme || 'dark', {
                 mode: getEffectiveThemeMode(appearance.themeMode),
@@ -97,9 +117,21 @@ function App() {
                         )
                     } />
                 </Routes>
-                <footer className="p-8 text-center opacity-50 text-sm mt-12 border-t border-secondary">
-                    © 2026 {siteName}. All rights reserved. Built with Vite + React.
-                </footer>
+                {footer.show && (footer.copyrightText || footer.creditText) && (
+                    <footer
+                        data-testid="site-footer"
+                        className="p-8 text-center opacity-50 text-sm mt-12 border-t border-secondary space-y-1"
+                    >
+                        {footer.copyrightText ? (
+                            <p data-testid="footer-copyright">
+                                {expandFooterPlaceholders(footer.copyrightText, siteName)}
+                            </p>
+                        ) : null}
+                        {footer.creditText ? (
+                            <p data-testid="footer-credit">{expandFooterPlaceholders(footer.creditText, siteName)}</p>
+                        ) : null}
+                    </footer>
+                )}
             </div>
             <div className="fixed top-4 right-4 z-[100] pointer-events-none flex flex-col items-end">
                 {notifications.map(n => <Notification key={n.id} {...n} onClose={removeNotification} />)}

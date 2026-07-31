@@ -37,7 +37,9 @@ describe('API Endpoints', () => {
     it('GET /api/posts should return posts', async () => {
         const res = await request(app).get('/api/posts');
         expect(res.status).toBe(200);
-        expect(Array.isArray(res.body)).toBe(true);
+        // Always paged shape so clients honor config.pagination
+        expect(Array.isArray(res.body.posts)).toBe(true);
+        expect(typeof res.body.total).toBe('number');
     });
 
     it('GET /api/theme should return theme variables', async () => {

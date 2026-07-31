@@ -80,6 +80,21 @@ export interface AppearanceConfig {
     textGlow?: boolean;
 }
 
+/** Public footer / copyright branding (editable in Site settings). */
+export interface FooterConfig {
+    /** false hides the entire footer */
+    show?: boolean;
+    /**
+     * Main line. Placeholders: {year} {siteName}.
+     * Empty string = no copyright line.
+     */
+    copyrightText?: string;
+    /** Optional second line (e.g. custom credit). Empty = omit. */
+    creditText?: string;
+}
+
+export const DEFAULT_FOOTER_COPYRIGHT = '© {year} {siteName}. All rights reserved.';
+
 export interface Config {
     postsDir: string;
     themeDir: string;
@@ -91,12 +106,20 @@ export interface Config {
     sortOrder?: 'asc' | 'desc';
     searchPlacement?: 'top' | 'bottom' | 'left' | 'right' | 'none';
     appearance?: AppearanceConfig;
+    footer?: FooterConfig;
     aiConfig?: AIConfig;
     service?: ServiceConfig;
     jwtSecret?: string;
     security?: SecurityConfig;
     /** Forward-compatible bag; sanitize keeps unknown top-level keys here if needed */
     [key: string]: unknown;
+}
+
+/** Expand footer placeholders for display. */
+export function formatFooterText(template: string, siteName: string, year = new Date().getFullYear()): string {
+    return template
+        .replace(/\{year\}/g, String(year))
+        .replace(/\{siteName\}/g, siteName || 'MDWeb');
 }
 
 export type AuthMode = 'jwt' | 'session';
@@ -185,6 +208,11 @@ export function defaultConfig(): Config {
             sortOrder: 'desc',
             searchPlacement: 'top',
             appearance: { themeMode: 'dark', crtEffects: true, textGlow: true },
+            footer: {
+                show: true,
+                copyrightText: DEFAULT_FOOTER_COPYRIGHT,
+                creditText: ''
+            },
             service: { port: 5173 },
             aiConfig: {
                 enabled: false,
@@ -194,6 +222,9 @@ export function defaultConfig(): Config {
                 modelId: 'llama3'
             },
             security: {
+                authMode: 'jwt',
+                sessionTtlSeconds: 86400,
+                sessionCookieName: 'mdweb.sid',
                 disableAI: false,
                 disableImages: false,
                 disablePublicSearch: false
@@ -210,7 +241,20 @@ export function defaultConfig(): Config {
         sortOrder: 'desc',
         searchPlacement: 'top',
         appearance: { themeMode: 'dark', crtEffects: true, textGlow: true },
-        service: { port: 5173 }
+        footer: {
+            show: true,
+            copyrightText: DEFAULT_FOOTER_COPYRIGHT,
+            creditText: ''
+        },
+        service: { port: 5173 },
+        security: {
+            authMode: 'jwt',
+            sessionTtlSeconds: 86400,
+            sessionCookieName: 'mdweb.sid',
+            disableAI: false,
+            disableImages: false,
+            disablePublicSearch: false
+        }
     };
 }
 
@@ -372,6 +416,24 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
         }
     }
 
+    if (o.footer !== undefined) {
+        if (o.footer && typeof o.footer === 'object' && !Array.isArray(o.footer)) {
+            const f = o.footer as Record<string, unknown>;
+            const clip = (s: string) => s.slice(0, 200);
+            config.footer = {
+                show: asBool(f.show, true),
+                copyrightText:
+                    typeof f.copyrightText === 'string'
+                        ? clip(f.copyrightText)
+                        : DEFAULT_FOOTER_COPYRIGHT,
+                creditText: typeof f.creditText === 'string' ? clip(f.creditText) : ''
+            };
+        } else {
+            warnings.push('footer invalid; using defaults');
+            config.footer = base.footer;
+        }
+    }
+
     if (o.aiConfig !== undefined) {
         if (o.aiConfig && typeof o.aiConfig === 'object' && !Array.isArray(o.aiConfig)) {
             const ai = o.aiConfig as Record<string, unknown>;
@@ -461,6 +523,7 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
         'sortOrder',
         'searchPlacement',
         'appearance',
+        'footer',
         'aiConfig',
         'service',
         'jwtSecret',

@@ -8,6 +8,16 @@
   "sortBy": "date",
   "sortOrder": "desc",
   "searchPlacement": "top",
+  "footer": {
+    "show": true,
+    "copyrightText": "© {year} {siteName}. All rights reserved.",
+    "creditText": ""
+  },
+  "appearance": {
+    "themeMode": "dark",
+    "crtEffects": true,
+    "textGlow": true
+  },
   "service": {
     "port": 5173
   },
@@ -19,6 +29,9 @@
     "modelId": "llama3"
   },
   "security": {
+    "authMode": "jwt",
+    "sessionTtlSeconds": 86400,
+    "sessionCookieName": "mdweb.sid",
     "disableAI": false,
     "disableImages": false,
     "disablePublicSearch": false
