@@ -128,7 +128,22 @@ const THEME_LABELS: Record<string, string> = {
     'zelda-green': 'Zelda Green',
     'sonic-blue': 'Sonic Blue',
     pokemon: 'Pokémon',
-    minecraft: 'Minecraft'
+    minecraft: 'Minecraft',
+    amiga: 'Amiga Workbench',
+    'apple-green': 'Apple II Green',
+    c64: 'Commodore 64 Blue',
+    'crt-amber': 'CRT Amber',
+    'crt-blue': 'CRT Blue',
+    'crt-emerald': 'CRT Emerald',
+    'crt-green': 'CRT Green',
+    'crt-plasma': 'CRT Plasma',
+    'crt-softamber': 'CRT Soft Amber',
+    'dos-norton': 'DOS Norton',
+    'ibm-3270': 'IBM 3270',
+    'ibm-cga': 'IBM CGA',
+    'pet-green': 'Commodore PET',
+    vic20: 'VIC-20',
+    'vt220-white': 'VT220 White',
 };
 
 export function themeMetaFromId(id: string, colors?: ThemeColors | null): ThemeMeta {

@@ -27,6 +27,9 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text);
   font-family: 'JetBrains Mono', monospace;
+  transition: background-color 0.25s ease, color 0.25s ease;
+  position: relative;
+  min-height: 100vh;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -36,8 +39,112 @@ h1, h2, h3, h4, h5, h6 {
 
 a {
   color: var(--color-accent);
+  transition: all 0.2s ease;
 }
 
 a:hover {
   text-decoration: underline;
+  filter: brightness(1.25);
+}
+
+/* === HIGH-IMPACT POP & RETRO CRT EFFECTS === */
+
+/* High-Contrast Card & Panel Styling */
+.bg-secondary {
+  border: 1px solid var(--border);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+/* Phosphor Bloom & Vivid Text Glow */
+body.phosphor-glow h1,
+body.phosphor-glow h2,
+body.phosphor-glow h3,
+body.phosphor-glow .font-bold {
+  text-shadow: 0 0 4px var(--primary), 0 0 12px var(--primary), 0 0 24px var(--primary);
+}
+
+body.phosphor-glow a {
+  text-shadow: 0 0 5px var(--accent), 0 0 12px var(--accent);
+}
+
+body.phosphor-glow input,
+body.phosphor-glow button,
+body.phosphor-glow select {
+  box-shadow: 0 0 8px var(--border);
+}
+
+/* CRT Card Ambient Phosphor Halo */
+body.crt-active .bg-secondary {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 8px var(--border);
+}
+
+body.crt-active .bg-secondary:hover {
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.8), 0 0 15px var(--primary);
+  transform: translateY(-2px);
+}
+
+/* Button Pulse & Glow on Hover */
+button, .button {
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+button:hover, .button:hover {
+  filter: brightness(1.15);
+}
+
+body.crt-active button:hover, body.crt-active .bg-accent:hover {
+  box-shadow: 0 0 15px var(--accent), 0 0 25px var(--accent);
+}
+
+/* CRT Scanlines Overlay */
+body.crt-active::after {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+              linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.015), rgba(0, 0, 255, 0.03));
+  z-index: 9999;
+  background-size: 100% 3px, 6px 100%;
+  pointer-events: none;
+  opacity: 0.65;
+}
+
+/* CRT Curved Glass Bezel Vignette */
+body.crt-active::before {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.55) 100%);
+  z-index: 9998;
+  pointer-events: none;
+}
+
+/* Micro CRT Phosphor Flicker */
+@keyframes crtFlicker {
+  0% { opacity: 0.993; }
+  50% { opacity: 1; }
+  100% { opacity: 0.996; }
+}
+
+body.crt-active {
+  animation: crtFlicker 0.15s infinite;
+}
+
+/* Blinking Terminal Prompt Cursor */
+@keyframes crtBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.crt-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.1em;
+  background-color: var(--primary);
+  animation: crtBlink 1s step-start infinite;
+  vertical-align: middle;
+  margin-left: 2px;
+  box-shadow: 0 0 8px var(--primary), 0 0 15px var(--primary);
 }

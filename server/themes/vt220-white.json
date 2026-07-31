@@ -1,0 +1,10 @@
+{
+  "--primary": "#e2e8f0",
+  "--secondary": "#14181c",
+  "--accent": "#94a3b8",
+  "--text": "#f0f4f8",
+  "--bg": "#0a0c0e",
+  "--border": "#333a42",
+  "--hover": "#1f242b",
+  "--site-name-color": "#38bdf8"
+}
