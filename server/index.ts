@@ -1,13 +1,14 @@
 import express from 'express';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
-import { rateLimit } from 'express-rate-limit';
-import { loadConfig } from './lib/config.ts';
+import { loadConfig, configPath } from './lib/config.ts';
 import { runPreflight } from './lib/preflight.ts';
 import { JwtSecretFactory, JwtSecretError, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
 import { createDefaultImageUpload } from './lib/upload-options.ts';
 import { RoleGuardFactory } from './middleware/auth.ts';
 import { createActiveConfigHolder } from './lib/app-context.ts';
+import { ensureRuntimeThemeCatalog } from './lib/themes.ts';
 import { registerRoutes } from './register-routes.ts';
 
 const app = express();
@@ -33,6 +34,22 @@ if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
 
 const configHolder = createActiveConfigHolder(loadConfig());
 const PORT = cliPort || configHolder.get().service?.port || process.env.PORT || 5173;
+
+// Populate runtime themeDir from the shipped catalog (missing files only)
+try {
+    const cfg = configHolder.get();
+    const rawThemeDir = cfg.themeDir || './themes';
+    const themeDir = path.isAbsolute(rawThemeDir)
+        ? rawThemeDir
+        : path.resolve(path.dirname(configPath()), rawThemeDir);
+    const seed = ensureRuntimeThemeCatalog(themeDir);
+    if (seed.copied.length) {
+        console.log(`[INFO] Seeded ${seed.copied.length} theme(s) into ${themeDir}: ${seed.copied.join(', ')}`);
+    }
+    console.log(`[INFO] Theme catalog ready: ${seed.total} preset(s)`);
+} catch (e) {
+    console.warn('[WARN] Theme catalog seed failed:', e);
+}
 
 let SECRET: string;
 try {
@@ -75,50 +92,9 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Defaults sized for a personal site + automated e2e; still overridable via config.security
-const apiLimiter = rateLimit({
-    windowMs: configHolder.get().security?.apiRateLimitWindow || 15 * 60 * 1000,
-    limit: () => configHolder.get().security?.apiRateLimitMax || 5000,
-    message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
-    standardHeaders: 'draft-7',
-    legacyHeaders: false,
-    validate: { ip: false },
-    skip: (req) => {
-        // originalUrl is always full path (/api/...); req.path can vary by mount
-        const p = (req.originalUrl || req.url || req.path || '').split('?')[0];
-        // Login has its own limiter — do not double-count against the general bucket
-        if (p === '/api/login') return true;
-        // High-churn public GETs (every page load)
-        if (req.method === 'GET') {
-            if (
-                p === '/api/health' ||
-                p === '/api/config' ||
-                p === '/api/theme' ||
-                p.startsWith('/api/theme?') ||
-                p === '/api/themes' ||
-                p.startsWith('/api/getimage') ||
-                p.startsWith('/api/images/')
-            ) {
-                return true;
-            }
-        }
-        return false;
-    },
-});
-
-const loginLimiter = rateLimit({
-    windowMs: configHolder.get().security?.loginRateLimitWindow || 15 * 60 * 1000,
-    limit: () => configHolder.get().security?.loginRateLimitMax || 50,
-    message: { message: 'Too many login attempts, please try again after 15 minutes' },
-    standardHeaders: 'draft-7',
-    legacyHeaders: false,
-    validate: { ip: false },
-});
-
+// Rate limiting is intentionally not applied here — handle at the reverse proxy / edge.
 app.use(cors());
 app.use(express.json());
-// Mount under /api so skip sees paths without /api prefix when using app.use('/api/', ...)
-app.use('/api/', apiLimiter);
 
 registerRoutes(app, {
     secret: SECRET,
@@ -128,7 +104,6 @@ registerRoutes(app, {
     requireAdmin,
     requireWriter,
     upload,
-    loginLimiter,
 });
 
 if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {

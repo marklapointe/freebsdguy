@@ -34,12 +34,9 @@ export const Login = ({ setUser }: LoginProps) => {
             setUser(userObj);
             navigate('/admin');
         } catch (err: unknown) {
-            const ax = err as { response?: { status?: number; data?: { message?: string } } };
-            const status = ax.response?.status;
+            const ax = err as { response?: { data?: { message?: string } } };
             const serverMsg = ax.response?.data?.message;
-            if (status === 429) {
-                setError(serverMsg || 'Too many requests — wait a moment and try again');
-            } else if (serverMsg) {
+            if (serverMsg) {
                 setError(serverMsg);
             } else {
                 setError('Invalid credentials');

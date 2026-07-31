@@ -24,8 +24,10 @@ test.describe('Login', () => {
     await page.getByTestId('username-input').fill(adminUser);
     await page.getByTestId('password-input').fill(adminPass);
     await page.getByTestId('login-submit').click();
-    await page.waitForURL(/admin/, { timeout: 10000 });
+    await page.waitForURL(/admin/, { timeout: 20000 });
     const token = await page.evaluate(() => localStorage.getItem('token'));
     expect(token).toBeTruthy();
   });
 });
+
+

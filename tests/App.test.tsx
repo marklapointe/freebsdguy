@@ -107,6 +107,24 @@ describe('App Component', () => {
         });
     });
 
+    it('keeps session on refresh when token is in localStorage', async () => {
+        localStorage.setItem('token', 'stored-token');
+        localStorage.setItem('role', 'admin');
+        localStorage.setItem('username', 'admin');
+        window.history.pushState({}, 'Admin', '/admin');
+
+        render(<App />);
+
+        // Must not bounce to login form while token is present
+        await waitFor(() => {
+            expect(screen.queryByTestId('username-input')).toBeNull();
+        });
+        // Admin chrome / settings affordance
+        await waitFor(() => {
+            expect(screen.getByTestId('admin-link') || screen.getByText(/Posts/i)).toBeTruthy();
+        });
+    });
+
     it('renders posts on home page', async () => {
         const mockPosts = [
             { slug: 'test-post', title: 'Test Post', date: '2026-01-01', summary: 'Test summary', content: 'Test content' }

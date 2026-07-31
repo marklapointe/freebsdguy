@@ -39,6 +39,16 @@ install -o root -g wheel -m 0555 /tmp/mdweb.rc /usr/local/etc/rc.d/mdweb
 install -d -o www -g www -m 0755 /var/run/mdweb /var/db/mdweb/themes
 cp -f "${REMOTE_APP}/server/themes/"*.json /var/db/mdweb/themes/ 2>/dev/null || true
 chown -R www:www /var/db/mdweb
+# www must write config (site theme / settings) and users.json
+chown www:www /usr/local/etc/mdweb 2>/dev/null || true
+if [ -f /usr/local/etc/mdweb/config.json ]; then
+  chown www:www /usr/local/etc/mdweb/config.json
+  chmod 0640 /usr/local/etc/mdweb/config.json
+fi
+if [ -f /usr/local/etc/mdweb/users.json ]; then
+  chown www:www /usr/local/etc/mdweb/users.json
+  chmod 0640 /usr/local/etc/mdweb/users.json
+fi
 
 # Free port + kill app tree (tsx leaves children that outlive pidfile stops)
 if [ -s /var/run/mdweb/mdweb.pid ]; then

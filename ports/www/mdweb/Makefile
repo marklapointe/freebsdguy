@@ -49,10 +49,8 @@ do-install:
 	cd ${WRKSRC}/node_modules && ${COPYTREE_BIN} . ${STAGEDIR}${WWWDIR}/node_modules
 	${INSTALL_DATA} ${WRKSRC}/server/posts/welcome.md \
 		${STAGEDIR}/var/db/mdweb/posts/ 2>/dev/null || ${TRUE}
-	${INSTALL_DATA} ${WRKSRC}/server/themes/dark.json \
-		${STAGEDIR}/var/db/mdweb/themes/
-	${INSTALL_DATA} ${WRKSRC}/server/themes/light.json \
-		${STAGEDIR}/var/db/mdweb/themes/
+	# Ship full theme catalog into runtime themes dir
+	cd ${WRKSRC}/server/themes && ${COPYTREE_SHARE} . ${STAGEDIR}/var/db/mdweb/themes
 	${INSTALL_DATA} ${FILESDIR}/config.json.sample ${STAGEDIR}${ETCDIR}/
 	${INSTALL_DATA} ${FILESDIR}/users.json.sample ${STAGEDIR}${ETCDIR}/
 	${INSTALL_DATA} ${FILESDIR}/mdweb.env.sample ${STAGEDIR}${ETCDIR}/

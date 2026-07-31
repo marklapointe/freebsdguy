@@ -92,9 +92,13 @@ export interface Config {
 }
 
 export interface SecurityConfig {
+    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
     apiRateLimitWindow?: number;
+    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
     apiRateLimitMax?: number;
+    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
     loginRateLimitWindow?: number;
+    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
     loginRateLimitMax?: number;
     disableAI?: boolean;
     disableImages?: boolean;
@@ -161,7 +165,18 @@ export const loadAIConfig = (customPath?: string): AIConfig | null => {
 export const saveConfig = (config: Config, customPath?: string) => {
     const targetPath = customPath || configPath();
     ensureDirectoryExists(targetPath);
-    fs.writeFileSync(targetPath, JSON.stringify(config, null, 2));
+    try {
+        fs.writeFileSync(targetPath, JSON.stringify(config, null, 2));
+    } catch (e: unknown) {
+        const err = e as NodeJS.ErrnoException;
+        if (err?.code === 'EACCES' || err?.code === 'EPERM') {
+            throw new Error(
+                `Cannot write config at ${targetPath} (permission denied). ` +
+                    `chown the file to the service user (e.g. www) and ensure it is writable.`
+            );
+        }
+        throw e;
+    }
 };
 
 export const isConfigWritable = (customPath?: string): boolean => {

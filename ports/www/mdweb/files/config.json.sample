@@ -19,10 +19,6 @@
     "modelId": "llama3"
   },
   "security": {
-    "apiRateLimitWindow": 900000,
-    "apiRateLimitMax": 100,
-    "loginRateLimitWindow": 900000,
-    "loginRateLimitMax": 10,
     "disableAI": false,
     "disableImages": false,
     "disablePublicSearch": false

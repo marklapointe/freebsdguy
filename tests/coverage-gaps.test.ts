@@ -303,10 +303,6 @@ describe('Config Admin Endpoints', () => {
             .set('Authorization', `Bearer ${adminToken}`)
             .send({
                 security: {
-                    apiRateLimitWindow: 60000,
-                    apiRateLimitMax: 50,
-                    loginRateLimitWindow: 300000,
-                    loginRateLimitMax: 5,
                     disableAI: true,
                     disableImages: true,
                     disablePublicSearch: true

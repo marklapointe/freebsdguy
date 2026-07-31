@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, applyTheme, getMdEditorTheme, type ThemeMeta } from '../../lib/api';
+import { api, applyTheme, fetchThemeCatalog, getMdEditorTheme, type ThemeMeta } from '../../lib/api';
 import { PostModal } from '../PostModal';
 import { ImagePickerModal, ImagePreviewModal } from '../ImageModals';
 import { User, Post, ImageInfo } from '../../types';
@@ -50,6 +50,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const [modelsList, setModelsList] = useState<string[]>([]);
     const [themeColors, setThemeColors] = useState<Record<string, string> | null>(null);
     const [themeCatalog, setThemeCatalog] = useState<ThemeMeta[]>([]);
+    const [themesLoading, setThemesLoading] = useState(false);
+    const [themesError, setThemesError] = useState<string | null>(null);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     const themeLabelMap: Record<string, string> = {
@@ -104,6 +106,13 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
         fetchImages().catch(err => console.error('Failed to fetch images:', err));
     }, [user]);
 
+    // Always re-load full catalog when opening Appearance (public /themes is the source of truth)
+    useEffect(() => {
+        if (activeTab === 'appearance' && user?.role === 'admin') {
+            fetchThemes().catch(err => console.error('Failed to fetch themes:', err));
+        }
+    }, [activeTab, user]);
+
     useEffect(() => {
         if (showLogoPicker) {
             api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
@@ -111,16 +120,39 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     }, [showLogoPicker]);
 
     const fetchUsers = () => api.get('/admin/users').then(res => { setUsers(res.data); return res; });
-    const fetchPosts = () => api.get('/posts').then(res => { setPosts(res.data); return res; });
-    const fetchThemes = () => api.get('/admin/themes').then(res => {
+    const fetchPosts = () => api.get('/posts').then(res => {
         const data = res.data;
-        if (Array.isArray(data) && data.length && typeof data[0] === 'object') {
-            setThemeCatalog(data as ThemeMeta[]);
-        } else if (Array.isArray(data)) {
-            setThemeCatalog((data as string[]).map(id => ({ id, label: id, mdEditorTheme: 'dark' as const })));
-        }
+        setPosts(Array.isArray(data) ? data : (data?.posts || []));
         return res;
     });
+    const fetchThemes = async () => {
+        setThemesLoading(true);
+        setThemesError(null);
+        try {
+            // Prefer public catalog (same data as admin) so a flaky admin auth path cannot hide presets
+            let data: ThemeMeta[] = await fetchThemeCatalog();
+            if (!data.length) {
+                const res = await api.get('/admin/themes');
+                const raw = res.data;
+                if (Array.isArray(raw) && raw.length && typeof raw[0] === 'object') {
+                    data = raw as ThemeMeta[];
+                } else if (Array.isArray(raw)) {
+                    data = (raw as string[]).map(id => ({ id, label: id, mdEditorTheme: 'dark' as const }));
+                }
+            }
+            if (data.length) {
+                setThemeCatalog(data);
+            } else {
+                setThemeCatalog([]);
+                setThemesError('Theme catalog response was empty');
+            }
+        } catch (err) {
+            console.error('Failed to fetch themes:', err);
+            setThemesError('Could not load theme catalog');
+        } finally {
+            setThemesLoading(false);
+        }
+    };
     const fetchImages = () => {
         const limit = imagesPerPage;
         const offset = (imagePage - 1) * (limit === 'all' ? 0 : parseInt(limit, 10));
@@ -137,7 +169,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const fetchConfig = () => api.get('/config').then(res => {
         const data = res.data;
         const defaultAiConfig = { enabled: false, provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'llama3' };
-        const defaultSecurity = { apiRateLimitWindow: 15 * 60 * 1000, apiRateLimitMax: 100, loginRateLimitWindow: 15 * 60 * 1000, loginRateLimitMax: 10, disableAI: false, disableImages: false, disablePublicSearch: false };
+        const defaultSecurity = { disableAI: false, disableImages: false, disablePublicSearch: false };
         data.aiConfig = { ...defaultAiConfig, ...data.aiConfig };
         data.security = { ...defaultSecurity, ...data.security };
         setConfig(data);
@@ -171,21 +203,27 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     }, [activeTab, config.aiConfig?.provider, config.aiConfig?.baseUrl]);
 
     const handleSaveConfig = () => {
-        api.post('/admin/config', config).then(() => {
-            const oldPort = parseInt(localStorage.getItem('lastPort') || '5173');
-            const newPort = config.service?.port || 5173;
-            setSiteName(config.siteName);
-            setSiteLogo(config.siteLogo || undefined);
-            fetchConfig();
-            applyTheme(config.currentTheme);
-            window.dispatchEvent(new CustomEvent('themeChanged', { detail: config.currentTheme }));
-            if (oldPort !== newPort) {
-                showAlert(`Settings saved! Port changed to ${newPort}. You will need to restart the service for this to take effect.`, 'Success');
-                localStorage.setItem('lastPort', newPort.toString());
-            } else {
-                showAlert('Settings saved successfully!', 'Success');
-            }
-        });
+        api.post('/admin/config', config)
+            .then(() => {
+                const oldPort = parseInt(localStorage.getItem('lastPort') || '5173');
+                const newPort = config.service?.port || 5173;
+                setSiteName(config.siteName);
+                setSiteLogo(config.siteLogo || undefined);
+                fetchConfig();
+                applyTheme(config.currentTheme);
+                window.dispatchEvent(new CustomEvent('themeChanged', { detail: config.currentTheme }));
+                if (oldPort !== newPort) {
+                    showAlert(`Settings saved! Port changed to ${newPort}. You will need to restart the service for this to take effect.`, 'Success');
+                    localStorage.setItem('lastPort', newPort.toString());
+                } else {
+                    showAlert('Settings saved successfully!', 'Success');
+                }
+            })
+            .catch((err: unknown) => {
+                const ax = err as { response?: { data?: { message?: string } } };
+                const msg = ax.response?.data?.message || 'Failed to save settings (is config.json writable by the service user?)';
+                showAlert(msg, 'Save failed');
+            });
     };
 
     const handleSaveAIConfig = () => {
@@ -195,10 +233,15 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     };
 
     const handleSaveTheme = () => {
-        api.post(`/admin/themes/${config.currentTheme}`, themeColors).then(() => {
-            fetchThemes();
-            showAlert(`${config.currentTheme.charAt(0).toUpperCase() + config.currentTheme.slice(1)} theme colors saved!`, 'Success');
-        });
+        api.post(`/admin/themes/${config.currentTheme}`, themeColors)
+            .then(() => {
+                fetchThemes();
+                showAlert(`${config.currentTheme.charAt(0).toUpperCase() + config.currentTheme.slice(1)} theme colors saved!`, 'Success');
+            })
+            .catch((err: unknown) => {
+                const ax = err as { response?: { data?: { message?: string } } };
+                showAlert(ax.response?.data?.message || 'Failed to save theme colors', 'Save failed');
+            });
     };
 
     const handleDeleteUser = (username: string) => {
@@ -470,7 +513,22 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                             </p>
                             <div className="bg-secondary rounded-lg p-6 space-y-6">
                                 <div>
-                                    <label className="block text-sm font-bold mb-2">Theme preset ({themeCatalog.length || '…'} available)</label>
+                                    <div className="flex items-center justify-between gap-3 mb-2">
+                                        <label className="block text-sm font-bold">
+                                            Theme preset ({themesLoading ? 'loading…' : `${themeCatalog.length} available`})
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => fetchThemes()}
+                                            className="text-xs flex items-center gap-1 px-2 py-1 rounded border border-border hover:bg-hover"
+                                            title="Reload theme catalog"
+                                        >
+                                            <RefreshCw size={14} /> Reload
+                                        </button>
+                                    </div>
+                                    {themesError && (
+                                        <p className="text-sm text-red-400 mb-2">{themesError}</p>
+                                    )}
                                     <select
                                         data-testid="admin-theme-select"
                                         value={config.currentTheme}
@@ -490,14 +548,18 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         ))}
                                     </select>
                                     <p className="text-xs opacity-50 mt-2">
-                                        Includes Miami Cyberpunk, Miami Vice, CRT, Win95, C64, ZX, and game packs (Game Boy, NES, Doom, Portal, Zelda…).
+                                        Full catalog: Miami Cyberpunk/Vice, CRT, Win95, C64, ZX, Game Boy, NES, Doom, Portal, Zelda, and more.
+                                        {themeCatalog.length > 0 && themeCatalog.length < 10 && (
+                                            <span className="text-amber-400"> Only {themeCatalog.length} loaded — click Reload if you expect more.</span>
+                                        )}
                                     </p>
                                 </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[28rem] overflow-y-auto pr-1">
                                     {themeCatalog.map(t => (
                                         <button
                                             key={t.id}
                                             type="button"
+                                            data-testid={`theme-card-${t.id}`}
                                             onClick={() => {
                                                 setConfig((prev: any) => ({ ...prev, currentTheme: t.id }));
                                                 applyTheme(t.id);
@@ -510,10 +572,13 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                             }`}
                                         >
                                             <span className="font-bold block truncate">{t.label}</span>
-                                            <span className="text-xs opacity-60">{t.mdEditorTheme} editor</span>
+                                            <span className="text-xs opacity-60">{t.id}</span>
                                         </button>
                                     ))}
                                 </div>
+                                {!themesLoading && themeCatalog.length === 0 && (
+                                    <p className="text-sm opacity-70">No themes found. Check server themeDir and restart mdweb.</p>
+                                )}
                                 {themeColors && (
                                     <div className="grid grid-cols-2 gap-4">
                                         {cssColorEntries(themeColors).map(([key, value]) => (

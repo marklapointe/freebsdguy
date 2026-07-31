@@ -5,8 +5,7 @@ test.describe('Security network checks', () => {
     const res = await request.post('/api/theme', {
       data: { currentTheme: 'light' },
     });
-    // 401 = unauthenticated; 429 = rate-limited after many probes (still not allowed)
-    expect([401, 429]).toContain(res.status());
+    expect(res.status()).toBe(401);
   });
 
   test('config responses during page load never include apiKey field', async ({ page }) => {

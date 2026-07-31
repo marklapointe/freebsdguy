@@ -3,6 +3,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { isSafePath } from './safe-path.ts';
 
 export interface ThemeColors {
@@ -18,6 +19,7 @@ export interface ThemeMeta {
 }
 
 const THEME_NAME_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const __themesModuleDir = path.dirname(fileURLToPath(import.meta.url));
 
 export function isValidThemeId(id: string): boolean {
     return THEME_NAME_RE.test(id);
@@ -30,17 +32,60 @@ export function themeFilePath(themeDir: string, id: string): string | null {
     return filePath;
 }
 
+/** Package/repo layout: server/themes next to server/lib, or cwd/server/themes. */
 export function shippedThemesDir(): string {
-    return path.resolve(process.cwd(), 'server/themes');
+    const candidates = [
+        path.resolve(__themesModuleDir, '..', 'themes'), // server/lib → server/themes
+        path.resolve(process.cwd(), 'server/themes'),
+        path.resolve(process.cwd(), 'themes')
+    ];
+    for (const c of candidates) {
+        if (fs.existsSync(c)) return c;
+    }
+    return candidates[0];
 }
 
 /** Configured theme dir first, then shipped catalog (repo / package tree). */
 export function themeSearchDirs(configuredDir: string): string[] {
     const dirs: string[] = [];
-    if (configuredDir) dirs.push(configuredDir);
+    if (configuredDir) dirs.push(path.resolve(configuredDir));
     const shipped = shippedThemesDir();
-    if (!dirs.includes(shipped)) dirs.push(shipped);
+    if (!dirs.some((d) => path.resolve(d) === path.resolve(shipped))) dirs.push(shipped);
     return dirs.filter((d) => d && fs.existsSync(d));
+}
+
+/**
+ * Ensure every complete shipped theme JSON exists under the runtime themeDir
+ * (e.g. /var/db/mdweb/themes). Missing files are copied; existing files are left alone
+ * so admin color overrides are preserved.
+ */
+export function ensureRuntimeThemeCatalog(configuredDir: string): { copied: string[]; total: number } {
+    const dest = resolveThemeDir(configuredDir);
+    const shipped = shippedThemesDir();
+    const copied: string[] = [];
+    if (!fs.existsSync(shipped)) {
+        return { copied, total: listThemeIds(dest).length };
+    }
+    if (!fs.existsSync(dest)) {
+        fs.mkdirSync(dest, { recursive: true });
+    }
+    for (const f of fs.readdirSync(shipped)) {
+        if (!f.endsWith('.json')) continue;
+        const id = f.replace(/\.json$/, '');
+        if (!isValidThemeId(id)) continue;
+        const src = path.join(shipped, f);
+        if (!readThemeFile(src)) continue;
+        const target = path.join(dest, f);
+        if (!fs.existsSync(target)) {
+            try {
+                fs.copyFileSync(src, target);
+                copied.push(id);
+            } catch {
+                /* non-fatal */
+            }
+        }
+    }
+    return { copied, total: listThemeIds(dest).length };
 }
 
 /** Prefer configured dir for writes; fall back to shipped for reads via search. */
@@ -129,9 +174,9 @@ const THEME_LABELS: Record<string, string> = {
     'sonic-blue': 'Sonic Blue',
     pokemon: 'Pokémon',
     minecraft: 'Minecraft',
-    amiga: 'Amiga Workbench',
+    'amiga': 'Amiga Workbench',
     'apple-green': 'Apple II Green',
-    c64: 'Commodore 64 Blue',
+    'c64': 'Commodore 64 Blue',
     'crt-amber': 'CRT Amber',
     'crt-blue': 'CRT Blue',
     'crt-emerald': 'CRT Emerald',
@@ -142,7 +187,7 @@ const THEME_LABELS: Record<string, string> = {
     'ibm-3270': 'IBM 3270',
     'ibm-cga': 'IBM CGA',
     'pet-green': 'Commodore PET',
-    vic20: 'VIC-20',
+    'vic20': 'VIC-20',
     'vt220-white': 'VT220 White',
 };
 

@@ -1,6 +1,6 @@
 /**
  * Shared runtime context for route factories (stepwise refinement of the god-file).
- * Mutable activeConfig is the single source for rate-limit/feature toggles after admin saves.
+ * Mutable activeConfig is the single source for feature toggles after admin saves.
  */
 import type { Config } from './config.ts';
 import type { RequestHandler } from 'express';
@@ -14,7 +14,6 @@ export interface AppContext {
     requireAdmin: RequestHandler;
     requireWriter: RequestHandler;
     upload: multer.Multer;
-    loginLimiter: RequestHandler;
 }
 
 export function createActiveConfigHolder(initial: Config) {

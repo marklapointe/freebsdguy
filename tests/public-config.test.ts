@@ -18,7 +18,7 @@ const baseConfig = (): Config => ({
     },
     security: {
         disableAI: false,
-        apiRateLimitMax: 100
+        disablePublicSearch: false
     },
     service: { port: 5173 }
 });

@@ -16,17 +16,28 @@ api.interceptors.response.use(
     response => response,
     error => {
         if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-            const isAuthError = error.response.data?.message === 'No token' ||
-                                error.response.data?.message === 'Failed to authenticate token' ||
-                                error.response.data?.message === 'Invalid credentials' ||
-                                error.response.data?.message === 'Forbidden';
+            // Only wipe session on real JWT failures — not every 403 (e.g. role-gated routes)
+            const msg = error.response.data?.message;
+            const isJwtFailure =
+                msg === 'No token' ||
+                msg === 'Failed to authenticate token' ||
+                msg === 'Invalid token' ||
+                msg === 'jwt malformed' ||
+                msg === 'jwt expired' ||
+                msg === 'invalid signature';
 
             const token = localStorage.getItem('token');
-            if (token && isAuthError) {
+            const path = error.config?.url || '';
+            // Never treat /login failures as "clear session and bounce"
+            const isLoginAttempt = String(path).includes('/login');
+
+            if (token && isJwtFailure && !isLoginAttempt) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('role');
                 localStorage.removeItem('username');
-                window.location.href = '/login';
+                if (!window.location.pathname.startsWith('/login')) {
+                    window.location.href = '/login';
+                }
             }
         }
         return Promise.reject(error);

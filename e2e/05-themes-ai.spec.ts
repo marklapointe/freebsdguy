@@ -39,7 +39,10 @@ test.describe('Themes catalog (admin-only)', () => {
     expect([401, 403]).toContain(res.status());
   });
 
-  test('admin sets theme from Appearance settings', async ({ page, request }) => {
+  test('admin sets theme from Appearance settings and persists server-side', async ({
+    page,
+    request
+  }) => {
     const catalog = await (await request.get('/api/themes')).json();
     const target =
       catalog.find((t: { id: string }) => t.id === 'miami-cyberpunk') ||
@@ -53,13 +56,14 @@ test.describe('Themes catalog (admin-only)', () => {
     await expect(page.getByTestId('admin-theme-select')).toBeVisible();
     await page.getByTestId('admin-theme-select').selectOption(target.id);
     await page.getByRole('button', { name: /Set as site theme/i }).click();
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(1000);
 
     const cfg = await request.get('/api/config');
-    // currentTheme may only update after save; applyTheme is client-side either way
+    expect(cfg.ok()).toBeTruthy();
+    const body = await cfg.json();
+    expect(body.currentTheme, 'theme must persist in config.json').toBe(target.id);
     const dataTheme = await page.locator('html').getAttribute('data-theme');
     expect(dataTheme).toBe(target.id);
-    expect(cfg.ok()).toBeTruthy();
   });
 });
 

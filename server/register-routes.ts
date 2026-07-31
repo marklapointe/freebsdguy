@@ -31,14 +31,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export function registerRoutes(app: Express, ctx: AppContext): void {
-    const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload, loginLimiter } = ctx;
+    const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload } = ctx;
     const getActive = ctx.getActiveConfig;
     const setActive = ctx.setActiveConfig;
 
 // Routes
 
 // Login
-app.post('/api/login', loginLimiter, async (req: Request, res: Response) => {
+app.post('/api/login', async (req: Request, res: Response) => {
     const { username, password } = req.body;
     const usersConfig = loadUsers();
 
@@ -498,105 +498,67 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
 
 // Admin: Update site config
 app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-    const config = loadConfig();
-    const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security } = req.body;
+    try {
+        const config = loadConfig();
+        const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security } = req.body;
 
-    if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
-    if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
-    if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
-    if (pagination !== undefined) config.pagination = Number(pagination);
-    if (sortBy) config.sortBy = sanitizeHtml(sortBy, { allowedTags: [], allowedAttributes: {} }) as 'title' | 'date' | 'author';
-    if (sortOrder) config.sortOrder = sanitizeHtml(sortOrder, { allowedTags: [], allowedAttributes: {} }) as 'desc' | 'asc';
-    if (searchPlacement) config.searchPlacement = sanitizeHtml(searchPlacement, { allowedTags: [], allowedAttributes: {} }) as 'top' | 'bottom' | 'left' | 'right' | 'none';
-    
-    if (aiConfig) {
-        const previousKey = config.aiConfig?.apiKey || '';
-        const nextKey =
-            typeof aiConfig.apiKey === 'string' && aiConfig.apiKey.length > 0
-                ? aiConfig.apiKey
-                : previousKey;
-        config.aiConfig = {
-            enabled: !!aiConfig.enabled,
-            provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
-            baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-            apiKey: nextKey,
-            modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
-        };
-    }
+        if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
+        if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
+        if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
+        if (pagination !== undefined) config.pagination = Number(pagination);
+        if (sortBy) config.sortBy = sanitizeHtml(sortBy, { allowedTags: [], allowedAttributes: {} }) as 'title' | 'date' | 'author';
+        if (sortOrder) config.sortOrder = sanitizeHtml(sortOrder, { allowedTags: [], allowedAttributes: {} }) as 'desc' | 'asc';
+        if (searchPlacement) config.searchPlacement = sanitizeHtml(searchPlacement, { allowedTags: [], allowedAttributes: {} }) as 'top' | 'bottom' | 'left' | 'right' | 'none';
 
-    if (service) {
-        config.service = {
-            port: Number(service.port) || 3001
-        };
-    }
-
-    if (security) {
-        config.security = {
-            apiRateLimitWindow: Number(security.apiRateLimitWindow) || 15 * 60 * 1000,
-            apiRateLimitMax: Number(security.apiRateLimitMax) || 100,
-            loginRateLimitWindow: Number(security.loginRateLimitWindow) || 15 * 60 * 1000,
-            loginRateLimitMax: Number(security.loginRateLimitMax) || 10,
-            disableAI: !!security.disableAI,
-            disableImages: !!security.disableImages,
-            disablePublicSearch: !!security.disablePublicSearch
-        };
-    }
-
-    saveConfig(config);
-    setActive(config);
-    
-    // Also update the theme if it changed
-    if (currentTheme) {
-        const configDir = path.dirname(configPath());
-        const themeDir = path.resolve(configDir, config.themeDir);
-        const themePath = path.join(themeDir, `${currentTheme}.json`);
-        if (!fs.existsSync(themePath)) {
-            // Create default theme if it doesn't exist
-            if (!fs.existsSync(themeDir)) fs.mkdirSync(themeDir, { recursive: true });
-            if (currentTheme === 'dark') {
-                fs.writeFileSync(themePath, JSON.stringify({
-                    "--primary": "#3b82f6",
-                    "--secondary": "#1f2937",
-                    "--accent": "#3a297a",
-                    "--text": "#f3f4f6",
-                    "--bg": "#111827",
-                    "--border": "#374151",
-                    "--hover": "#1f2937",
-                    "--site-name-color": "#3b82f6"
-                }, null, 2));
-            } else if (currentTheme === 'light') {
-                fs.writeFileSync(themePath, JSON.stringify({
-                    "--primary": "#2563eb",
-                    "--secondary": "#f3f4f6",
-                    "--accent": "#ef4444",
-                    "--text": "#111827",
-                    "--bg": "#ffffff",
-                    "--border": "#e5e7eb",
-                    "--hover": "#f3f4f6",
-                    "--site-name-color": "#2563eb"
-                }, null, 2));
-            } else {
-                fs.writeFileSync(themePath, JSON.stringify({
-                    "--primary": "#2563eb",
-                    "--secondary": "#f3f4f6",
-                    "--accent": "#ef4444",
-                    "--text": "#111827",
-                    "--bg": "#ffffff",
-                    "--border": "#e5e7eb",
-                    "--hover": "#f3f4f6",
-                    "--site-name-color": "#2563eb"
-                }, null, 2));
-            }
+        if (aiConfig) {
+            const previousKey = config.aiConfig?.apiKey || '';
+            const nextKey =
+                typeof aiConfig.apiKey === 'string' && aiConfig.apiKey.length > 0
+                    ? aiConfig.apiKey
+                    : previousKey;
+            config.aiConfig = {
+                enabled: !!aiConfig.enabled,
+                provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
+                baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
+                apiKey: nextKey,
+                modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
+            };
         }
-    }
 
-    res.json({ message: 'Configuration updated' });
+        if (service) {
+            config.service = {
+                port: Number(service.port) || 3001
+            };
+        }
+
+        if (security) {
+            // Rate limits are not enforced in-app; only feature toggles are kept.
+            config.security = {
+                disableAI: !!security.disableAI,
+                disableImages: !!security.disableImages,
+                disablePublicSearch: !!security.disablePublicSearch
+            };
+        }
+
+        saveConfig(config);
+        setActive(config);
+
+        res.json({ message: 'Configuration updated', currentTheme: config.currentTheme });
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to save configuration';
+        console.error('[ERROR] POST /api/admin/config:', msg);
+        res.status(500).json({ message: msg });
+    }
 });
 
 const themeDirForConfig = () => {
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    return resolveThemeDir(path.resolve(configDir, config.themeDir || './themes'));
+    const raw = config.themeDir || './themes';
+    // Absolute themeDir (e.g. /var/db/mdweb/themes) must not be joined under CONFIG_DIR
+    const resolved = path.isAbsolute(raw)
+        ? raw
+        : path.resolve(path.dirname(configPath()), raw);
+    return resolveThemeDir(resolved);
 };
 
 // Public theme catalog (ids + labels for pickers)
@@ -834,23 +796,29 @@ app.get('/api/theme', (req: Request, res: Response) => {
 
 // Theme write: admin-only site preference (config.currentTheme only — never per-user)
 app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-    const { currentTheme } = req.body;
-    if (!currentTheme || typeof currentTheme !== 'string' || !isValidThemeId(currentTheme)) {
-        return res.status(400).json({ message: 'currentTheme must be a valid theme id' });
-    }
+    try {
+        const { currentTheme } = req.body;
+        if (!currentTheme || typeof currentTheme !== 'string' || !isValidThemeId(currentTheme)) {
+            return res.status(400).json({ message: 'currentTheme must be a valid theme id' });
+        }
 
-    const config = loadConfig();
-    const themeDir = themeDirForConfig();
-    const known = listThemeIds(themeDir);
-    if (!known.includes(currentTheme) && !loadThemeColors(themeDir, currentTheme)) {
-        return res.status(404).json({ message: `Theme not found: ${currentTheme}` });
-    }
+        const config = loadConfig();
+        const themeDir = themeDirForConfig();
+        const known = listThemeIds(themeDir);
+        if (!known.includes(currentTheme) && !loadThemeColors(themeDir, currentTheme)) {
+            return res.status(404).json({ message: `Theme not found: ${currentTheme}` });
+        }
 
-    config.currentTheme = currentTheme;
-    saveConfig(config);
-    setActive(config);
-    console.log(`[INFO] Admin set site theme to: ${currentTheme}`);
-    res.json({ message: 'Site theme updated', currentTheme });
+        config.currentTheme = currentTheme;
+        saveConfig(config);
+        setActive(config);
+        console.log(`[INFO] Admin set site theme to: ${currentTheme}`);
+        res.json({ message: 'Site theme updated', currentTheme });
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to set theme';
+        console.error('[ERROR] POST /api/theme:', msg);
+        res.status(500).json({ message: msg });
+    }
 });
 
 

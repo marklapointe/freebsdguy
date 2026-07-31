@@ -9,9 +9,23 @@ import { Modal, Notification } from './components/Modal';
 import { User, AlertType } from './types';
 import { Admin } from './components/admin/Admin';
 
+/** Restore session on first paint — do not wait for useEffect (that races /admin → /login). */
+function readStoredUser(): User | null {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) return null;
+        return {
+            role: localStorage.getItem('role') || 'contributor',
+            username: localStorage.getItem('username') || 'unknown'
+        };
+    } catch {
+        return null;
+    }
+}
 
 function App() {
-    const [user, setUser] = useState<User | null>(null);
+    // Synchronous hydrate so refresh on /admin does not flash-redirect to login
+    const [user, setUser] = useState<User | null>(() => readStoredUser());
     const [siteName, setSiteName] = useState('MDWeb');
     const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
     const [notifications, setNotifications] = useState<AlertType[]>([]);
@@ -22,13 +36,9 @@ function App() {
             setSiteName(res.data.siteName || 'MDWeb');
             setSiteLogo(res.data.siteLogo);
             applyTheme(res.data.currentTheme || 'dark');
+        }).catch(() => {
+            /* public config optional at boot */
         });
-        const token = localStorage.getItem('token');
-        const role = localStorage.getItem('role');
-        const username = localStorage.getItem('username');
-        if (token) {
-            setUser({ role: role || 'contributor', username: username || 'unknown' });
-        }
     }, []);
 
     const [modal, setModal] = useState<{ isOpen: boolean; title: string; message: string; type: string; onConfirm: () => void }>({ isOpen: false, title: '', message: '', type: 'alert', onConfirm: () => {} });
@@ -53,7 +63,9 @@ function App() {
                 <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/post/:slug" element={<PostDetail />} />
-                    <Route path="/login" element={<Login setUser={setUser} />} />
+                    <Route path="/login" element={
+                        user ? <Navigate to="/admin" replace /> : <Login setUser={setUser} />
+                    } />
                     <Route path="/admin" element={
                         user ? (
                             <Admin user={user} siteName={siteName} setSiteName={setSiteName} siteLogo={siteLogo} setSiteLogo={setSiteLogo} showAlert={showAlert} showConfirm={showConfirm} />

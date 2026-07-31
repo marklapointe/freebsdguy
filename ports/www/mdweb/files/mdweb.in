@@ -60,6 +60,17 @@ mdweb_prestart()
 			install -d -o ${mdweb_runas} -g ${mdweb_group} -m 0755 "${d}"
 		fi
 	done
+	# Service user must write config (theme / site settings) and users.json
+	if [ -d "${mdweb_config_dir}" ]; then
+		chown ${mdweb_runas}:${mdweb_group} "${mdweb_config_dir}" 2>/dev/null || true
+		for f in config.json users.json; do
+			if [ -f "${mdweb_config_dir}/${f}" ]; then
+				chown ${mdweb_runas}:${mdweb_group} "${mdweb_config_dir}/${f}" 2>/dev/null || true
+				chmod 0640 "${mdweb_config_dir}/${f}" 2>/dev/null || true
+			fi
+		done
+	fi
+	chown -R ${mdweb_runas}:${mdweb_group} /var/db/mdweb 2>/dev/null || true
 
 	if [ -f "${pidfile}" ]; then
 		_pid=$(cat "${pidfile}")
