@@ -121,7 +121,21 @@ export const applyTheme = async (themeName?: string): Promise<ThemeColors | null
                 root.style.setProperty(key, value);
             }
         });
-        root.setAttribute('data-theme', themeName || themeData.mdEditorTheme || 'dark');
+        const activeTheme = themeName || (themeData as any).id || 'dark';
+        root.setAttribute('data-theme', activeTheme);
+
+        // Enable CRT scanlines & phosphor bloom for all retro / CRT themes
+        const isRetroTheme = !['dark', 'light'].includes(activeTheme);
+        if (isRetroTheme) {
+            document.body.classList.add('crt-active');
+            if (activeTheme.startsWith('crt-') || activeTheme.includes('green') || activeTheme.includes('amber') || activeTheme.includes('plasma') || activeTheme.includes('3270') || activeTheme.includes('apple') || activeTheme.includes('matrix') || activeTheme.includes('dos') || activeTheme.includes('gameboy') || activeTheme.includes('arcade')) {
+                document.body.classList.add('phosphor-glow');
+            } else {
+                document.body.classList.remove('phosphor-glow');
+            }
+        } else {
+            document.body.classList.remove('crt-active', 'phosphor-glow');
+        }
 
         // Editor light/dark only — site theme lives in server config (admin Appearance)
         if (themeData.mdEditorTheme === 'light' || themeData.mdEditorTheme === 'dark') {
