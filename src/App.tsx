@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { api, applyTheme } from './lib/api';
+import { api, applyTheme, getEffectiveThemeMode, setAuthModeCache } from './lib/api';
 import { Navbar } from './components/Navbar';
 import { Home } from './components/Home';
 import { PostDetail } from './components/PostDetail';
@@ -9,14 +9,18 @@ import { Modal, Notification } from './components/Modal';
 import { User, AlertType } from './types';
 import { Admin } from './components/admin/Admin';
 
-/** Restore session on first paint — do not wait for useEffect (that races /admin → /login). */
+/** Restore session on first paint — JWT needs token; session mode may only have role/username. */
 function readStoredUser(): User | null {
     try {
+        const role = localStorage.getItem('role');
+        const username = localStorage.getItem('username');
         const token = localStorage.getItem('token');
-        if (!token) return null;
+        // Session cookie mode stores role/username without a client token
+        if (!role && !token) return null;
+        if (!role && !username) return null;
         return {
-            role: localStorage.getItem('role') || 'contributor',
-            username: localStorage.getItem('username') || 'unknown'
+            role: role || 'contributor',
+            username: username || 'unknown'
         };
     } catch {
         return null;
@@ -31,14 +35,33 @@ function App() {
     const [notifications, setNotifications] = useState<AlertType[]>([]);
 
     useEffect(() => {
-        // Site theme is always from config (admin Appearance) — never per-user / localStorage
+        // Theme pack is site-wide; light/dark mode is per-browser (localStorage)
         api.get('/config').then(res => {
             setSiteName(res.data.siteName || 'MDWeb');
             setSiteLogo(res.data.siteLogo);
-            applyTheme(res.data.currentTheme || 'dark');
+            setAuthModeCache(res.data.security?.authMode);
+            const appearance = res.data.appearance || {};
+            applyTheme(res.data.currentTheme || 'dark', {
+                mode: getEffectiveThemeMode(appearance.themeMode),
+                crtEffects: appearance.crtEffects !== false,
+                textGlow: appearance.textGlow !== false
+            });
         }).catch(() => {
             /* public config optional at boot */
         });
+        // Session mode: refresh identity from cookie if localStorage is thin
+        api.get('/me')
+            .then(res => {
+                if (res.data?.username) {
+                    localStorage.setItem('username', res.data.username);
+                    localStorage.setItem('role', res.data.role || 'contributor');
+                    setUser({ username: res.data.username, role: res.data.role || 'contributor' });
+                    if (res.data.authMode) setAuthModeCache(res.data.authMode);
+                }
+            })
+            .catch(() => {
+                /* not logged in */
+            });
     }, []);
 
     const [modal, setModal] = useState<{ isOpen: boolean; title: string; message: string; type: string; onConfirm: () => void }>({ isOpen: false, title: '', message: '', type: 'alert', onConfirm: () => {} });

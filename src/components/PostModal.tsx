@@ -164,7 +164,7 @@ export const PostModal = ({
                                         <button
                                             type="button"
                                             onClick={onApplyEnhancement}
-                                            className="p-1 px-3 bg-accent text-white rounded text-xs font-bold hover:bg-opacity-80 transition"
+                                            className="p-1 px-3 bg-accent text-on-accent rounded text-xs font-bold hover:bg-opacity-80 transition"
                                         >
                                             Apply Changes
                                         </button>
@@ -228,7 +228,7 @@ export const PostModal = ({
                     </div>
                 </div>
                 <div className="p-6 md:p-8 border-t border-accent border-opacity-20 flex gap-4 bg-bg bg-opacity-30">
-                        <button type="submit" className="bg-accent p-3 px-8 rounded font-bold hover:bg-opacity-80 transition text-white shadow-lg">Save Post</button>
+                        <button type="submit" className="bg-accent text-on-accent p-3 px-8 rounded font-bold hover:bg-opacity-80 transition shadow-lg">Save Post</button>
                         <button type="button" onClick={onCancel} className="p-3 px-8 border border-accent rounded font-bold hover:bg-accent hover:bg-opacity-10 transition">Cancel</button>
                     </div>
                 </form>

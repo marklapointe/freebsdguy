@@ -49,7 +49,7 @@ export const ImagePickerModal = ({ isOpen, images, onSelect, onClose, onUpload, 
                                     }}
                                 />
                                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all flex items-center justify-center">
-                                    <span className="bg-accent text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg">
+                                    <span className="bg-accent text-on-accent p-2 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg">
                                         <Plus size={16} />
                                     </span>
                                 </div>

@@ -49,7 +49,12 @@ describe('config.ts', () => {
         };
         saveConfig(config, customConfigPath);
         const loaded = loadConfig(customConfigPath);
-        expect(loaded).toEqual(config);
+        expect(loaded.postsDir).toBe('./test-posts');
+        expect(loaded.themeDir).toBe('./test-themes');
+        expect(loaded.currentTheme).toBe('light');
+        expect(loaded.siteName).toBe('Test Site');
+        // sanitize fills remaining defaults on save/load
+        expect(loaded.pagination).toBe(10);
     });
 
     it('loadAIConfig returns null if no aiConfig', () => {
@@ -99,7 +104,9 @@ describe('config.ts', () => {
         };
         saveUsers(users, customUsersPath);
         const loaded = loadUsers(customUsersPath);
-        expect(loaded).toEqual(users);
+        expect(loaded.admin.username).toBe('superadmin');
+        expect(loaded.admin.passwordHash).toBe('hash');
+        expect(loaded.users).toEqual([]);
     });
     
     it('configPath and usersPath return strings', () => {

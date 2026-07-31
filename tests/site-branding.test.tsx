@@ -33,6 +33,10 @@ vi.mock('../src/lib/api', () => ({
     },
     applyTheme: vi.fn().mockResolvedValue(null),
     getMdEditorTheme: vi.fn().mockReturnValue('dark'),
+    getStoredThemeMode: vi.fn().mockReturnValue(null),
+    getEffectiveThemeMode: vi.fn().mockReturnValue('dark'),
+    setStoredThemeMode: vi.fn(),
+    toggleThemeMode: vi.fn().mockResolvedValue('light'),
     fetchThemeCatalog: vi.fn().mockResolvedValue([
         { id: 'dark', label: 'Dark', mdEditorTheme: 'dark' },
         { id: 'light', label: 'Light', mdEditorTheme: 'light' }

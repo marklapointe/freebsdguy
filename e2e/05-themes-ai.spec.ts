@@ -53,8 +53,9 @@ test.describe('Themes catalog (admin-only)', () => {
 
     await login(page);
     await page.getByRole('button', { name: /Appearance/i }).click();
-    await expect(page.getByTestId('admin-theme-select')).toBeVisible();
-    await page.getByTestId('admin-theme-select').selectOption(target.id);
+    const card = page.getByTestId(`theme-card-${target.id}`);
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.click();
     await page.getByRole('button', { name: /Set as site theme/i }).click();
     await page.waitForTimeout(1000);
 

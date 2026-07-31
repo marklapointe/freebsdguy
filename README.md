@@ -1,169 +1,148 @@
-# MDWeb Website
+# MDWeb
 
-A dynamic blogging platform built with **React**, **Vite**, **Tailwind CSS**, and **Node.js (TypeScript)**. Designed for the MDWeb enthusiast, supporting dynamic posts, themes, and user management.
+**A personal website and blog that stores everything as files.**  
+Markdown for posts. JSON for settings and themes. **No database.**
 
-## Features
+You write. You own the files. You run it on your machine — FreeBSD preferred, Node anywhere.
 
-- **TypeScript Throughout**: Both frontend and backend are written in TypeScript for enhanced reliability.
-- **Dynamic Markdown Posts**: Load posts from a specified directory. Supports frontmatter for metadata (title, summary, date, author).
-- **Configurable Site Name**: Customize the blog's title in the configuration file.
-- **Dynamic Theming**: Themes are loaded as JSON and applied via CSS variables.
-- **Authentication**: RBAC with Admin and Contributor roles.
-- **Admin Dashboard**: Create and manage users.
-- **Markdown & Images**: Full Markdown rendering support, including images served from the post directory.
-- **Searchable Homepage**: Quickly find posts by title or content.
-- **Comprehensive Testing**: Unit tests for both backend logic and frontend components using Vitest.
-- **Responsive Design**: Built with Tailwind CSS for mobile and desktop support.
+---
 
-## Prerequisites
+## Why this exists
 
-- **Node.js** (v18 or higher recommended)
-- **npm**
-- (Optional) **FreeBSD** for running the provided RC script.
-- (Optional) **Podman/Docker** for OCI container support.
+Most “simple” blogs still want Postgres, a cloud account, or a proprietary export. MDWeb does not.
 
-## Getting Started
+- **Posts are `.md` files** — edit in vim, VS Code, or the built-in admin editor  
+- **Config and users are JSON** — readable, greppable, backup with `tar` or ZFS  
+- **Themes are JSON color packs** — dozens of skins (CRT, Miami, Win95, Matrix, …), each with light and dark  
+- **No MySQL, Postgres, SQLite, or Redis required** for day-to-day operation  
 
-### 1. Installation
+If you can copy a folder, you can move your site.
 
-Install the required dependencies for both frontend and backend:
+---
+
+## Screenshots
+
+![Home](docs/images/home-hero.png)
+
+| A Markdown post | Theme picker (admin) |
+|-----------------|----------------------|
+| ![Post](docs/images/post-kitchen-sink.png) | ![Appearance](docs/images/admin-appearance.png) |
+
+Every shipped theme in light and dark: **[docs/THEMES.md](docs/THEMES.md)**
+
+| Miami Cyberpunk | Matrix | CRT Amber |
+|-----------------|--------|-----------|
+| ![](docs/images/themes/miami-cyberpunk-dark.png) | ![](docs/images/themes/matrix-dark.png) | ![](docs/images/themes/crt-amber-dark.png) |
+
+---
+
+## What you need
+
+| Install path | Requirements |
+|--------------|----------------|
+| **FreeBSD package / port** | FreeBSD host, Node (pulled in by the port), a strong secret for login tokens |
+| **From source** | Node.js 18+, npm |
+
+That is it. No separate database server to install or tune.
+
+---
+
+## Install on FreeBSD (recommended)
+
+1. Install the `www/mdweb` package or build the port under `ports/www/mdweb/`.  
+2. Create a strong secret (required in production):
+
+   ```sh
+   printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" | sudo tee /usr/local/etc/mdweb.env
+   sudo chmod 0600 /usr/local/etc/mdweb.env
+   ```
+
+3. Enable and start the service:
+
+   ```sh
+   sudo sysrc mdweb_enable=YES
+   sudo service mdweb start
+   ```
+
+4. Open the site in a browser: `http://YOUR-HOST:5173`  
+   (Use your machine’s hostname or IP — whatever you use for other services on that box.)
+
+5. Log in with the default admin account and **change the password immediately**:
+
+   - User: `admin`  
+   - Password: `admin`  
+
+   ```sh
+   # from a checkout, or use the admin UI once logged in
+   npm run change-password -- admin 'your-strong-password'
+   ```
+
+### Where your data lives (package install)
+
+| Path | What |
+|------|------|
+| `/usr/local/etc/mdweb/config.json` | Site name, theme, appearance, security options |
+| `/usr/local/etc/mdweb/users.json` | Accounts (password hashes) |
+| `/var/db/mdweb/posts/` | **Your Markdown posts and images** |
+| `/var/db/mdweb/themes/` | Theme files (including any color tweaks you save) |
+
+Upgrades replace the app under `/usr/local/www/mdweb`. They do **not** wipe posts or config when installed correctly. Details: [docs/UPGRADE.md](docs/UPGRADE.md).
+
+---
+
+## Install from source (any OS with Node)
 
 ```bash
+git clone <this-repo>
+cd mdweb   # or freebsdguy, depending on your checkout
 npm install
-```
-
-### 2. Configuration
-
-User settings and site configuration are stored in `server/config/config.json`.
-User credentials (usernames and password hashes) are stored in `server/config/users.json`.
-
-Default Admin credentials (created automatically if `users.json` is missing):
-- **Username**: `admin`
-- **Password**: `admin`
-
-**Change this password immediately** before any network exposure (`npm run change-password admin <new_password>`). Production also requires a strong `JWT_SECRET` (never the development default).
-
-Posts are stored in `server/posts/` (development) or a configured data directory (package install).
-Themes are stored in `server/themes/` or the configured theme directory.
-
-FreeBSD package install (`www/mdweb`) is documented under [FreeBSD package install](#freebsd-package-install) once the port is available.
-
-### 3. Running the Project
-
-#### Development Mode
-
-Start the unified development server:
-```bash
 npm run dev
 ```
-The application (both frontend and API) will be available at `http://localhost:5173`.
 
-#### Production Mode
+Open **http://localhost:5173**, log in as `admin` / `admin`, change the password.
 
-Build the project and run the production server:
+Production-style run:
+
 ```bash
+export JWT_SECRET="$(openssl rand -hex 32)"
 npm run build
 npm start
 ```
-The site will be served at `http://localhost:5173`.
 
-#### Using Makefile
+Posts in development are ordinary Markdown files under `server/posts/`.
 
-- Build: `make build`
-- Run production: `make run`
-- Run development: `make run-dev`
-- Clean: `make clean`
+---
 
-### 4. Deployment on FreeBSD
+## Day-to-day use
 
-#### FreeBSD package install
+| Task | How |
+|------|-----|
+| Write a post | Log in → Admin → New Post, or drop a `.md` file into the posts directory |
+| Change site look | Admin → **Appearance** → pick a theme → Set as site theme |
+| Light / dark | Anyone: sun/moon control in the navbar (applies to the current theme pack) |
+| Users | Admin → Users (admin only) |
+| Auth style | Admin → **Security** — JWT (default) or classical session cookies; see [docs/AUTH.md](docs/AUTH.md) |
 
-When the `www/mdweb` port is available (see `ports/www/mdweb/`):
+Showcase posts (math, code, Mermaid, kitchen-sink Markdown) can appear on first install; they are only copied if those files are not already present, so your writing is never overwritten. Markdown notes: [docs/MARKDOWN.md](docs/MARKDOWN.md).
 
-1. Build and install the package (or install from your package repository).
-2. Set a strong `JWT_SECRET` in `/usr/local/etc/mdweb.env` (mode `0600`).
-3. Change the admin password before exposing the service.
-4. Enable and start: `sysrc mdweb_enable=YES && service mdweb start`.
+---
 
-Writable data lives under `/var/db/mdweb`; config under `/usr/local/etc/mdweb`.
+## Documentation
 
-#### Manual RC script
+| Doc | Audience |
+|-----|----------|
+| [docs/ADMIN.md](docs/ADMIN.md) | Running the admin UI |
+| [docs/AUTH.md](docs/AUTH.md) | JWT vs session login |
+| [docs/UPGRADE.md](docs/UPGRADE.md) | Backups, upgrades, durable paths |
+| [docs/MARKDOWN.md](docs/MARKDOWN.md) | What works in posts |
+| [docs/THEMES.md](docs/THEMES.md) | Full theme gallery |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building from source, tests, contributing |
 
-A sample RC script `mdweb.rc` is also provided for development installs:
-
-1. Copy the script to `/usr/local/etc/rc.d/mdweb`.
-2. Set the executable permission: `chmod +x /usr/local/etc/rc.d/mdweb`.
-3. Enable the service: `sysrc mdweb_enable="YES"`.
-4. Start the service: `service mdweb start`.
-
-### 5. OCI Container
-
-Build the container image using the provided `Containerfile`:
-
-```bash
-podman build -t mdweb -f Containerfile .
-podman run -p 5173:5173 -e JWT_SECRET="$(openssl rand -hex 32)" mdweb
-```
-
-Do not use the placeholder `JWT_SECRET` from the Containerfile in production.
-
-### 5b. Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `JWT_SECRET` | Required in production; signs auth tokens |
-| `CONFIG_DIR` / `CONFIG_PATH` / `USERS_PATH` | Config locations |
-| `PORT` | Listen port (default from config or 5173) |
-| `NODE_ENV` | Set `production` for package installs |
-
-### 6. Changing User Passwords
-
-You can change a user's password (including the admin) using the provided CLI tool.
-
-#### Using npm
-```bash
-npm run change-password <username> <new_password>
-```
-
-#### Using Shell Script
-```bash
-./bin/change-password.sh <username> <new_password>
-```
-
-### 7. Testing
-
-The project uses **Vitest** for unit testing.
-
-To run all tests:
-```bash
-npm test
-```
-
-To run tests in watch mode during development:
-```bash
-npm run test:watch
-```
-
-Tests are located in the `tests/` directory.
-
-## Project Structure
-
-- `src/`: React frontend source code.
-- `server/`: Express backend source code.
-  - `server/lib/`: Core backend logic (config, auth, posts).
-  - `server/posts/`: Markdown post files and images.
-  - `server/config/`: Configuration files (users, settings).
-  - `server/themes/`: Dynamic theme JSON files.
-- `tests/`: Unit tests for both frontend and backend.
-- `public/`: Static assets for the frontend.
-- `dist/`: Built frontend (generated after `npm run build`).
-
-## Contributing
-
-1. Add new posts as `.md` files in `server/posts/`.
-2. Add new themes as `.json` files in `server/themes/`.
-3. Use the Admin dashboard to create new contributors.
+---
 
 ## License
 
-MIT
+**MIT License**  
+Copyright (c) 2026 Mark LaPointe  
+
+Free to use, modify, and distribute, subject to the terms in [LICENSE](./LICENSE). Provided as-is, without warranty.

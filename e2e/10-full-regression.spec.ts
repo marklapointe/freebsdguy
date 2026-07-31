@@ -1,10 +1,8 @@
 /**
  * Full feature regression against a live MDWeb instance.
  *
- * Run (repeatable against FreeBSD or local):
- *   MDWEB_BASE_URL=http://172.16.176.133:5173 \
- *   MDWEB_ADMIN_USER=admin MDWEB_ADMIN_PASS=admin \
- *   npx playwright test e2e/10-full-regression.spec.ts --reporter=list
+ *   npm run test:e2e
+ *   # optional: MDWEB_BASE_URL=http://127.0.0.1:5173 for local dev
  *
  * Uses unique slugs/usernames per run; cleans up resources it creates.
  */
@@ -221,19 +219,9 @@ test.describe('FULL regression — all product surfaces', () => {
 
     await asAdmin(page, request);
     await page.getByRole('button', { name: /Appearance/i }).click();
-    await expect(page.getByTestId('admin-theme-select')).toBeVisible({ timeout: 15000 });
-
-    // Wait for catalog to populate beyond dark/light fallback when possible
-    await page.waitForTimeout(800);
-    const optionCount = await page.getByTestId('admin-theme-select').locator('option').count();
-    expect(optionCount, 'theme select under-populated').toBeGreaterThanOrEqual(2);
-
-    await page.getByTestId('admin-theme-select').selectOption(target.id);
-    // Prefer card click if present
     const card = page.getByTestId(`theme-card-${target.id}`);
-    if (await card.count()) {
-      await card.click();
-    }
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.click();
 
     await page.getByRole('button', { name: /Set as site theme/i }).click();
     // Success toast or error must not be "permission denied" for a healthy host

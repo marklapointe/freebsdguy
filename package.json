@@ -17,7 +17,8 @@
     "test:e2e:full": "playwright test --reporter=list",
     "test:api-smoke": "bash scripts/api-smoke.sh",
     "regression:freebsd": "bash scripts/freebsd-package-round.sh",
-    "regression:live": "bash scripts/regression-round.sh smoke"
+    "regression:live": "bash scripts/regression-round.sh smoke",
+    "docs:shots": "playwright test e2e/99-docs-screenshots.spec.ts --reporter=list"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",

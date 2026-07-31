@@ -7,7 +7,8 @@
  * Builder pattern: accumulate optional inclusions, validate at build().
  */
 
-import type { AIConfig, Config, SecurityConfig, ServiceConfig } from './config.ts';
+import type { AIConfig, AppearanceConfig, AuthMode, Config, ServiceConfig } from './config.ts';
+import { resolveAuthMode } from './config.ts';
 
 /** Public AI surface: capability flags only; never the raw secret. */
 export interface PublicAIConfig {
@@ -19,20 +20,64 @@ export interface PublicAIConfig {
     apiKeySet: boolean;
 }
 
+export interface PublicAppearance {
+    themeMode: 'light' | 'dark';
+    crtEffects: boolean;
+    textGlow: boolean;
+}
+
+/** Public security surface — never secrets. */
+export interface PublicSecurity {
+    authMode: AuthMode;
+    /** True when JWT_SECRET / SESSION_SECRET / config.jwtSecret looks set (not the value). */
+    authSecretSet: boolean;
+    sessionTtlSeconds: number;
+    disableAI: boolean;
+    disableImages: boolean;
+    disablePublicSearch: boolean;
+}
+
 export interface PublicConfig {
     siteName: string;
     siteLogo: string;
     currentTheme: string;
+    appearance: PublicAppearance;
     pagination: number;
     sortBy: string;
     sortOrder: string;
     searchPlacement: string;
     aiConfig?: PublicAIConfig;
     service: ServiceConfig;
-    security?: SecurityConfig;
+    security?: PublicSecurity;
 }
 
 const DEFAULT_INSECURE_JWT = 'freebsd_guy_secret_key';
+
+export function projectSecurity(config: Config): PublicSecurity {
+    const s = config.security || {};
+    const secret =
+        (process.env.SESSION_SECRET || process.env.JWT_SECRET || config.jwtSecret || '').trim();
+    return {
+        authMode: resolveAuthMode(config),
+        authSecretSet: secret.length >= 16 && secret !== DEFAULT_INSECURE_JWT,
+        sessionTtlSeconds:
+            typeof s.sessionTtlSeconds === 'number' && s.sessionTtlSeconds > 0
+                ? s.sessionTtlSeconds
+                : 86400,
+        disableAI: !!s.disableAI,
+        disableImages: !!s.disableImages,
+        disablePublicSearch: !!s.disablePublicSearch
+    };
+}
+
+export function projectAppearance(a?: AppearanceConfig | null): PublicAppearance {
+    return {
+        themeMode: a?.themeMode === 'light' ? 'light' : 'dark',
+        // Default ON so retro themes keep CRT look until admin turns them off
+        crtEffects: a?.crtEffects !== false,
+        textGlow: a?.textGlow !== false
+    };
+}
 
 /**
  * Pure projection of AI config.
@@ -87,6 +132,7 @@ export class PublicConfigBuilder {
             siteName: this.source.siteName || 'Generic Blog',
             siteLogo: this.source.siteLogo || 'logo.webp',
             currentTheme: this.source.currentTheme || 'dark',
+            appearance: projectAppearance(this.source.appearance),
             pagination: this.source.pagination || 10,
             sortBy: this.source.sortBy || 'date',
             sortOrder: this.source.sortOrder || 'desc',
@@ -99,8 +145,8 @@ export class PublicConfigBuilder {
         if (this.includeAI) {
             out.aiConfig = projectAIConfig(this.source.aiConfig);
         }
-        if (this.includeSecurity && this.source.security) {
-            out.security = { ...this.source.security };
+        if (this.includeSecurity) {
+            out.security = projectSecurity(this.source);
         }
 
         // Defensive check: reject accidental secret leakage if schema drifts

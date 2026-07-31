@@ -64,9 +64,16 @@ fi
 if [ ! -f /usr/local/etc/mdweb/users.json ]; then
   cp /usr/local/etc/mdweb/users.json.sample /usr/local/etc/mdweb/users.json
 fi
-# Always refresh theme catalog from the package tree
+# Seed missing themes only — never clobber admin color overrides in /var/db/mdweb/themes
 if [ -d /usr/local/www/mdweb/server/themes ]; then
-  cp -f /usr/local/www/mdweb/server/themes/*.json /var/db/mdweb/themes/ 2>/dev/null || true
+  for f in /usr/local/www/mdweb/server/themes/*.json; do
+    [ -f "\$f" ] || continue
+    base=\$(basename "\$f")
+    dest=/var/db/mdweb/themes/\$base
+    if [ ! -f "\$dest" ]; then
+      cp "\$f" "\$dest"
+    fi
+  done
 fi
 if [ ! -f /usr/local/etc/mdweb.env ] || ! grep -q '^JWT_SECRET=.' /usr/local/etc/mdweb.env 2>/dev/null; then
   printf 'JWT_SECRET=%s\n' "\$(openssl rand -hex 32)" > /usr/local/etc/mdweb.env

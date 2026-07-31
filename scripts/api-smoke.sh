@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # API smoke against a running MDWeb instance (INV-SEC-1 checks included).
 set -euo pipefail
-BASE="${MDWEB_BASE_URL:-http://127.0.0.1:5173}"
+# Default: local instance. For a remote package install set MDWEB_BASE_URL or MDWEB_FREEBSD_HOST.
+if [ -n "${MDWEB_BASE_URL:-}" ]; then
+  BASE="${MDWEB_BASE_URL}"
+elif [ -n "${MDWEB_FREEBSD_HOST:-}" ]; then
+  BASE="http://${MDWEB_FREEBSD_HOST}:5173"
+else
+  BASE="http://127.0.0.1:5173"
+fi
 BASE="${BASE%/}"
 
 echo "==> Health ${BASE}/api/health"

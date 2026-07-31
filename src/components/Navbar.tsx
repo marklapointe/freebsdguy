@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Settings } from 'lucide-react';
-import { api, applyTheme, siteConfig } from '../lib/api';
+import { LogOut, Settings, Sun, Moon } from 'lucide-react';
+import {
+    api,
+    applyTheme,
+    getEffectiveThemeMode,
+    siteConfig,
+    toggleThemeMode,
+    type ThemeMode
+} from '../lib/api';
 import { User } from '../types';
 
 interface NavbarProps {
@@ -10,12 +17,13 @@ interface NavbarProps {
 }
 
 /**
- * Themes are site-wide and admin-only (Appearance settings).
- * Navbar only loads/applies the current site theme — no picker for visitors or contributors.
+ * Theme pack is site-wide (admin Appearance). Light/dark mode of that pack is
+ * per-browser and switchable here for every visitor.
  */
 export const Navbar = ({ user, setUser }: NavbarProps) => {
     const [siteName, setSiteName] = useState('MDWeb');
     const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
+    const [themeMode, setThemeMode] = useState<ThemeMode>(() => getEffectiveThemeMode());
     const location = useLocation();
     const navigate = useNavigate();
 
@@ -32,9 +40,16 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
             try {
                 const res = await api.get('/config');
                 const currentTheme = res.data.currentTheme || 'dark';
-                await applyTheme(currentTheme);
+                const appearance = res.data.appearance || {};
+                const mode = getEffectiveThemeMode(appearance.themeMode);
+                setThemeMode(mode);
+                await applyTheme(currentTheme, {
+                    mode,
+                    crtEffects: appearance.crtEffects !== false,
+                    textGlow: appearance.textGlow !== false
+                });
             } catch {
-                await applyTheme('dark');
+                await applyTheme('dark', { mode: getEffectiveThemeMode('dark') });
             }
         };
 
@@ -42,16 +57,35 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
 
         const handleThemeChanged = async (e: CustomEvent) => {
             if (e.detail && typeof e.detail === 'string') {
-                await applyTheme(e.detail);
+                await applyTheme(e.detail, { mode: getEffectiveThemeMode() });
             } else {
                 await loadSiteTheme();
             }
         };
+        const handleModeChanged = (e: CustomEvent) => {
+            if (e.detail === 'light' || e.detail === 'dark') {
+                setThemeMode(e.detail);
+            }
+        };
         window.addEventListener('themeChanged' as any, handleThemeChanged);
-        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
+        window.addEventListener('themeModeChanged' as any, handleModeChanged);
+        return () => {
+            window.removeEventListener('themeChanged' as any, handleThemeChanged);
+            window.removeEventListener('themeModeChanged' as any, handleModeChanged);
+        };
     }, []);
 
-    const handleLogout = () => {
+    const handleToggleMode = async () => {
+        const next = await toggleThemeMode();
+        setThemeMode(next);
+    };
+
+    const handleLogout = async () => {
+        try {
+            await api.post('/logout');
+        } catch {
+            /* still clear client */
+        }
         localStorage.removeItem('token');
         localStorage.removeItem('role');
         localStorage.removeItem('username');
@@ -75,20 +109,30 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
                 )}
             </Link>
             <div className="flex gap-2 sm:gap-4 items-center">
+                <button
+                    type="button"
+                    onClick={handleToggleMode}
+                    data-testid="theme-mode-toggle"
+                    className="p-2 hover:bg-accent rounded transition hover:text-on-accent"
+                    title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                    aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                    {themeMode === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                </button>
                 {user ? (
                     <>
                         <span className="hidden sm:inline opacity-70">Hello, {user.username}</span>
                         {(user.role === 'admin' || user.role === 'contributor') && (
-                            <Link to="/admin" data-testid="admin-link" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Settings">
+                            <Link to="/admin" data-testid="admin-link" className="p-2 hover:bg-accent rounded transition hover:text-on-accent" title="Settings">
                                 <Settings size={20} />
                             </Link>
                         )}
-                        <button onClick={handleLogout} data-testid="logout-button" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Logout">
+                        <button onClick={handleLogout} data-testid="logout-button" className="p-2 hover:bg-accent rounded transition hover:text-on-accent" title="Logout">
                             <LogOut size={20} />
                         </button>
                     </>
                 ) : (
-                    <Link to="/login" data-testid="login-link" className="p-2 hover:bg-accent rounded transition hover:text-white" title="Login">
+                    <Link to="/login" data-testid="login-link" className="p-2 hover:bg-accent rounded transition hover:text-on-accent" title="Login">
                         Login
                     </Link>
                 )}

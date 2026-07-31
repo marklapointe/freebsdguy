@@ -1,12 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { api, applyTheme, fetchThemeCatalog, getMdEditorTheme, type ThemeMeta } from '../../lib/api';
+import {
+    api,
+    applyTheme,
+    fetchThemeCatalog,
+    getEffectiveThemeMode,
+    getMdEditorTheme,
+    type ThemeMeta
+} from '../../lib/api';
 import { PostModal } from '../PostModal';
 import { ImagePickerModal, ImagePreviewModal } from '../ImageModals';
 import { User, Post, ImageInfo } from '../../types';
 import {
     Eye, Trash2, Edit, Plus, Upload, Palette,
     Users, FileText, Image as ImageIcon, Cpu,
-    Server, Pin, CheckSquare, Square, RefreshCw
+    Server, Pin, CheckSquare, Square, RefreshCw, Shield
 } from 'lucide-react';
 
 export type AdminProps = {
@@ -40,6 +47,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
         sortBy: 'date',
         sortOrder: 'desc',
         searchPlacement: 'top',
+        appearance: { themeMode: 'dark', crtEffects: true, textGlow: true },
         aiConfig: { provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'llama3', enabled: true },
         service: { port: 3001 }
     });
@@ -78,9 +86,12 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
 
     useEffect(() => {
         if (activeTab === 'appearance' || !themeColors) {
-            api.get('/theme?name=' + encodeURIComponent(config.currentTheme)).then(res => setThemeColors(res.data));
+            const mode = getEffectiveThemeMode(config.appearance?.themeMode);
+            api.get(
+                `/theme?name=${encodeURIComponent(config.currentTheme)}&mode=${mode}`
+            ).then(res => setThemeColors(res.data));
         }
-    }, [activeTab, config.currentTheme]);
+    }, [activeTab, config.currentTheme, config.appearance?.themeMode]);
 
     useEffect(() => {
         const handleThemeChanged = (e: CustomEvent) => {
@@ -88,12 +99,15 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             if (newTheme && typeof newTheme === 'string') {
                 setConfig((prev: any) => ({ ...prev, currentTheme: newTheme }));
                 setEditorTheme(getMdEditorTheme());
-                api.get('/theme?name=' + encodeURIComponent(newTheme)).then(res => setThemeColors(res.data));
+                const mode = getEffectiveThemeMode(config.appearance?.themeMode);
+                api.get(`/theme?name=${encodeURIComponent(newTheme)}&mode=${mode}`).then(res =>
+                    setThemeColors(res.data)
+                );
             }
         };
         window.addEventListener('themeChanged' as any, handleThemeChanged);
         return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
-    }, []);
+    }, [config.appearance?.themeMode]);
 
     useEffect(() => {
         if (user && user.role === 'admin') {
@@ -169,13 +183,33 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const fetchConfig = () => api.get('/config').then(res => {
         const data = res.data;
         const defaultAiConfig = { enabled: false, provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'llama3' };
-        const defaultSecurity = { disableAI: false, disableImages: false, disablePublicSearch: false };
+        const defaultSecurity = {
+            authMode: 'jwt' as const,
+            sessionTtlSeconds: 86400,
+            disableAI: false,
+            disableImages: false,
+            disablePublicSearch: false
+        };
+        const defaultAppearance = { themeMode: 'dark' as const, crtEffects: true, textGlow: true };
         data.aiConfig = { ...defaultAiConfig, ...data.aiConfig };
         data.security = { ...defaultSecurity, ...data.security };
+        data.appearance = { ...defaultAppearance, ...data.appearance };
         setConfig(data);
         if (data.service?.port) localStorage.setItem('lastPort', data.service.port.toString());
         return res;
     });
+
+    const previewTheme = (themeId: string, appearanceOverride?: Partial<{ themeMode: string; crtEffects: boolean; textGlow: boolean }>) => {
+        const appearance = { ...config.appearance, ...appearanceOverride };
+        // Admin preview uses the site default mode (not the visitor localStorage override)
+        const mode = appearance.themeMode === 'light' ? 'light' : 'dark';
+        applyTheme(themeId, {
+            mode,
+            crtEffects: appearance.crtEffects !== false,
+            textGlow: appearance.textGlow !== false
+        });
+        window.dispatchEvent(new CustomEvent('themeChanged', { detail: themeId }));
+    };
     const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { return res; });
 
     const fetchAIModels = (p?: string, b?: string, k?: string) => {
@@ -210,8 +244,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 setSiteName(config.siteName);
                 setSiteLogo(config.siteLogo || undefined);
                 fetchConfig();
-                applyTheme(config.currentTheme);
-                window.dispatchEvent(new CustomEvent('themeChanged', { detail: config.currentTheme }));
+                previewTheme(config.currentTheme);
                 if (oldPort !== newPort) {
                     showAlert(`Settings saved! Port changed to ${newPort}. You will need to restart the service for this to take effect.`, 'Success');
                     localStorage.setItem('lastPort', newPort.toString());
@@ -377,8 +410,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     <div className="mb-6">
                         <h2 className="text-xs font-black uppercase tracking-wider opacity-50 mb-3">Content</h2>
                         <nav className="space-y-1">
-                            <button onClick={() => setActiveTab('posts')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'posts' ? 'bg-accent text-white' : 'hover:bg-bg'}`}><FileText size={18} /> Posts</button>
-                            <button onClick={() => setActiveTab('images')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'images' ? 'bg-accent text-white' : 'hover:bg-bg'}`}><ImageIcon size={18} /> Images</button>
+                            <button onClick={() => setActiveTab('posts')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'posts' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><FileText size={18} /> Posts</button>
+                            <button onClick={() => setActiveTab('images')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'images' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><ImageIcon size={18} /> Images</button>
                             <button onClick={handleNewPost} className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition hover:bg-bg text-accent"><Plus size={18} /> New Post</button>
                         </nav>
                     </div>
@@ -386,10 +419,11 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                         <div className="mb-6">
                             <h2 className="text-xs font-black uppercase tracking-wider opacity-50 mb-3">Admin</h2>
                             <nav className="space-y-1">
-                                <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'settings' ? 'bg-accent text-white' : 'hover:bg-bg'}`}><Server size={18} /> Settings</button>
-                                <button onClick={() => setActiveTab('appearance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'appearance' ? 'bg-accent text-white' : 'hover:bg-bg'}`}><Palette size={18} /> Appearance</button>
-                                <button onClick={() => setActiveTab('users')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'users' ? 'bg-accent text-white' : 'hover:bg-bg'}`}><Users size={18} /> Users</button>
-                                <button onClick={() => setActiveTab('ai')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'ai' ? 'bg-accent text-white' : 'hover:bg-bg'}`}><Cpu size={18} /> AI Settings</button>
+                                <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'settings' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Server size={18} /> Settings</button>
+                                <button onClick={() => setActiveTab('appearance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'appearance' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Palette size={18} /> Appearance</button>
+                                <button onClick={() => setActiveTab('users')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'users' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Users size={18} /> Users</button>
+                                <button onClick={() => setActiveTab('ai')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'ai' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Cpu size={18} /> AI Settings</button>
+                                <button onClick={() => setActiveTab('security')} data-testid="admin-security-tab" className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'security' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Shield size={18} /> Security</button>
                             </nav>
                         </div>
                     )}
@@ -406,7 +440,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                             <p className="text-sm opacity-50">{new Date(post.date).toLocaleDateString()}</p>
                                         </div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => handleEditPost(post)} className="p-2 hover:bg-accent rounded transition"><Edit size={18} /></button>
+                                            <button onClick={() => handleEditPost(post)} className="p-2 hover:bg-accent hover:text-on-accent rounded transition"><Edit size={18} /></button>
                                             <button onClick={() => handleDeletePost(post.slug)} className="p-2 hover:bg-red-500 rounded transition"><Trash2 size={18} /></button>
                                         </div>
                                     </div>
@@ -422,7 +456,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                 <div className="flex gap-2">
                                     {isSelectionMode && <button onClick={handleBulkDelete} className="bg-red-500 text-white px-4 py-2 rounded font-bold disabled:opacity-50" disabled={selectedImages.size === 0}>Delete ({selectedImages.size})</button>}
                                     <button onClick={() => setIsSelectionMode(!isSelectionMode)} className="bg-secondary px-4 py-2 rounded font-bold">{isSelectionMode ? 'Cancel' : 'Select'}</button>
-                                    <label className="bg-accent text-white px-4 py-2 rounded font-bold cursor-pointer flex items-center gap-2"><Upload size={18} /> Upload<input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} /></label>
+                                    <label className="bg-accent text-on-accent px-4 py-2 rounded font-bold cursor-pointer flex items-center gap-2"><Upload size={18} /> Upload<input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} /></label>
                                 </div>
                             </div>
                             <div className="grid grid-cols-3 gap-4">
@@ -437,7 +471,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         <p className="text-xs truncate mt-2">{img.originalName}</p>
                                         {!isSelectionMode && (
                                             <div className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto pointer-events-none transition-all flex items-center justify-center gap-2 rounded">
-                                                <button onClick={() => setPreviewImage(img)} className="p-2 bg-accent text-white rounded-full z-20"><Eye size={18} /></button>
+                                                <button onClick={() => setPreviewImage(img)} className="p-2 bg-accent text-on-accent rounded-full z-20"><Eye size={18} /></button>
                                                 <button onClick={() => handleDeleteImage(img.filename)} className="p-2 bg-red-500 text-white rounded-full z-20"><Trash2 size={18} /></button>
                                             </div>
                                         )}
@@ -494,14 +528,14 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                     <label className="block text-sm font-bold mb-2">Site Logo</label>
                                     <div className="flex items-center gap-4">
                                         {config.siteLogo && <img src={`/api/getimage?fileName=${config.siteLogo}`} alt="Logo" className="h-12 w-auto" />}
-                                        <button onClick={() => setShowLogoPicker(true)} className="bg-accent text-white px-4 py-2 rounded font-bold">Choose Image</button>
+                                        <button onClick={() => setShowLogoPicker(true)} className="bg-accent text-on-accent px-4 py-2 rounded font-bold">Choose Image</button>
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">Service Port</label>
                                     <input type="number" value={config.service?.port || 3001} onChange={e => setConfig((prev: any) => ({ ...prev, service: { ...prev.service, port: parseInt(e.target.value) } }))} className="w-full p-3 bg-bg border border-accent rounded text-text" />
                                 </div>
-                                <button onClick={handleSaveConfig} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save Settings</button>
+                                <button onClick={handleSaveConfig} className="bg-accent text-on-accent px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save Settings</button>
                             </div>
                         </div>
                     )}
@@ -509,13 +543,17 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                         <div>
                             <h1 className="text-3xl font-bold mb-6">Appearance</h1>
                             <p className="text-sm opacity-60 mb-4">
-                                Site theme is admin-only. Visitors always see the theme you set here (no public theme switcher).
+                                Theme pack is site-wide. Visitors can switch light/dark for that pack in the navbar;
+                                the default mode and CRT/glow effects are set here.
                             </p>
                             <div className="bg-secondary rounded-lg p-6 space-y-6">
                                 <div>
                                     <div className="flex items-center justify-between gap-3 mb-2">
                                         <label className="block text-sm font-bold">
                                             Theme preset ({themesLoading ? 'loading…' : `${themeCatalog.length} available`})
+                                            {config.currentTheme && (
+                                                <span className="font-normal opacity-60 ml-2">— {config.currentTheme}</span>
+                                            )}
                                         </label>
                                         <button
                                             type="button"
@@ -529,30 +567,76 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                     {themesError && (
                                         <p className="text-sm text-red-400 mb-2">{themesError}</p>
                                     )}
-                                    <select
-                                        data-testid="admin-theme-select"
-                                        value={config.currentTheme}
-                                        onChange={e => {
-                                            const id = e.target.value;
-                                            setConfig((prev: any) => ({ ...prev, currentTheme: id }));
-                                            applyTheme(id);
-                                            window.dispatchEvent(new CustomEvent('themeChanged', { detail: id }));
-                                        }}
-                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
-                                    >
-                                        {(themeCatalog.length
-                                            ? themeCatalog
-                                            : [{ id: 'dark', label: 'Dark' }, { id: 'light', label: 'Light' }]
-                                        ).map(t => (
-                                            <option key={t.id} value={t.id}>{t.label}</option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs opacity-50 mt-2">
-                                        Full catalog: Miami Cyberpunk/Vice, CRT, Win95, C64, ZX, Game Boy, NES, Doom, Portal, Zelda, and more.
+                                    <p className="text-xs opacity-50 mb-2">
+                                        Pick a pack from the grid below.
                                         {themeCatalog.length > 0 && themeCatalog.length < 10 && (
                                             <span className="text-amber-400"> Only {themeCatalog.length} loaded — click Reload if you expect more.</span>
                                         )}
                                     </p>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Default light / dark</label>
+                                        <select
+                                            data-testid="admin-theme-mode"
+                                            value={config.appearance?.themeMode === 'light' ? 'light' : 'dark'}
+                                            onChange={e => {
+                                                const themeMode = e.target.value === 'light' ? 'light' : 'dark';
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    appearance: { ...prev.appearance, themeMode }
+                                                }));
+                                                previewTheme(config.currentTheme, { themeMode });
+                                            }}
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        >
+                                            <option value="dark">Dark</option>
+                                            <option value="light">Light</option>
+                                        </select>
+                                        <p className="text-xs opacity-50 mt-1">
+                                            Used when a visitor has not chosen a mode yet.
+                                        </p>
+                                    </div>
+                                    <label className="flex items-start gap-3 p-3 rounded border border-border cursor-pointer hover:bg-hover">
+                                        <input
+                                            type="checkbox"
+                                            data-testid="admin-crt-effects"
+                                            checked={config.appearance?.crtEffects !== false}
+                                            onChange={e => {
+                                                const crtEffects = e.target.checked;
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    appearance: { ...prev.appearance, crtEffects }
+                                                }));
+                                                previewTheme(config.currentTheme, { crtEffects });
+                                            }}
+                                            className="mt-1"
+                                        />
+                                        <span>
+                                            <span className="font-bold text-sm block">CRT effects</span>
+                                            <span className="text-xs opacity-60">Scanlines, vignette, flicker on retro packs</span>
+                                        </span>
+                                    </label>
+                                    <label className="flex items-start gap-3 p-3 rounded border border-border cursor-pointer hover:bg-hover">
+                                        <input
+                                            type="checkbox"
+                                            data-testid="admin-text-glow"
+                                            checked={config.appearance?.textGlow !== false}
+                                            onChange={e => {
+                                                const textGlow = e.target.checked;
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    appearance: { ...prev.appearance, textGlow }
+                                                }));
+                                                previewTheme(config.currentTheme, { textGlow });
+                                            }}
+                                            className="mt-1"
+                                        />
+                                        <span>
+                                            <span className="font-bold text-sm block">Text glow</span>
+                                            <span className="text-xs opacity-60">Phosphor bloom on headings and links</span>
+                                        </span>
+                                    </label>
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[28rem] overflow-y-auto pr-1">
                                     {themeCatalog.map(t => (
@@ -562,12 +646,11 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                             data-testid={`theme-card-${t.id}`}
                                             onClick={() => {
                                                 setConfig((prev: any) => ({ ...prev, currentTheme: t.id }));
-                                                applyTheme(t.id);
-                                                window.dispatchEvent(new CustomEvent('themeChanged', { detail: t.id }));
+                                                previewTheme(t.id);
                                             }}
                                             className={`p-3 rounded border text-left text-sm transition ${
                                                 config.currentTheme === t.id
-                                                    ? 'border-accent bg-accent text-white'
+                                                    ? 'border-accent bg-accent text-on-accent'
                                                     : 'border-border hover:bg-hover'
                                             }`}
                                         >
@@ -598,13 +681,130 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                     </div>
                                 )}
                                 <div className="flex flex-wrap gap-3">
-                                    <button onClick={handleSaveConfig} className="bg-primary text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">
+                                    <button onClick={handleSaveConfig} className="bg-primary text-on-primary px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">
                                         Set as site theme
                                     </button>
-                                    <button onClick={handleSaveTheme} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">
+                                    <button onClick={handleSaveTheme} className="bg-accent text-on-accent px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">
                                         Save color overrides
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+                    {activeTab === 'security' && user.role === 'admin' && (
+                        <div>
+                            <h1 className="text-3xl font-bold mb-6" data-testid="security-settings-heading">Security</h1>
+                            <p className="text-sm opacity-60 mb-4">
+                                JWT is the default. Switch to classical session cookies if your environment strips
+                                Authorization headers or JWT secrets are awkward to manage. Changing mode forces everyone to log in again.
+                            </p>
+                            <div className="bg-secondary rounded-lg p-6 space-y-6" data-testid="security-settings-panel">
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">Authentication mode</label>
+                                    <select
+                                        data-testid="auth-mode-select"
+                                        value={config.security?.authMode === 'session' ? 'session' : 'jwt'}
+                                        onChange={e =>
+                                            setConfig((prev: any) => ({
+                                                ...prev,
+                                                security: {
+                                                    ...prev.security,
+                                                    authMode: e.target.value === 'session' ? 'session' : 'jwt'
+                                                }
+                                            }))
+                                        }
+                                        className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                    >
+                                        <option value="jwt">JWT Bearer (recommended)</option>
+                                        <option value="session">Session cookie (classical)</option>
+                                    </select>
+                                    <p className="text-xs opacity-50 mt-1">
+                                        Env override: <code className="opacity-80">MDWEB_AUTH_MODE=jwt|session</code>
+                                    </p>
+                                </div>
+                                {config.security?.authMode === 'session' && (
+                                    <div>
+                                        <label className="block text-sm font-bold mb-2">Session lifetime (hours)</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={168}
+                                            data-testid="session-ttl-hours"
+                                            value={Math.round((config.security?.sessionTtlSeconds || 86400) / 3600)}
+                                            onChange={e => {
+                                                const hours = Math.max(1, Math.min(168, parseInt(e.target.value, 10) || 24));
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    security: {
+                                                        ...prev.security,
+                                                        sessionTtlSeconds: hours * 3600
+                                                    }
+                                                }));
+                                            }}
+                                            className="w-full p-3 bg-bg border border-accent rounded text-text"
+                                        />
+                                    </div>
+                                )}
+                                <div className="space-y-3">
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!config.security?.disablePublicSearch}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    security: { ...prev.security, disablePublicSearch: e.target.checked }
+                                                }))
+                                            }
+                                        />
+                                        <span className="text-sm font-bold">Disable public search</span>
+                                    </label>
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!config.security?.disableImages}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    security: { ...prev.security, disableImages: e.target.checked }
+                                                }))
+                                            }
+                                        />
+                                        <span className="text-sm font-bold">Disable image uploads</span>
+                                    </label>
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!config.security?.disableAI}
+                                            onChange={e =>
+                                                setConfig((prev: any) => ({
+                                                    ...prev,
+                                                    security: { ...prev.security, disableAI: e.target.checked }
+                                                }))
+                                            }
+                                        />
+                                        <span className="text-sm font-bold">Disable AI features</span>
+                                    </label>
+                                </div>
+                                <p className="text-xs opacity-60">
+                                    Auth secret configured:{' '}
+                                    <strong>{config.security?.authSecretSet === false ? 'no' : 'yes / unknown'}</strong>
+                                    {' '}(set <code>JWT_SECRET</code> or <code>SESSION_SECRET</code> in mdweb.env)
+                                </p>
+                                <button
+                                    type="button"
+                                    data-testid="security-save-button"
+                                    onClick={() => {
+                                        showConfirm(
+                                            'Saving security settings may require all users to log in again. Continue?',
+                                            () => handleSaveConfig(),
+                                            'Confirm security save'
+                                        );
+                                    }}
+                                    className="bg-accent text-on-accent px-6 py-3 rounded font-bold hover:bg-opacity-80 transition"
+                                >
+                                    Save security settings
+                                </button>
                             </div>
                         </div>
                     )}
@@ -618,7 +818,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         {users.map(u => (
                                             <tr key={u.username} className="border-b border-accent border-opacity-20">
                                                 <td className="py-3">{u.username} {u.username === user.username && '(You)'}</td>
-                                                <td className="py-3"><span className={`px-2 py-1 rounded text-xs ${u.role === 'admin' ? 'bg-accent' : 'bg-secondary'}`}>{u.role}</span></td>
+                                                <td className="py-3"><span className={`px-2 py-1 rounded text-xs ${u.role === 'admin' ? 'bg-accent text-on-accent' : 'bg-secondary text-text'}`}>{u.role}</span></td>
                                                 <td className="py-3">{u.username !== user.username && <button onClick={() => handleDeleteUser(u.username)} className="text-red-500 hover:underline">Delete</button>}</td>
                                             </tr>
                                         ))}
@@ -690,7 +890,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                         autoComplete="off"
                                     />
                                 </div>
-                                <button data-testid="ai-save-button" onClick={handleSaveAIConfig} className="bg-accent text-white px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save AI Settings</button>
+                                <button data-testid="ai-save-button" onClick={handleSaveAIConfig} className="bg-accent text-on-accent px-6 py-3 rounded font-bold hover:bg-opacity-80 transition">Save AI Settings</button>
                             </div>
                         </div>
                     )}

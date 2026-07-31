@@ -5,6 +5,7 @@
 import type { Config } from './config.ts';
 import type { RequestHandler } from 'express';
 import type multer from 'multer';
+import type { FileSessionStore } from './session-store.ts';
 
 export interface AppContext {
     secret: string;
@@ -14,6 +15,7 @@ export interface AppContext {
     requireAdmin: RequestHandler;
     requireWriter: RequestHandler;
     upload: multer.Multer;
+    sessionStore?: FileSessionStore;
 }
 
 export function createActiveConfigHolder(initial: Config) {

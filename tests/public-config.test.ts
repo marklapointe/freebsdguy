@@ -60,4 +60,22 @@ describe('PublicConfigBuilder (INV-SEC-1)', () => {
         expect(pub.pagination).toBe(10);
         expect(pub.currentTheme).toBe('light');
     });
+
+    it('projects appearance defaults (dark mode, CRT/glow on)', () => {
+        const pub = PublicConfigBuilder.from(baseConfig()).build();
+        expect(pub.appearance).toEqual({
+            themeMode: 'dark',
+            crtEffects: true,
+            textGlow: true
+        });
+    });
+
+    it('projects appearance overrides', () => {
+        const cfg = baseConfig();
+        cfg.appearance = { themeMode: 'light', crtEffects: false, textGlow: false };
+        const pub = PublicConfigBuilder.from(cfg).build();
+        expect(pub.appearance.themeMode).toBe('light');
+        expect(pub.appearance.crtEffects).toBe(false);
+        expect(pub.appearance.textGlow).toBe(false);
+    });
 });

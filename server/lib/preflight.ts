@@ -23,20 +23,57 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
     const users = loadUsers();
     const configDir = path.dirname(configPath());
 
-    // 1. Check directories
-    const postsDir = path.resolve(configDir, config.postsDir);
+    // 1. Check directories — auto-create in non-interactive mode so production restarts survive
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
 
     if (!fs.existsSync(postsDir)) {
-        issues.push({
-            id: 'DIR_POSTS_MISSING',
-            description: `Posts directory missing: ${postsDir}`,
-            critical: true,
-            fixable: true
-        });
+        if (!interactive) {
+            try {
+                fs.mkdirSync(postsDir, { recursive: true });
+                if (!process.env.VITEST) console.log(`[INFO] Created posts directory: ${postsDir}`);
+            } catch (e) {
+                issues.push({
+                    id: 'DIR_POSTS_MISSING',
+                    description: `Posts directory missing and could not be created: ${postsDir} (${e})`,
+                    critical: true,
+                    fixable: false
+                });
+            }
+        } else {
+            issues.push({
+                id: 'DIR_POSTS_MISSING',
+                description: `Posts directory missing: ${postsDir}`,
+                critical: true,
+                fixable: true
+            });
+        }
     }
 
-    if (!fs.existsSync(imagesDir)) {
+    if (!fs.existsSync(imagesDir) && fs.existsSync(postsDir)) {
+        if (!interactive) {
+            try {
+                fs.mkdirSync(imagesDir, { recursive: true });
+                if (!process.env.VITEST) console.log(`[INFO] Created images directory: ${imagesDir}`);
+            } catch (e) {
+                issues.push({
+                    id: 'DIR_IMAGES_MISSING',
+                    description: `Images directory missing and could not be created: ${imagesDir} (${e})`,
+                    critical: true,
+                    fixable: false
+                });
+            }
+        } else {
+            issues.push({
+                id: 'DIR_IMAGES_MISSING',
+                description: `Images directory missing: ${imagesDir}`,
+                critical: true,
+                fixable: true
+            });
+        }
+    } else if (!fs.existsSync(imagesDir)) {
         issues.push({
             id: 'DIR_IMAGES_MISSING',
             description: `Images directory missing: ${imagesDir}`,
@@ -114,13 +151,18 @@ const fixIssue = async (issue: PreflightIssue): Promise<boolean> => {
     try {
         switch (issue.id) {
             case 'DIR_POSTS_MISSING': {
-                const postsDir = path.resolve(configDir, config.postsDir);
+                const postsDir = path.isAbsolute(config.postsDir)
+                    ? config.postsDir
+                    : path.resolve(configDir, config.postsDir);
                 fs.mkdirSync(postsDir, { recursive: true });
                 console.log(`✔ Created posts directory: ${postsDir}`);
                 return true;
             }
             case 'DIR_IMAGES_MISSING': {
-                const iDir = path.join(path.resolve(configDir, config.postsDir), 'images');
+                const postsDir = path.isAbsolute(config.postsDir)
+                    ? config.postsDir
+                    : path.resolve(configDir, config.postsDir);
+                const iDir = path.join(postsDir, 'images');
                 fs.mkdirSync(iDir, { recursive: true });
                 console.log(`✔ Created images directory: ${iDir}`);
                 return true;

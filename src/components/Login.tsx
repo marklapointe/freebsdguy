@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, applyTheme } from '../lib/api';
+import { api, applyTheme, getEffectiveThemeMode, setAuthModeCache } from '../lib/api';
 import { User } from '../types';
 
 interface LoginProps {
@@ -17,19 +17,31 @@ export const Login = ({ setUser }: LoginProps) => {
         e.preventDefault();
         try {
             const res = await api.post('/login', { username, password });
-            localStorage.setItem('token', res.data.token);
+            if (res.data.authMode === 'session' || res.data.authMode === 'jwt') {
+                setAuthModeCache(res.data.authMode);
+            }
+            if (res.data.token) {
+                localStorage.setItem('token', res.data.token);
+            } else {
+                localStorage.removeItem('token');
+            }
             localStorage.setItem('role', res.data.role);
             const userObj = {
                 username: res.data.username || username,
                 role: res.data.role
             };
             localStorage.setItem('username', userObj.username);
-            // Site theme is admin-owned; always load from public config (not per-user)
+            // Theme pack is site-wide; light/dark follows browser preference
             try {
                 const cfg = await api.get('/config');
-                await applyTheme(cfg.data.currentTheme || 'dark');
+                const appearance = cfg.data.appearance || {};
+                await applyTheme(cfg.data.currentTheme || 'dark', {
+                    mode: getEffectiveThemeMode(appearance.themeMode),
+                    crtEffects: appearance.crtEffects !== false,
+                    textGlow: appearance.textGlow !== false
+                });
             } catch {
-                await applyTheme('dark');
+                await applyTheme('dark', { mode: getEffectiveThemeMode('dark') });
             }
             setUser(userObj);
             navigate('/admin');
@@ -75,7 +87,7 @@ export const Login = ({ setUser }: LoginProps) => {
                         autoComplete="current-password"
                     />
                 </div>
-                <button type="submit" data-testid="login-submit" className="w-full p-3 bg-accent rounded font-bold hover:bg-opacity-80 transition shadow-lg text-white">
+                <button type="submit" data-testid="login-submit" className="w-full p-3 bg-accent text-on-accent rounded font-bold hover:bg-opacity-80 transition shadow-lg">
                     Sign In
                 </button>
             </form>

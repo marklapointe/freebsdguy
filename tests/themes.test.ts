@@ -8,6 +8,9 @@ import {
     listThemeIds,
     listThemeCatalog,
     loadThemeColors,
+    loadThemeColorsForMode,
+    deriveThemeMode,
+    relativeLuminance,
     REQUIRED_THEME_KEYS
 } from '../server/lib/themes.ts';
 
@@ -88,6 +91,50 @@ describe('Themes API', () => {
         expect(res.status).toBe(200);
         // invalid name → fallback dark palette
         expect(res.body['--bg']).toBeTruthy();
+    });
+
+    it('GET /api/theme?mode=light derives a light palette from a dark pack', async () => {
+        const dark = await request(app).get('/api/theme?name=dark&mode=dark');
+        const light = await request(app).get('/api/theme?name=dark&mode=light');
+        expect(dark.status).toBe(200);
+        expect(light.status).toBe(200);
+        expect(light.body.mdEditorTheme).toBe('light');
+        expect(dark.body.mdEditorTheme).toBe('dark');
+        // Light surface should not match the dark pack background
+        if (dark.body['--bg'] && light.body['--bg']) {
+            expect(light.body['--bg']).not.toBe(dark.body['--bg']);
+        }
+    });
+});
+
+describe('deriveThemeMode', () => {
+    it('returns coherent dark when pack is already dark', () => {
+        const base = loadThemeColors(themesDir, 'dark');
+        expect(base).toBeTruthy();
+        const derived = deriveThemeMode(base!, 'dark');
+        expect(derived.mdEditorTheme).toBe('dark');
+        expect(derived['--bg']).toMatch(/^#/);
+    });
+
+    it('synthesizes coherent light mode from a dark pack', () => {
+        const base = loadThemeColors(themesDir, 'miami-cyberpunk') || loadThemeColors(themesDir, 'dark');
+        expect(base).toBeTruthy();
+        const light = deriveThemeMode(base!, 'light');
+        expect(light.mdEditorTheme).toBe('light');
+        expect(light['--bg']).toMatch(/^#/);
+        expect(light['--text']).toMatch(/^#/);
+        expect(light['--bg']).not.toBe(base!['--bg']);
+        // Surfaces stay in one light family (no dark panels on light page)
+        expect(relativeLuminance(light['--bg'])).toBeGreaterThan(0.72);
+        expect(relativeLuminance(light['--secondary'])).toBeGreaterThan(0.55);
+        expect(relativeLuminance(light['--text'])).toBeLessThan(0.45);
+    });
+
+    it('loadThemeColorsForMode honors mode argument', () => {
+        const light = loadThemeColorsForMode(themesDir, 'dark', 'light');
+        const dark = loadThemeColorsForMode(themesDir, 'dark', 'dark');
+        expect(light?.mdEditorTheme).toBe('light');
+        expect(dark?.mdEditorTheme).toBe('dark');
     });
 });
 

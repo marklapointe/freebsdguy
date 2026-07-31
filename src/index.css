@@ -10,10 +10,13 @@
   --color-border: var(--border);
   --color-hover: var(--hover);
   --color-site-name: var(--site-name-color);
+  /* Text/icons on solid accent/primary chips (buttons, active nav, badges) */
+  --color-on-accent: var(--on-accent);
+  --color-on-primary: var(--on-primary);
 }
 
 :root {
-  --primary: #f9fafb;
+  --primary: #3b82f6;
   --secondary: #1f2937;
   --accent: #ef4444;
   --text: #f3f4f6;
@@ -21,6 +24,18 @@
   --border: #374151;
   --hover: #1f2937;
   --site-name-color: #3b82f6;
+  --on-accent: #ffffff;
+  --on-primary: #ffffff;
+}
+
+/* Solid accent/primary buttons: always use the contrasting on-* token */
+.btn-accent {
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn-primary {
+  background-color: var(--primary);
+  color: var(--on-primary);
 }
 
 body {

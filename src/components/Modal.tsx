@@ -30,7 +30,7 @@ export const Modal = ({ isOpen, title, message, type, onConfirm, onCancel }: Mod
                     )}
                     <button
                         onClick={onConfirm}
-                        className="bg-accent p-2 px-6 rounded font-bold hover:bg-opacity-80 transition shadow-lg text-white"
+                        className="bg-accent text-on-accent p-2 px-6 rounded font-bold hover:bg-opacity-80 transition shadow-lg"
                     >
                         OK
                     </button>

@@ -47,12 +47,27 @@ describe('Preflight Check', () => {
         expect(issues).toHaveLength(0);
     });
 
-    it('should detect missing posts directory', async () => {
-        (fs.existsSync as any).mockImplementation((path: string) => {
-            if (path.includes('posts') && !path.includes('images')) return false;
+    it('auto-creates missing posts directory in non-interactive mode', async () => {
+        (fs.existsSync as any).mockImplementation((p: string) => {
+            if (String(p).includes('posts') && !String(p).includes('images')) return false;
             return true;
         });
-        
+
+        const issues = await runPreflight(false);
+        // Non-interactive production path: mkdir instead of fatal DIR_POSTS_MISSING
+        expect(fs.mkdirSync).toHaveBeenCalled();
+        expect(issues.some(i => i.id === 'DIR_POSTS_MISSING')).toBe(false);
+    });
+
+    it('reports DIR_POSTS_MISSING when auto-create fails', async () => {
+        (fs.existsSync as any).mockImplementation((p: string) => {
+            if (String(p).includes('posts') && !String(p).includes('images')) return false;
+            return true;
+        });
+        (fs.mkdirSync as any).mockImplementation(() => {
+            throw new Error('EACCES');
+        });
+
         const issues = await runPreflight(false);
         expect(issues.some(i => i.id === 'DIR_POSTS_MISSING')).toBe(true);
     });

@@ -85,7 +85,7 @@ export const Home = () => {
                 <div className="mt-12 flex justify-center">
                     <button
                         onClick={loadMore}
-                        className="bg-accent p-3 px-10 rounded-full font-bold hover:bg-opacity-80 transition shadow-lg text-white flex items-center gap-2 group"
+                        className="bg-accent text-on-accent p-3 px-10 rounded-full font-bold hover:bg-opacity-80 transition shadow-lg flex items-center gap-2 group"
                     >
                         <Plus size={20} className="group-hover:rotate-90 transition-transform duration-300" /> Load More Posts
                     </button>

@@ -36,10 +36,31 @@ sed -e 's|%%WWWDIR%%|/usr/local/www/mdweb|g' -e 's|%%LOCALBASE%%|/usr/local|g' \
   /tmp/mdweb.rc.in > /tmp/mdweb.rc
 install -o root -g wheel -m 0555 /tmp/mdweb.rc /usr/local/etc/rc.d/mdweb
 
-install -d -o www -g www -m 0755 /var/run/mdweb /var/db/mdweb/themes
-cp -f "${REMOTE_APP}/server/themes/"*.json /var/db/mdweb/themes/ 2>/dev/null || true
+install -d -o www -g www -m 0755 /var/run/mdweb /var/db/mdweb/posts /var/db/mdweb/posts/images /var/db/mdweb/themes
+
+# Durable data: NEVER force-overwrite runtime themes (admin color overrides live here).
+# Seed only missing theme JSON files from the shipped catalog (same rule as ensureRuntimeThemeCatalog).
+if [ -d "${REMOTE_APP}/server/themes" ]; then
+  for f in "${REMOTE_APP}/server/themes/"*.json; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    dest="/var/db/mdweb/themes/${base}"
+    if [ ! -f "$dest" ]; then
+      cp "$f" "$dest"
+    fi
+  done
+fi
+
+# Optional safety snapshot of site config before restart (keep last 10)
+if [ -f /usr/local/etc/mdweb/config.json ]; then
+  install -d -m 0755 /var/backups/mdweb
+  cp -a /usr/local/etc/mdweb/config.json \
+    "/var/backups/mdweb/config.json.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+  ls -1t /var/backups/mdweb/config.json.* 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+fi
+
 chown -R www:www /var/db/mdweb
-# www must write config (site theme / settings) and users.json
+# Ownership only — never replace config.json / users.json content
 chown www:www /usr/local/etc/mdweb 2>/dev/null || true
 if [ -f /usr/local/etc/mdweb/config.json ]; then
   chown www:www /usr/local/etc/mdweb/config.json

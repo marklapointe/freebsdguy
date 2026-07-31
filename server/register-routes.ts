@@ -10,7 +10,24 @@ import jwt from 'jsonwebtoken';
 import sanitizeHtml from 'sanitize-html';
 import express from 'express';
 import { fileURLToPath } from 'url';
-import { loadConfig, saveConfig, configPath, loadUsers, saveUsers, loadAIConfig, isConfigWritable } from './lib/config.ts';
+import {
+    loadConfig,
+    saveConfig,
+    configPath,
+    loadUsers,
+    saveUsers,
+    loadAIConfig,
+    isConfigWritable,
+    getConfigLoadStatus,
+    sanitizeConfig,
+    resolveAuthMode
+} from './lib/config.ts';
+import {
+    parseCookies,
+    sessionCookieHeader,
+    clearSessionCookieHeader,
+    FileSessionStore
+} from './lib/session-store.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName } from './lib/images.ts';
@@ -23,6 +40,7 @@ import {
     listThemeCatalog,
     listThemeIds,
     loadThemeColors,
+    loadThemeColorsForMode,
     resolveThemeDir,
     themeFilePath
 } from './lib/themes.ts';
@@ -34,6 +52,41 @@ export function registerRoutes(app: Express, ctx: AppContext): void {
     const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload } = ctx;
     const getActive = ctx.getActiveConfig;
     const setActive = ctx.setActiveConfig;
+    const sessionStore = ctx.sessionStore || new FileSessionStore();
+
+    const issueAuthResponse = (
+        res: Response,
+        identity: { username: string; role: string }
+    ) => {
+        const cfg = getActive();
+        const mode = resolveAuthMode(cfg);
+        const ttl = cfg.security?.sessionTtlSeconds || 86400;
+        const cookieName = cfg.security?.sessionCookieName || 'mdweb.sid';
+        const secure = process.env.MDWEB_TLS === '1';
+
+        if (mode === 'session') {
+            sessionStore.purgeExpired();
+            const rec = sessionStore.create(identity.username, identity.role, ttl);
+            res.setHeader('Set-Cookie', sessionCookieHeader(cookieName, rec.id, ttl, secure));
+            return res.json({
+                role: identity.role,
+                username: identity.username,
+                authMode: 'session'
+            });
+        }
+
+        const token = jwt.sign(
+            { username: identity.username, role: identity.role },
+            SECRET,
+            { expiresIn: '24h' }
+        );
+        return res.json({
+            token,
+            role: identity.role,
+            username: identity.username,
+            authMode: 'jwt'
+        });
+    };
 
 // Routes
 
@@ -49,12 +102,9 @@ app.post('/api/login', async (req: Request, res: Response) => {
         const match = await bcrypt.compare(password, usersConfig.admin.passwordHash);
         if (match) {
             console.log(`[AUTH] Admin login successful: ${username}`);
-            const token = jwt.sign({ username: usersConfig.admin.username, role: usersConfig.admin.role }, SECRET, { expiresIn: '24h' });
-            // Theme is site-wide (admin Appearance only) — not returned per-user on login
-            return res.json({
-                token,
-                role: usersConfig.admin.role,
-                username: usersConfig.admin.username
+            return issueAuthResponse(res, {
+                username: usersConfig.admin.username,
+                role: usersConfig.admin.role
             });
         }
     }
@@ -65,17 +115,33 @@ app.post('/api/login', async (req: Request, res: Response) => {
         const match = await bcrypt.compare(password, user.passwordHash);
         if (match) {
             console.log(`[AUTH] User login successful: ${username}`);
-            const token = jwt.sign({ username: user.username, role: user.role }, SECRET, { expiresIn: '24h' });
-            return res.json({
-                token,
-                role: user.role,
-                username: user.username
-            });
+            return issueAuthResponse(res, { username: user.username, role: user.role });
         }
     }
 
     console.warn(`[AUTH] Login failed for user: ${username}`);
     res.status(401).json({ message: 'Invalid credentials' });
+});
+
+// Logout (both modes)
+app.post('/api/logout', (req: Request, res: Response) => {
+    const cfg = getActive();
+    const cookieName = cfg.security?.sessionCookieName || 'mdweb.sid';
+    const secure = process.env.MDWEB_TLS === '1';
+    const cookies = parseCookies(req.headers.cookie);
+    const sid = cookies[cookieName];
+    if (sid) sessionStore.destroy(sid);
+    res.setHeader('Set-Cookie', clearSessionCookieHeader(cookieName, secure));
+    res.json({ message: 'Logged out', authMode: resolveAuthMode(cfg) });
+});
+
+// Current user (JWT or session)
+app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    res.json({
+        username: req.user?.username,
+        role: req.user?.role,
+        authMode: resolveAuthMode(getActive())
+    });
 });
 
 // Admin: Get all users
@@ -385,17 +451,52 @@ if (fs.existsSync(distPath)) {
 
 // Health probe for FreeBSD service / regression (no secrets)
 app.get('/api/health', (_req: Request, res: Response) => {
+    const config = loadConfig();
+    const status = getConfigLoadStatus();
+    const configDir = path.dirname(configPath());
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     res.json({
         ok: true,
         version: process.env.npm_package_version || '1.0.0',
-        env: process.env.NODE_ENV || 'development'
+        env: process.env.NODE_ENV || 'development',
+        auth: {
+            mode: resolveAuthMode(config)
+        },
+        config: {
+            path: status.path || configPath(),
+            writable: isConfigWritable(),
+            loadWarnings: status.warnings.length,
+            usedDefaults: status.usedDefaults
+        },
+        data: {
+            postsDir,
+            exists: fs.existsSync(postsDir)
+        }
     });
 });
 
 // Get site config — PublicConfigBuilder enforces INV-SEC-1 (no secrets)
 app.get('/api/config', (_req: Request, res: Response) => {
     const config = loadConfig();
-    res.json(PublicConfigBuilder.from(config).build());
+    try {
+        res.json(PublicConfigBuilder.from(config).build());
+    } catch (e) {
+        console.error('[ERROR] PublicConfigBuilder failed; serving minimal public config:', e);
+        const { config: safe } = sanitizeConfig(config);
+        res.json({
+            siteName: safe.siteName || 'MDWeb',
+            siteLogo: safe.siteLogo || 'logo.webp',
+            currentTheme: safe.currentTheme || 'dark',
+            appearance: safe.appearance || { themeMode: 'dark', crtEffects: true, textGlow: true },
+            pagination: safe.pagination || 10,
+            sortBy: safe.sortBy || 'date',
+            sortOrder: safe.sortOrder || 'desc',
+            searchPlacement: safe.searchPlacement || 'top',
+            service: safe.service || { port: 5173 }
+        });
+    }
 });
 
 // Admin: Update AI config
@@ -500,7 +601,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
 app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     try {
         const config = loadConfig();
-        const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security } = req.body;
+        const { siteName, siteLogo, currentTheme, pagination, sortBy, sortOrder, searchPlacement, aiConfig, service, security, appearance } = req.body;
 
         if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
         if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
@@ -509,6 +610,21 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         if (sortBy) config.sortBy = sanitizeHtml(sortBy, { allowedTags: [], allowedAttributes: {} }) as 'title' | 'date' | 'author';
         if (sortOrder) config.sortOrder = sanitizeHtml(sortOrder, { allowedTags: [], allowedAttributes: {} }) as 'desc' | 'asc';
         if (searchPlacement) config.searchPlacement = sanitizeHtml(searchPlacement, { allowedTags: [], allowedAttributes: {} }) as 'top' | 'bottom' | 'left' | 'right' | 'none';
+
+        if (appearance && typeof appearance === 'object') {
+            const prev = config.appearance || {};
+            config.appearance = {
+                themeMode:
+                    appearance.themeMode === 'light' || appearance.themeMode === 'dark'
+                        ? appearance.themeMode
+                        : prev.themeMode === 'light'
+                          ? 'light'
+                          : 'dark',
+                crtEffects:
+                    typeof appearance.crtEffects === 'boolean' ? appearance.crtEffects : prev.crtEffects !== false,
+                textGlow: typeof appearance.textGlow === 'boolean' ? appearance.textGlow : prev.textGlow !== false
+            };
+        }
 
         if (aiConfig) {
             const previousKey = config.aiConfig?.apiKey || '';
@@ -531,9 +647,24 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
             };
         }
 
-        if (security) {
-            // Rate limits are not enforced in-app; only feature toggles are kept.
+        if (security && typeof security === 'object') {
+            const prev = config.security || {};
             config.security = {
+                authMode:
+                    security.authMode === 'session' || security.authMode === 'jwt'
+                        ? security.authMode
+                        : prev.authMode === 'session'
+                          ? 'session'
+                          : 'jwt',
+                sessionTtlSeconds:
+                    typeof security.sessionTtlSeconds === 'number'
+                        ? Math.max(300, Math.min(604800, Math.floor(security.sessionTtlSeconds)))
+                        : prev.sessionTtlSeconds || 86400,
+                sessionCookieName:
+                    typeof security.sessionCookieName === 'string' &&
+                    /^[a-zA-Z0-9._-]{1,64}$/.test(security.sessionCookieName)
+                        ? security.sessionCookieName
+                        : prev.sessionCookieName || 'mdweb.sid',
                 disableAI: !!security.disableAI,
                 disableImages: !!security.disableImages,
                 disablePublicSearch: !!security.disablePublicSearch
@@ -776,11 +907,20 @@ app.get('/api/theme', (req: Request, res: Response) => {
     const config = loadConfig();
     const themeDir = themeDirForConfig();
     const themeName = String((req.query.name as string) || config.currentTheme || 'dark');
-    const colors = loadThemeColors(themeDir, themeName);
+    // Explicit ?mode= always wins. Site appearance.themeMode only applies when loading
+    // the active site theme (no ?name=), so pack inspection returns the authored palette.
+    const modeParam = String(req.query.mode || '');
+    let mode: 'light' | 'dark' | undefined =
+        modeParam === 'light' || modeParam === 'dark' ? modeParam : undefined;
+    if (mode === undefined && req.query.name === undefined) {
+        const siteMode = config.appearance?.themeMode;
+        if (siteMode === 'light' || siteMode === 'dark') mode = siteMode;
+    }
+    const colors = loadThemeColorsForMode(themeDir, themeName, mode);
     if (colors) {
         return res.json(colors);
     }
-    // Fallback dark palette
+    // Fallback dark palette (includes chip on-* colors)
     res.json({
         mdEditorTheme: 'dark',
         '--primary': '#3b82f6',
@@ -790,7 +930,9 @@ app.get('/api/theme', (req: Request, res: Response) => {
         '--bg': '#111827',
         '--border': '#374151',
         '--hover': '#1f2937',
-        '--site-name-color': '#3b82f6'
+        '--site-name-color': '#3b82f6',
+        '--on-accent': '#ffffff',
+        '--on-primary': '#ffffff'
     });
 });
 

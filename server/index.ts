@@ -2,13 +2,15 @@ import express from 'express';
 import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
-import { loadConfig, configPath } from './lib/config.ts';
+import { loadConfig, configPath, resolveAuthMode } from './lib/config.ts';
 import { runPreflight } from './lib/preflight.ts';
 import { JwtSecretFactory, JwtSecretError, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
 import { createDefaultImageUpload } from './lib/upload-options.ts';
 import { RoleGuardFactory } from './middleware/auth.ts';
 import { createActiveConfigHolder } from './lib/app-context.ts';
 import { ensureRuntimeThemeCatalog } from './lib/themes.ts';
+import { ensureDemoPosts } from './lib/demo-posts.ts';
+import { FileSessionStore, defaultSessionDir } from './lib/session-store.ts';
 import { registerRoutes } from './register-routes.ts';
 
 const app = express();
@@ -35,7 +37,7 @@ if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
 const configHolder = createActiveConfigHolder(loadConfig());
 const PORT = cliPort || configHolder.get().service?.port || process.env.PORT || 5173;
 
-// Populate runtime themeDir from the shipped catalog (missing files only)
+// Populate runtime themeDir + demo posts (missing files only)
 try {
     const cfg = configHolder.get();
     const rawThemeDir = cfg.themeDir || './themes';
@@ -47,19 +49,33 @@ try {
         console.log(`[INFO] Seeded ${seed.copied.length} theme(s) into ${themeDir}: ${seed.copied.join(', ')}`);
     }
     console.log(`[INFO] Theme catalog ready: ${seed.total} preset(s)`);
+
+    const rawPosts = cfg.postsDir || './posts';
+    const postsDir = path.isAbsolute(rawPosts)
+        ? rawPosts
+        : path.resolve(path.dirname(configPath()), rawPosts);
+    const demo = ensureDemoPosts(postsDir);
+    if (demo.copied.length) {
+        console.log(`[INFO] Seeded demo post(s): ${demo.copied.join(', ')}`);
+    }
 } catch (e) {
-    console.warn('[WARN] Theme catalog seed failed:', e);
+    console.warn('[WARN] Theme/demo seed failed:', e);
 }
+
+const authModeAtBoot = resolveAuthMode(configHolder.get());
+console.log(`[INFO] Auth mode: ${authModeAtBoot}`);
 
 let SECRET: string;
 try {
+    // Session mode may use SESSION_SECRET; JWT factory still accepts JWT_SECRET / config
+    const envSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
     const jwtResult = JwtSecretFactory.forMode()
-        .fromEnv(process.env.JWT_SECRET)
+        .fromEnv(envSecret)
         .fromConfig(configHolder.get())
         .create();
     SECRET = jwtResult.secret;
     if (!jwtResult.secure && !process.env.VITEST) {
-        console.warn(`[WARN] JWT secret is insecure (source=${jwtResult.source}). Set JWT_SECRET for production.`);
+        console.warn(`[WARN] Auth secret is insecure (source=${jwtResult.source}). Set JWT_SECRET or SESSION_SECRET for production.`);
     }
 } catch (e) {
     if (e instanceof JwtSecretError) {
@@ -71,8 +87,20 @@ try {
     }
 }
 
+const sessionStore = new FileSessionStore(defaultSessionDir());
+try {
+    sessionStore.ensureDir();
+} catch (e) {
+    console.warn('[WARN] Session store dir not ready:', e);
+}
+
 const upload = createDefaultImageUpload();
-const guards = new RoleGuardFactory(SECRET);
+const guards = new RoleGuardFactory(SECRET, {
+    getMode: () => resolveAuthMode(configHolder.get()),
+    getSessionStore: () => sessionStore,
+    getSessionCookieName: () =>
+        configHolder.get().security?.sessionCookieName || 'mdweb.sid'
+});
 const authenticate = guards.authenticate();
 const requireAdmin = guards.requireAdmin();
 const requireWriter = guards.requireContributorOrAdmin();
@@ -93,7 +121,8 @@ app.use(helmet({
 }));
 
 // Rate limiting is intentionally not applied here — handle at the reverse proxy / edge.
-app.use(cors());
+// credentials: true so session cookies work when authMode=session
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 registerRoutes(app, {
@@ -104,6 +133,7 @@ registerRoutes(app, {
     requireAdmin,
     requireWriter,
     upload,
+    sessionStore,
 });
 
 if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {
