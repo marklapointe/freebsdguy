@@ -331,7 +331,9 @@ app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: R
 app.get('/api/posts/:slug', (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const slug = req.params.slug as string;
     
     // Security check: prevent directory traversal
@@ -355,7 +357,9 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
     const { slug, title, content, summary, date, pinned } = req.body;
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     
     // Security check: prevent directory traversal
     const postPath = path.join(postsDir, `${slug}.md`);
@@ -381,7 +385,9 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
 app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
     
     // Support both query param (preferred) and route param (legacy)
@@ -524,7 +530,9 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: Aut
     const filename = decodeURIComponent(req.params.filename as string);
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
     const filePath = path.join(imagesDir, filename);
 
@@ -563,7 +571,9 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
 
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
     const manifest = loadManifest(imagesDir);
     
@@ -790,7 +800,9 @@ app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedR
     const slug = req.params.slug;
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const postPath = path.join(postsDir, `${slug}.md`);
 
     if (!isSafePath(postsDir, postPath)) {
@@ -824,7 +836,9 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
     try {
         const config = loadConfig();
         const configDir = path.dirname(configPath());
-        const postsDir = path.resolve(configDir, config.postsDir);
+        const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
         const imagesDir = path.join(postsDir, 'images');
 
         if (!fs.existsSync(imagesDir)) {
@@ -912,7 +926,9 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 app.get('/api/admin/images', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const config = loadConfig();
     const configDir = path.dirname(configPath());
-    const postsDir = path.resolve(configDir, config.postsDir);
+    const postsDir = path.isAbsolute(config.postsDir)
+        ? config.postsDir
+        : path.resolve(configDir, config.postsDir);
     const imagesDir = path.join(postsDir, 'images');
 
     if (!fs.existsSync(imagesDir)) return res.json({ images: [], total: 0 });

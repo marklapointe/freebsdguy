@@ -73,6 +73,76 @@ describe('posts.ts', () => {
         expect(getPost(tempDir, 'ghost')).toBeNull();
     });
 
+    it('getPost returns full markdown body for demo-style posts (frontmatter + body)', () => {
+        // Mirrors shipped showcase posts: YAML frontmatter then markdown body
+        const raw = `---
+title: The Markdown Kitchen Sink
+summary: A short teaser
+date: 2026-07-29
+author: MDWeb
+pinned: true
+---
+
+# The Markdown Kitchen Sink
+
+If Markdown were a diner, this post would order **everything on the menu**.
+
+## Lists
+
+- Coffee
+- Kernel rebuild
+`;
+        fs.writeFileSync(path.join(tempDir, 'kitchen-sink-markdown.md'), raw);
+        const loaded = getPost(tempDir, 'kitchen-sink-markdown');
+        expect(loaded).toBeTruthy();
+        expect(loaded!.title).toBe('The Markdown Kitchen Sink');
+        expect(loaded!.summary).toBe('A short teaser');
+        expect(loaded!.pinned).toBe(true);
+        // Body must be present for the admin editor — not empty / undefined
+        expect(typeof loaded!.content).toBe('string');
+        expect(loaded!.content.length).toBeGreaterThan(20);
+        expect(loaded!.content).toContain('# The Markdown Kitchen Sink');
+        expect(loaded!.content).toContain('everything on the menu');
+        // Frontmatter must not be embedded as the only "content"
+        expect(loaded!.content.trimStart().startsWith('---')).toBe(false);
+    });
+
+    it('getPosts list items do not include full body (metadata only)', () => {
+        savePost(tempDir, {
+            slug: 'meta-only',
+            title: 'Meta',
+            content: '# Long body that should not appear in list\n\nMore text.',
+            summary: 'sum',
+            author: 'admin',
+            date: '2026-01-01'
+        });
+        const list = getPosts(tempDir);
+        const item = list.find(p => p.slug === 'meta-only');
+        expect(item).toBeTruthy();
+        expect(item!.title).toBe('Meta');
+        // List DTO has no content field (or empty) — editor must fetch by slug
+        expect((item as any).content).toBeUndefined();
+    });
+
+    it('getPost body is not clobbered when frontmatter has extra keys', () => {
+        const raw = `---
+title: Extra Keys
+summary: sum
+date: 2026-01-02
+author: MDWeb
+content: SHOULD_NOT_WIN
+---
+
+# Real body
+
+Paragraph.
+`;
+        fs.writeFileSync(path.join(tempDir, 'extra-keys.md'), raw);
+        const loaded = getPost(tempDir, 'extra-keys');
+        expect(loaded!.content).toContain('# Real body');
+        expect(loaded!.content).not.toContain('SHOULD_NOT_WIN');
+    });
+
     it('getPost handles path traversal attempt', () => {
         expect(getPost(tempDir, '../passwd')).toBeNull();
     });

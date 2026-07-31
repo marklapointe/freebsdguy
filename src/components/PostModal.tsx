@@ -119,7 +119,7 @@ export const PostModal = ({
                             id="post-summary"
                             placeholder="Summary (short description)"
                             className="w-full p-3 bg-bg border border-accent rounded h-20 text-text placeholder-text placeholder-opacity-50 focus:ring-1 focus:ring-accent outline-none"
-                            value={post.summary} onChange={e => setPost({...post, summary: e.target.value})}
+                            value={post.summary || ''} onChange={e => setPost({...post, summary: e.target.value})}
                             autoComplete="off"
                         />
                     </div>
@@ -189,7 +189,7 @@ export const PostModal = ({
                         )}
 
                         <MdEditor
-                            modelValue={post.content}
+                            modelValue={post.content || ''}
                             onChange={(val) => setPost({...post, content: val})}
                             theme={theme}
                             language="en-US"

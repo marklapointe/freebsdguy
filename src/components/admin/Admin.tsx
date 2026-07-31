@@ -397,9 +397,25 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
         setEnhancedPreview(null);
     };
 
-    const handleEditPost = (post: Post) => {
-        setEditingPost({ ...post });
+    const handleEditPost = async (post: Post) => {
+        // List endpoint is metadata-only (no body). Always fetch full post for the editor.
         setEnhancedPreview(null);
+        try {
+            const res = await api.get(`/posts/${encodeURIComponent(post.slug)}`);
+            const full = res.data || {};
+            setEditingPost({
+                slug: full.slug || post.slug,
+                title: full.title ?? post.title ?? '',
+                summary: full.summary ?? post.summary ?? '',
+                date: full.date ?? post.date ?? '',
+                author: full.author ?? post.author ?? '',
+                pinned: full.pinned === true || post.pinned === true,
+                content: typeof full.content === 'string' ? full.content : ''
+            });
+        } catch (err: unknown) {
+            const ax = err as { response?: { data?: { message?: string } } };
+            showAlert(ax.response?.data?.message || `Failed to load post "${post.slug}" for editing`, 'Error');
+        }
     };
 
     const handleLogoSelect = (filename: string) => {
@@ -448,7 +464,15 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                             <p className="text-sm opacity-50">{new Date(post.date).toLocaleDateString()}</p>
                                         </div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => handleEditPost(post)} className="p-2 hover:bg-accent hover:text-on-accent rounded transition"><Edit size={18} /></button>
+                                            <button
+                                                type="button"
+                                                data-testid={`edit-post-${post.slug}`}
+                                                onClick={() => handleEditPost(post)}
+                                                className="p-2 hover:bg-accent hover:text-on-accent rounded transition"
+                                                title="Edit"
+                                            >
+                                                <Edit size={18} />
+                                            </button>
                                             <button onClick={() => handleDeletePost(post.slug)} className="p-2 hover:bg-red-500 rounded transition"><Trash2 size={18} /></button>
                                         </div>
                                     </div>

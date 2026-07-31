@@ -107,14 +107,21 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
     try {
         const parsed = matter(content);
         const pinned = parsed.data.pinned === true || parsed.data.pinned === 'true';
+        // Body must come from gray-matter `content` (after frontmatter), never from
+        // list metadata or frontmatter keys — spread data first, then set body fields.
+        const body = typeof parsed.content === 'string' ? parsed.content : '';
+        const summary =
+            typeof parsed.data.summary === 'string' && parsed.data.summary
+                ? parsed.data.summary
+                : body.substring(0, 150) + (body.length > 150 ? '...' : '');
         return {
+            ...parsed.data,
             title: parsed.data.title || slug,
             slug,
-            content: parsed.content,
-            summary: parsed.data.summary || parsed.content.substring(0, 150) + '...',
+            content: body,
+            summary,
             date: parsed.data.date || '',
             author: parsed.data.author || '',
-            ...parsed.data,
             pinned
         };
     } catch (error) {

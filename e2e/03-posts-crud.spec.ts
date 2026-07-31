@@ -47,6 +47,43 @@ test.describe('Posts CRUD (browser)', () => {
     expect([200, 404]).toContain(del.status());
   });
 
+  test('editing a post loads full markdown body into the editor', async ({ page, request }) => {
+    // Seed a showcase-style post (frontmatter + body) like auto-generated demos
+    const loginRes = await request.post('/api/login', {
+      data: { username: user, password: pass }
+    });
+    expect(loginRes.ok(), await loginRes.text()).toBeTruthy();
+    const { token } = await loginRes.json();
+    const slug = `e2e-edit-body-${Date.now()}`;
+    const body = `# Editor body check\n\nUnique phrase XYZEDIT123 for the markdown editor.\n`;
+    const save = await request.post('/api/posts', {
+      headers: { Authorization: `Bearer ${token}` },
+      data: {
+        slug,
+        title: 'Edit Body Check',
+        summary: 'sum',
+        content: body,
+        date: new Date().toISOString(),
+        author: 'admin',
+        pinned: false
+      }
+    });
+    expect(save.ok(), await save.text()).toBeTruthy();
+
+    await login(page);
+
+    // Posts tab is default; open editor via unique data-testid
+    const editBtn = page.getByTestId(`edit-post-${slug}`);
+    await expect(editBtn).toBeVisible({ timeout: 15000 });
+    await editBtn.click();
+
+    // Modal open — editor must contain body (MdEditor may render text in editor + preview)
+    await expect(page.getByRole('heading', { name: /Edit Post/i })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('XYZEDIT123').first()).toBeVisible({ timeout: 15000 });
+
+    await request.delete(`/api/posts/${slug}`, { headers: { Authorization: `Bearer ${token}` } });
+  });
+
   test('admin posts list loads after login', async ({ page }) => {
     await login(page);
     await page.getByRole('button', { name: /Posts/i }).click();
