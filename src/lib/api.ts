@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { dispatchThemeChanged, dispatchThemeModeChanged } from './theme-events';
 
 export const api = axios.create({
     baseURL: '/api',
@@ -293,7 +294,7 @@ export const toggleThemeMode = async (): Promise<ThemeMode> => {
         crtEffects: cachedCrtEffects,
         textGlow: cachedTextGlow
     });
-    window.dispatchEvent(new CustomEvent('themeModeChanged', { detail: next }));
+    dispatchThemeModeChanged(next);
     return next;
 };
 
@@ -320,7 +321,7 @@ export const setSiteTheme = async (themeId: string): Promise<boolean> => {
     try {
         await api.post('/theme', { currentTheme: themeId });
         await applyTheme(themeId);
-        window.dispatchEvent(new CustomEvent('themeChanged', { detail: themeId }));
+        dispatchThemeChanged(themeId);
         return true;
     } catch (e) {
         console.error('Failed to set site theme (admin only)', e);

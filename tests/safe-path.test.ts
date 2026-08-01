@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
-import { isSafePath } from '../server/lib/safe-path.ts';
+import {
+    isSafePath,
+    resolveConfiguredPath,
+    resolvePostsDir,
+    resolveImagesDir
+} from '../server/lib/safe-path.ts';
 
 describe('isSafePath (INV-SEC-3)', () => {
     const base = path.resolve('/var/db/mdweb/posts/images');
@@ -19,5 +24,27 @@ describe('isSafePath (INV-SEC-3)', () => {
 
     it('rejects absolute escape', () => {
         expect(isSafePath(base, '/etc/passwd')).toBe(false);
+    });
+});
+
+describe('resolveConfiguredPath (path algebra)', () => {
+    const base = '/var/db/mdweb';
+
+    it('keeps absolute paths', () => {
+        expect(resolveConfiguredPath(base, '/abs/posts')).toBe('/abs/posts');
+    });
+
+    it('joins relative paths to base', () => {
+        expect(resolveConfiguredPath(base, './posts')).toBe(path.resolve(base, './posts'));
+    });
+
+    it('empty configured resolves to base', () => {
+        expect(resolveConfiguredPath(base, '')).toBe(path.resolve(base));
+        expect(resolveConfiguredPath(base, null)).toBe(path.resolve(base));
+    });
+
+    it('posts + images composition', () => {
+        expect(resolvePostsDir(base, 'content')).toBe(path.resolve(base, 'content'));
+        expect(resolveImagesDir(base, 'content')).toBe(path.join(path.resolve(base, 'content'), 'images'));
     });
 });

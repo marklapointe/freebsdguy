@@ -7,6 +7,8 @@ import {
     getMdEditorTheme,
     type ThemeMeta
 } from '../../lib/api';
+import { axiosErrorMessage } from '../../lib/errors';
+import { dispatchThemeChanged, onThemeChanged } from '../../lib/theme-events';
 import { PostModal } from '../PostModal';
 import { ImagePickerModal, ImagePreviewModal } from '../ImageModals';
 import { User, Post, ImageInfo } from '../../types';
@@ -96,8 +98,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     }, [activeTab, config.currentTheme, config.appearance?.themeMode]);
 
     useEffect(() => {
-        const handleThemeChanged = (e: CustomEvent) => {
-            const newTheme = e.detail;
+        return onThemeChanged(newTheme => {
             if (newTheme && typeof newTheme === 'string') {
                 setConfig((prev: any) => ({ ...prev, currentTheme: newTheme }));
                 setEditorTheme(getMdEditorTheme());
@@ -106,9 +107,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     setThemeColors(res.data)
                 );
             }
-        };
-        window.addEventListener('themeChanged' as any, handleThemeChanged);
-        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
+        });
     }, [config.appearance?.themeMode]);
 
     useEffect(() => {
@@ -216,7 +215,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             crtEffects: appearance.crtEffects !== false,
             textGlow: appearance.textGlow !== false
         });
-        window.dispatchEvent(new CustomEvent('themeChanged', { detail: themeId }));
+        dispatchThemeChanged(themeId);
     };
     const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { return res; });
 
@@ -261,9 +260,13 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 }
             })
             .catch((err: unknown) => {
-                const ax = err as { response?: { data?: { message?: string } } };
-                const msg = ax.response?.data?.message || 'Failed to save settings (is config.json writable by the service user?)';
-                showAlert(msg, 'Save failed');
+                showAlert(
+                    axiosErrorMessage(
+                        err,
+                        'Failed to save settings (is config.json writable by the service user?)'
+                    ),
+                    'Save failed'
+                );
             });
     };
 
@@ -280,8 +283,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 showAlert(`${config.currentTheme.charAt(0).toUpperCase() + config.currentTheme.slice(1)} theme colors saved!`, 'Success');
             })
             .catch((err: unknown) => {
-                const ax = err as { response?: { data?: { message?: string } } };
-                showAlert(ax.response?.data?.message || 'Failed to save theme colors', 'Save failed');
+                showAlert(axiosErrorMessage(err, 'Failed to save theme colors'), 'Save failed');
             });
     };
 
@@ -413,8 +415,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 content: typeof full.content === 'string' ? full.content : ''
             });
         } catch (err: unknown) {
-            const ax = err as { response?: { data?: { message?: string } } };
-            showAlert(ax.response?.data?.message || `Failed to load post "${post.slug}" for editing`, 'Error');
+            showAlert(axiosErrorMessage(err, `Failed to load post "${post.slug}" for editing`), 'Error');
         }
     };
 
@@ -1154,8 +1155,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                                 showAlert('User created', 'Success');
                                             })
                                             .catch((err: unknown) => {
-                                                const ax = err as { response?: { data?: { message?: string } } };
-                                                showAlert(ax.response?.data?.message || 'Failed to create user', 'Error');
+                                                showAlert(axiosErrorMessage(err, 'Failed to create user'), 'Error');
                                             });
                                     }}
                                 >

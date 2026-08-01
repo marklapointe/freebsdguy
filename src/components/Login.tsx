@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, applyTheme, getEffectiveThemeMode, setAuthModeCache } from '../lib/api';
+import { axiosErrorMessage } from '../lib/errors';
 import { User } from '../types';
 
 interface LoginProps {
@@ -46,13 +47,7 @@ export const Login = ({ setUser }: LoginProps) => {
             setUser(userObj);
             navigate('/admin');
         } catch (err: unknown) {
-            const ax = err as { response?: { data?: { message?: string } } };
-            const serverMsg = ax.response?.data?.message;
-            if (serverMsg) {
-                setError(serverMsg);
-            } else {
-                setError('Invalid credentials');
-            }
+            setError(axiosErrorMessage(err, 'Invalid credentials'));
         }
     };
 

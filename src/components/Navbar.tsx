@@ -9,6 +9,7 @@ import {
     toggleThemeMode,
     type ThemeMode
 } from '../lib/api';
+import { onThemeChanged, onThemeModeChanged } from '../lib/theme-events';
 import { User } from '../types';
 
 interface NavbarProps {
@@ -55,23 +56,21 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
 
         loadSiteTheme();
 
-        const handleThemeChanged = async (e: CustomEvent) => {
-            if (e.detail && typeof e.detail === 'string') {
-                await applyTheme(e.detail, { mode: getEffectiveThemeMode() });
+        const offTheme = onThemeChanged(async detail => {
+            if (detail && typeof detail === 'string') {
+                await applyTheme(detail, { mode: getEffectiveThemeMode() });
             } else {
                 await loadSiteTheme();
             }
-        };
-        const handleModeChanged = (e: CustomEvent) => {
-            if (e.detail === 'light' || e.detail === 'dark') {
-                setThemeMode(e.detail);
+        });
+        const offMode = onThemeModeChanged(detail => {
+            if (detail === 'light' || detail === 'dark') {
+                setThemeMode(detail);
             }
-        };
-        window.addEventListener('themeChanged' as any, handleThemeChanged);
-        window.addEventListener('themeModeChanged' as any, handleModeChanged);
+        });
         return () => {
-            window.removeEventListener('themeChanged' as any, handleThemeChanged);
-            window.removeEventListener('themeModeChanged' as any, handleModeChanged);
+            offTheme();
+            offMode();
         };
     }, []);
 

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import enquirer from 'enquirer';
 import { loadConfig, saveConfig, configPath, loadUsers } from './config.ts';
 import { INSECURE_DEFAULT_JWT_SECRET, isInsecureJwtSecret } from './jwt-secret.ts';
+import { resolvePostsDir, resolveImagesDir } from './safe-path.ts';
 
 export interface PreflightIssue {
     id: string;
@@ -24,10 +25,8 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
     const configDir = path.dirname(configPath());
 
     // 1. Check directories — auto-create in non-interactive mode so production restarts survive
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
-    const imagesDir = path.join(postsDir, 'images');
+    const postsDir = resolvePostsDir(configDir, config.postsDir);
+    const imagesDir = resolveImagesDir(configDir, config.postsDir);
 
     if (!fs.existsSync(postsDir)) {
         if (!interactive) {
@@ -151,18 +150,13 @@ const fixIssue = async (issue: PreflightIssue): Promise<boolean> => {
     try {
         switch (issue.id) {
             case 'DIR_POSTS_MISSING': {
-                const postsDir = path.isAbsolute(config.postsDir)
-                    ? config.postsDir
-                    : path.resolve(configDir, config.postsDir);
+                const postsDir = resolvePostsDir(configDir, config.postsDir);
                 fs.mkdirSync(postsDir, { recursive: true });
                 console.log(`✔ Created posts directory: ${postsDir}`);
                 return true;
             }
             case 'DIR_IMAGES_MISSING': {
-                const postsDir = path.isAbsolute(config.postsDir)
-                    ? config.postsDir
-                    : path.resolve(configDir, config.postsDir);
-                const iDir = path.join(postsDir, 'images');
+                const iDir = resolveImagesDir(configDir, config.postsDir);
                 fs.mkdirSync(iDir, { recursive: true });
                 console.log(`✔ Created images directory: ${iDir}`);
                 return true;

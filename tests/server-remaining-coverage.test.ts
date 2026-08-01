@@ -1686,14 +1686,15 @@ describe('register-routes error paths', () => {
     it('admin theme save mkdirs missing themeDir', async () => {
         const config = loadConfig();
         const configDir = path.dirname(configPath());
-        // Point themeDir at a fresh nested path under tmp config
+        // Isolated dir under CONFIG_DIR — never write incomplete packs into server/themes
         const nested = './themes-cov-' + Date.now();
+        const themePath = path.resolve(configDir, nested);
+        if (fs.existsSync(themePath)) fs.rmSync(themePath, { recursive: true, force: true });
+
         await request(app)
             .post('/api/admin/config')
             .set('Authorization', `Bearer ${token()}`)
             .send({ themeDir: nested });
-        const themePath = path.resolve(configDir, nested);
-        if (fs.existsSync(themePath)) fs.rmSync(themePath, { recursive: true, force: true });
 
         const res = await request(app)
             .post('/api/admin/themes/covpack')
@@ -1704,13 +1705,19 @@ describe('register-routes error paths', () => {
                 '--primary': '#3b82f6',
                 '--secondary': '#222222',
                 '--accent': '#ef4444',
+                '--border': '#333333',
+                '--hover': '#2a2a2a',
+                '--site-name-color': '#3b82f6',
                 mdEditorTheme: 'dark'
             });
         expect(res.status).toBe(200);
-        // restore themeDir
+        expect(fs.existsSync(path.join(themePath, 'covpack.json'))).toBe(true);
+
+        // restore themeDir and drop isolated dir
         await request(app)
             .post('/api/admin/config')
             .set('Authorization', `Bearer ${token()}`)
             .send({ themeDir: config.themeDir || './themes' });
+        fs.rmSync(themePath, { recursive: true, force: true });
     });
 });

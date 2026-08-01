@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Search, Plus, Pin } from 'lucide-react';
 import { MdPreview } from 'md-editor-rt';
 import { api, getMdEditorTheme } from '../lib/api';
+import { onThemeChanged } from '../lib/theme-events';
 import { Post } from '../types';
 
 export const Home = () => {
@@ -16,9 +17,7 @@ export const Home = () => {
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
-        const handleThemeChanged = () => setEditorTheme(getMdEditorTheme());
-        window.addEventListener('themeChanged' as any, handleThemeChanged);
-        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
+        return onThemeChanged(() => setEditorTheme(getMdEditorTheme()));
     }, []);
 
     useEffect(() => {

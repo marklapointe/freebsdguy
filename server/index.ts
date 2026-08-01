@@ -11,6 +11,7 @@ import { createActiveConfigHolder } from './lib/app-context.ts';
 import { ensureRuntimeThemeCatalog } from './lib/themes.ts';
 import { ensureDemoPosts } from './lib/demo-posts.ts';
 import { FileSessionStore, defaultSessionDir } from './lib/session-store.ts';
+import { resolveConfiguredPath, resolvePostsDir } from './lib/safe-path.ts';
 import { registerRoutes } from './register-routes.ts';
 
 const app = express();
@@ -52,10 +53,8 @@ const PORT = cliPort || configHolder.get().service?.port || process.env.PORT || 
 // Populate runtime themeDir + demo posts (missing files only)
 try {
     const cfg = configHolder.get();
-    const rawThemeDir = cfg.themeDir || './themes';
-    const themeDir = path.isAbsolute(rawThemeDir)
-        ? rawThemeDir
-        : path.resolve(path.dirname(configPath()), rawThemeDir);
+    const configDir = path.dirname(configPath());
+    const themeDir = resolveConfiguredPath(configDir, cfg.themeDir || './themes');
     const seed = ensureRuntimeThemeCatalog(themeDir);
     /* istanbul ignore next */
     if (seed.copied.length) {
@@ -63,10 +62,7 @@ try {
     }
     console.log(`[INFO] Theme catalog ready: ${seed.total} preset(s)`);
 
-    const rawPosts = cfg.postsDir || './posts';
-    const postsDir = path.isAbsolute(rawPosts)
-        ? rawPosts
-        : path.resolve(path.dirname(configPath()), rawPosts);
+    const postsDir = resolvePostsDir(configDir, cfg.postsDir);
     const demo = ensureDemoPosts(postsDir);
     /* istanbul ignore next */
     if (demo.copied.length) {

@@ -32,7 +32,7 @@ import { getPosts, getPost, savePost } from './lib/posts.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName } from './lib/images.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
-import { isSafePath } from './lib/safe-path.ts';
+import { isSafePath, resolveConfiguredPath, resolvePostsDir, resolveImagesDir } from './lib/safe-path.ts';
 import { isAllowedRole, AuthenticatedRequest } from './middleware/auth.ts';
 import type { AppContext } from './lib/app-context.ts';
 import {
@@ -47,6 +47,27 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/** Config root directory (CONFIG_DIR / platform default). */
+const configDirOf = () => path.dirname(configPath());
+
+/** Absolute posts directory from active or loaded config. */
+const postsDirOf = (config: { postsDir?: string } = loadConfig()) =>
+    resolvePostsDir(configDirOf(), config.postsDir);
+
+/** Absolute images directory under posts. */
+const imagesDirOf = (config: { postsDir?: string } = loadConfig()) =>
+    resolveImagesDir(configDirOf(), config.postsDir);
+
+/**
+ * Configured theme directory (absolute). Do not fall back to shipped themes here:
+ * resolveThemeDir() would rewrite missing paths to the repo pack, and admin saves
+ * would pollute server/themes. Catalog loaders already search shipped via themeSearchDirs.
+ */
+const themeDirForConfig = () => {
+    const config = loadConfig();
+    return resolveConfiguredPath(configDirOf(), config.themeDir || './themes');
+};
 
 export function registerRoutes(app: Express, ctx: AppContext): void {
     const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload } = ctx;
@@ -210,10 +231,7 @@ app.get('/api/posts', (req: Request, res: Response) => {
         return res.status(403).json({ message: 'Search is disabled by security policy' });
     }
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
+    const postsDir = postsDirOf(config);
     const posts = getPosts(postsDir, {
         sortBy: (config.sortBy as 'title' | 'date' | 'author') || 'date',
         sortOrder: (config.sortOrder as 'asc' | 'desc') || 'desc'
@@ -330,10 +348,7 @@ app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: R
 // Get single post
 app.get('/api/posts/:slug', (req: Request, res: Response) => {
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
+    const postsDir = postsDirOf(config);
     const slug = req.params.slug as string;
     
     // Security check: prevent directory traversal
@@ -356,10 +371,7 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
 app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const { slug, title, content, summary, date, pinned } = req.body;
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
+    const postsDir = postsDirOf(config);
     
     // Security check: prevent directory traversal
     const postPath = path.join(postsDir, `${slug}.md`);
@@ -384,11 +396,8 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
 // Proxy images through a common endpoint
 app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
-    const imagesDir = path.join(postsDir, 'images');
+    const postsDir = postsDirOf(config);
+    const imagesDir = imagesDirOf(config);
     
     // Support both query param (preferred) and route param (legacy)
     const filenameRaw = (req.query.fileName as string) || (req.params.filename as string) || '';
@@ -460,10 +469,7 @@ if (fs.existsSync(distPath)) {
 app.get('/api/health', (_req: Request, res: Response) => {
     const config = loadConfig();
     const status = getConfigLoadStatus();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
+    const postsDir = postsDirOf(config);
     res.json({
         ok: true,
         version: process.env.npm_package_version || '1.0.0',
@@ -531,11 +537,8 @@ app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: Authenticated
 app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const filename = decodeURIComponent(req.params.filename as string);
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
-    const imagesDir = path.join(postsDir, 'images');
+    const postsDir = postsDirOf(config);
+    const imagesDir = imagesDirOf(config);
     const filePath = path.join(imagesDir, filename);
 
     if (!isSafePath(imagesDir, filePath)) {
@@ -572,11 +575,8 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
     if (!Array.isArray(filenames)) return res.status(400).json({ message: 'filenames must be an array' });
 
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
-    const imagesDir = path.join(postsDir, 'images');
+    const postsDir = postsDirOf(config);
+    const imagesDir = imagesDirOf(config);
     const manifest = loadManifest(imagesDir);
     
     let deletedCount = 0;
@@ -745,15 +745,6 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
     }
 });
 
-const themeDirForConfig = () => {
-    const config = loadConfig();
-    const raw = config.themeDir || './themes';
-    // Absolute themeDir (e.g. /var/db/mdweb/themes) must not be joined under CONFIG_DIR
-    const resolved = path.isAbsolute(raw)
-        ? raw
-        : path.resolve(path.dirname(configPath()), raw);
-    return resolveThemeDir(resolved);
-};
 
 // Public theme catalog (ids + labels for pickers)
 app.get('/api/themes', (_req: Request, res: Response) => {
@@ -783,9 +774,7 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
         sanitizedColors.mdEditorTheme = colors.mdEditorTheme;
     }
 
-    const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const themeDir = path.resolve(configDir, config.themeDir);
+    const themeDir = themeDirForConfig();
     const themePath = themeFilePath(themeDir, name);
     if (!themePath) return res.status(400).json({ message: 'Invalid theme path' });
 
@@ -801,10 +790,7 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
 app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const slug = req.params.slug;
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
+    const postsDir = postsDirOf(config);
     const postPath = path.join(postsDir, `${slug}.md`);
 
     if (!isSafePath(postsDir, postPath)) {
@@ -837,11 +823,8 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 
     try {
         const config = loadConfig();
-        const configDir = path.dirname(configPath());
-        const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
-        const imagesDir = path.join(postsDir, 'images');
+        const postsDir = postsDirOf(config);
+        const imagesDir = imagesDirOf(config);
 
         if (!fs.existsSync(imagesDir)) {
             fs.mkdirSync(imagesDir, { recursive: true });
@@ -928,11 +911,8 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 // Get images with pagination
 app.get('/api/admin/images', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const config = loadConfig();
-    const configDir = path.dirname(configPath());
-    const postsDir = path.isAbsolute(config.postsDir)
-        ? config.postsDir
-        : path.resolve(configDir, config.postsDir);
-    const imagesDir = path.join(postsDir, 'images');
+    const postsDir = postsDirOf(config);
+    const imagesDir = imagesDirOf(config);
 
     if (!fs.existsSync(imagesDir)) return res.json({ images: [], total: 0 });
     

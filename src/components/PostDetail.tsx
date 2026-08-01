@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
 import { api, siteConfig, getMdEditorTheme } from '../lib/api';
+import { onThemeChanged } from '../lib/theme-events';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -36,9 +37,7 @@ export const PostDetail = () => {
     }, [slug]);
 
     useEffect(() => {
-        const handleThemeChanged = () => setEditorTheme(getMdEditorTheme());
-        window.addEventListener('themeChanged' as any, handleThemeChanged);
-        return () => window.removeEventListener('themeChanged' as any, handleThemeChanged);
+        return onThemeChanged(() => setEditorTheme(getMdEditorTheme()));
     }, []);
 
     if (error) {
