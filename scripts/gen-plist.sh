@@ -20,7 +20,8 @@ fi
   # Runtime data shipped into the package (theme catalog, welcome post)
   find "${STAGE_ROOT}/var/db/mdweb" \( -type f -o -type l \) 2>/dev/null \
     | sed "s|^${STAGE_ROOT}/|/|" | sort
-  echo "etc/rc.d/mdweb"
+  # USE_RC_SUBR already packs etc/rc.d/mdweb — do not list it again.
+  # @sample: path is the .sample file under PREFIX; installs to basename without .sample
   echo "@sample etc/mdweb/config.json.sample"
   echo "@sample etc/mdweb/users.json.sample"
   echo "@sample etc/mdweb/mdweb.env.sample"

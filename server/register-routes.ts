@@ -41,7 +41,6 @@ import {
     listThemeIds,
     loadThemeColors,
     loadThemeColorsForMode,
-    resolveThemeDir,
     themeFilePath
 } from './lib/themes.ts';
 
@@ -396,7 +395,6 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
 // Proxy images through a common endpoint
 app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
     const config = loadConfig();
-    const postsDir = postsDirOf(config);
     const imagesDir = imagesDirOf(config);
     
     // Support both query param (preferred) and route param (legacy)
@@ -537,7 +535,6 @@ app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: Authenticated
 app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const filename = decodeURIComponent(req.params.filename as string);
     const config = loadConfig();
-    const postsDir = postsDirOf(config);
     const imagesDir = imagesDirOf(config);
     const filePath = path.join(imagesDir, filename);
 
@@ -575,7 +572,6 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
     if (!Array.isArray(filenames)) return res.status(400).json({ message: 'filenames must be an array' });
 
     const config = loadConfig();
-    const postsDir = postsDirOf(config);
     const imagesDir = imagesDirOf(config);
     const manifest = loadManifest(imagesDir);
     
@@ -823,7 +819,6 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 
     try {
         const config = loadConfig();
-        const postsDir = postsDirOf(config);
         const imagesDir = imagesDirOf(config);
 
         if (!fs.existsSync(imagesDir)) {
@@ -911,7 +906,6 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 // Get images with pagination
 app.get('/api/admin/images', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const config = loadConfig();
-    const postsDir = postsDirOf(config);
     const imagesDir = imagesDirOf(config);
 
     if (!fs.existsSync(imagesDir)) return res.json({ images: [], total: 0 });
