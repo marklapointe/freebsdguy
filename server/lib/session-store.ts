@@ -78,6 +78,30 @@ export class FileSessionStore {
         }
     }
 
+    /** Destroy all sessions for a username (password change / user delete). */
+    destroyForUser(username: string): number {
+        this.ensureDir();
+        let n = 0;
+        try {
+            for (const f of fs.readdirSync(this.dir)) {
+                if (!f.endsWith('.json')) continue;
+                const fp = path.join(this.dir, f);
+                try {
+                    const rec = JSON.parse(fs.readFileSync(fp, 'utf8')) as SessionRecord;
+                    if (rec?.username === username) {
+                        fs.unlinkSync(fp);
+                        n++;
+                    }
+                } catch {
+                    /* skip */
+                }
+            }
+        } catch {
+            /* ignore */
+        }
+        return n;
+    }
+
     /** Best-effort purge of expired sessions (call on login). */
     purgeExpired(): number {
         this.ensureDir();
@@ -111,9 +135,18 @@ export function parseCookies(header: string | undefined): Record<string, string>
         if (idx === -1) continue;
         const k = part.slice(0, idx).trim();
         const v = part.slice(idx + 1).trim();
-        if (k) out[k] = decodeURIComponent(v);
+        if (k) out[k] = safeDecode(v);
     }
     return out;
+}
+
+/** decodeURIComponent that returns the raw value on malformed escapes instead of throwing. */
+export function safeDecode(v: string): string {
+    try {
+        return decodeURIComponent(v);
+    } catch {
+        return v;
+    }
 }
 
 export function sessionCookieHeader(

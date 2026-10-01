@@ -1,30 +1,30 @@
-FROM node:20-alpine AS builder
+# Build stage: full dev deps for tsc + vite
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build \
+ && npm prune --omit=dev
 
-FROM node:20-alpine
+# Runtime stage: production deps only (tsx is a runtime dependency in package.json)
+FROM node:22-alpine
 
 WORKDIR /app
+ENV NODE_ENV=production
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
 
-# Install tsx globally or locally to run the TS server
-RUN npm install -g tsx
-
-# Set default environment variables
+# Default environment variables — override JWT_SECRET at run time
 ENV PORT=5173
-ENV JWT_SECRET=change_me_in_production
-ENV CONFIG_PATH=/app/server/config/config.json
-ENV USERS_PATH=/app/server/config/users.json
+ENV CONFIG_DIR=/app/server/config
 
 EXPOSE 5173
 
-CMD ["tsx", "server/index.ts"]
+CMD ["./node_modules/.bin/tsx", "server/index.ts"]

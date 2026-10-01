@@ -53,3 +53,23 @@ export function findByName(manifest: ImageManifest, originalName: string): Image
     }
     return null;
 }
+
+/** Per-directory promise chain so manifest read-modify-write sequences never interleave. */
+const manifestLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Run `task` with exclusive access to the manifest of `imagesDir`.
+ * Tasks for the same directory execute strictly in FIFO order; a rejected
+ * task releases the lock for the next one.
+ */
+export function withManifestLock<T>(imagesDir: string, task: () => Promise<T>): Promise<T> {
+    const key = path.resolve(imagesDir);
+    const prev = manifestLocks.get(key) ?? Promise.resolve();
+    const run = prev.catch(() => undefined).then(task);
+    const settled = run.catch(() => undefined);
+    manifestLocks.set(key, settled);
+    settled.then(() => {
+        if (manifestLocks.get(key) === settled) manifestLocks.delete(key);
+    });
+    return run;
+}

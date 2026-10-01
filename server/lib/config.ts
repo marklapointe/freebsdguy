@@ -271,12 +271,51 @@ export function defaultUsers(): UsersConfig {
     };
 }
 
+/**
+ * Fail-closed users projection: structure present, password unusable.
+ * Used after quarantine/read failure — never invents a known password hash.
+ */
+export function lockedUsers(): UsersConfig {
+    return {
+        admin: {
+            username: DEFAULT_ADMIN_USERNAME,
+            passwordHash: '',
+            role: 'admin'
+        },
+        users: []
+    };
+}
+
 const ensureDirectoryExists = (filePath: string) => {
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
 };
+
+/**
+ * Atomic JSON write: temp file → rename over target.
+ * Spec: after return, targetPath contains the full document or is unchanged.
+ */
+export function writeJsonAtomic(targetPath: string, data: unknown): void {
+    ensureDirectoryExists(targetPath);
+    const dir = path.dirname(targetPath);
+    const tmp = path.join(
+        dir,
+        `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`
+    );
+    try {
+        fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+        fs.renameSync(tmp, targetPath);
+    } catch (e) {
+        try {
+            if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+        } catch {
+            /* ignore cleanup */
+        }
+        throw e;
+    }
+}
 
 /**
  * Move unreadable config/users aside so the next load does not thrash.
@@ -612,11 +651,10 @@ export const loadAIConfig = (customPath?: string): AIConfig | null => {
 
 export const saveConfig = (config: Config, customPath?: string) => {
     const targetPath = customPath || configPath();
-    ensureDirectoryExists(targetPath);
     // Always persist a sanitized document so disk never holds half-broken shapes we wrote
     const { config: clean } = sanitizeConfig(config);
     try {
-        fs.writeFileSync(targetPath, JSON.stringify(clean, null, 2));
+        writeJsonAtomic(targetPath, clean);
     } catch (e: unknown) {
         const err = e as NodeJS.ErrnoException;
         if (err?.code === 'EACCES' || err?.code === 'EPERM') {
@@ -650,32 +688,33 @@ export const isConfigWritable = (customPath?: string): boolean => {
 
 /**
  * Coerce users.json into UsersConfig. Never throws.
+ * INV: never invents DEFAULT_ADMIN_PASSWORD_HASH — missing/invalid hash → '' (unloginable).
  */
 export function sanitizeUsers(raw: unknown): { users: UsersConfig; warnings: string[] } {
     const warnings: string[] = [];
-    const base = defaultUsers();
+    const locked = lockedUsers();
 
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        warnings.push('users root invalid; using default admin');
-        return { users: base, warnings };
+        warnings.push('users root invalid; login locked until users.json is repaired');
+        return { users: locked, warnings };
     }
 
     const o = raw as Record<string, unknown>;
-    let admin = base.admin;
+    let admin = locked.admin;
 
     if (o.admin && typeof o.admin === 'object' && !Array.isArray(o.admin)) {
         const a = o.admin as Record<string, unknown>;
         admin = {
             username: asNonEmptyString(a.username) || DEFAULT_ADMIN_USERNAME,
-            passwordHash: typeof a.passwordHash === 'string' ? a.passwordHash : DEFAULT_ADMIN_PASSWORD_HASH,
+            passwordHash: typeof a.passwordHash === 'string' ? a.passwordHash : '',
             role: asNonEmptyString(a.role) || 'admin'
         };
-        if (!asNonEmptyString(a.username)) warnings.push('admin.username missing; using default');
+        if (!asNonEmptyString(a.username)) warnings.push('admin.username missing; using default username');
         if (typeof a.passwordHash !== 'string' || !a.passwordHash) {
-            warnings.push('admin.passwordHash missing; using default hash');
+            warnings.push('admin.passwordHash missing or empty; login disabled until set');
         }
     } else {
-        warnings.push('admin block missing; using default admin');
+        warnings.push('admin block missing; login locked until users.json is repaired');
     }
 
     const users: User[] = [];
@@ -700,8 +739,9 @@ export function sanitizeUsers(raw: unknown): { users: UsersConfig; warnings: str
 
 /**
  * Load users. Never throws.
- * Missing file: create default admin on disk.
- * Corrupt file: quarantine + in-memory default admin (do not overwrite with write unless missing).
+ * Missing file (first boot): create default admin on disk (change password immediately).
+ * Corrupt/empty/unreadable: quarantine when possible, return lockedUsers() — never rewrite
+ * DEFAULT_ADMIN_PASSWORD_HASH after a failed load.
  */
 export const loadUsers = (customPath?: string): UsersConfig => {
     const targetPath = customPath || usersPath();
@@ -717,8 +757,7 @@ export const loadUsers = (customPath?: string): UsersConfig => {
     if (!fs.existsSync(targetPath)) {
         const defaultConfig = defaultUsers();
         try {
-            ensureDirectoryExists(targetPath);
-            fs.writeFileSync(targetPath, JSON.stringify(defaultConfig, null, 2));
+            writeJsonAtomic(targetPath, defaultConfig);
         } catch (e) {
             console.error(`[ERROR] Could not write default users to ${targetPath}:`, e);
         }
@@ -729,14 +768,16 @@ export const loadUsers = (customPath?: string): UsersConfig => {
     try {
         text = fs.readFileSync(targetPath, 'utf8');
     } catch (e) {
-        console.error(`[ERROR] Cannot read users at ${targetPath}:`, e);
-        return defaultUsers();
+        console.error(`[ERROR] Cannot read users at ${targetPath}; login locked:`, e);
+        return lockedUsers();
     }
 
     if (!text.trim()) {
         const q = quarantineBadFile(targetPath);
-        console.error(`[ERROR] Empty users file; quarantined to ${q || '(failed)'}`);
-        return defaultUsers();
+        console.error(
+            `[ERROR] Empty users file; quarantined to ${q || '(failed)'}; login locked`
+        );
+        return lockedUsers();
     }
 
     try {
@@ -749,15 +790,28 @@ export const loadUsers = (customPath?: string): UsersConfig => {
     } catch (e) {
         const q = quarantineBadFile(targetPath);
         console.error(
-            `[ERROR] Invalid users JSON at ${targetPath}; using default admin. Moved to ${q || '(quarantine failed)'}`
+            `[ERROR] Invalid users JSON at ${targetPath}; login locked. Moved to ${q || '(quarantine failed)'}`
         );
-        return defaultUsers();
+        return lockedUsers();
     }
 };
 
 export const saveUsers = (users: UsersConfig, customPath?: string) => {
     const targetPath = customPath || usersPath();
-    ensureDirectoryExists(targetPath);
     const { users: clean } = sanitizeUsers(users);
-    fs.writeFileSync(targetPath, JSON.stringify(clean, null, 2));
+    writeJsonAtomic(targetPath, clean);
 };
+
+/** Resolve a live account by username (admin or users[]). Null if missing or hash empty. */
+export function findUserByUsername(
+    username: string,
+    users: UsersConfig = loadUsers()
+): User | null {
+    if (!username) return null;
+    if (users.admin.username === username) {
+        return users.admin.passwordHash ? users.admin : null;
+    }
+    const u = users.users.find((x) => x.username === username);
+    if (!u || !u.passwordHash) return null;
+    return u;
+}

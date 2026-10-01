@@ -21,7 +21,8 @@ vi.mock('../src/lib/api', () => ({
     applyTheme: (...a: unknown[]) => applyTheme(...a),
     fetchThemeCatalog: (...a: unknown[]) => fetchThemeCatalog(...a),
     getMdEditorTheme: () => 'dark',
-    getEffectiveThemeMode: (m?: string) => (m === 'light' ? 'light' : 'dark')
+    getEffectiveThemeMode: (m?: string) => (m === 'light' ? 'light' : 'dark'),
+    siteConfig: { refresh: vi.fn().mockResolvedValue({}), load: vi.fn().mockResolvedValue({}), subscribe: () => () => {}, notify: vi.fn() }
 }));
 
 vi.mock('md-editor-rt', () => ({

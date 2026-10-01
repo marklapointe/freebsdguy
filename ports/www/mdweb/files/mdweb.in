@@ -18,7 +18,9 @@ load_rc_config $name
 : ${mdweb_group:="www"}
 : ${mdweb_dir:="%%WWWDIR%%"}
 : ${mdweb_port:="5173"}
-: ${mdweb_env_file:="/usr/local/etc/mdweb.env"}
+: ${mdweb_env_file:="/usr/local/etc/mdweb/mdweb.env"}
+# Legacy location (pre-1.0.1 docs) still honored when the canonical file is absent
+: ${mdweb_env_file_legacy:="/usr/local/etc/mdweb.env"}
 : ${mdweb_config_dir:="/usr/local/etc/mdweb"}
 
 pidfile="/var/run/mdweb/${name}.pid"
@@ -26,18 +28,28 @@ procname="%%LOCALBASE%%/bin/node"
 command="/usr/sbin/daemon"
 
 # Load JWT_SECRET and friends from env file when present
-if [ -f "${mdweb_env_file}" ]; then
+# -r: `service mdweb status` as a non-root user must not spew "Permission denied"
+if [ -r "${mdweb_env_file}" ]; then
 	. "${mdweb_env_file}"
+elif [ -r "${mdweb_env_file_legacy}" ]; then
+	. "${mdweb_env_file_legacy}"
 fi
 
 export NODE_ENV=production
 export CONFIG_DIR="${mdweb_config_dir}"
 export PORT="${mdweb_port}"
-# JWT_SECRET must be set in mdweb.env for production
+# Secrets stay in the process environment (sourced above) — never on argv (ps-visible).
+if [ -n "${JWT_SECRET:-}" ]; then
+	export JWT_SECRET
+fi
+if [ -n "${SESSION_SECRET:-}" ]; then
+	export SESSION_SECRET
+fi
 
-# Root runs daemon; -u drops to www; -p writes child (node) pid for status
+# Root runs daemon; -u drops to www; -p writes child (node) pid for status.
+# daemon inherits exported env; do not pass JWT_SECRET= on the env/argv line.
 command_args="-f -p ${pidfile} -u ${mdweb_runas} \
-	/usr/bin/env NODE_ENV=production CONFIG_DIR=${mdweb_config_dir} PORT=${mdweb_port} JWT_SECRET=${JWT_SECRET} \
+	/usr/bin/env NODE_ENV=production CONFIG_DIR=${mdweb_config_dir} PORT=${mdweb_port} \
 	${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts -p ${mdweb_port}"
 
 start_precmd="mdweb_prestart"

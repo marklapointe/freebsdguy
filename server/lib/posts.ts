@@ -47,8 +47,8 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
             const { data, content: mdContent } = matter(content);
             const pinned = data.pinned === true || data.pinned === 'true';
             return {
-                slug: filename.replace('.md', ''),
-                title: data.title || filename.replace('.md', ''),
+                slug: filename.replace(/\.md$/, ''),
+                title: data.title || filename.replace(/\.md$/, ''),
                 summary: data.summary || mdContent.substring(0, 150) + '...',
                 date: data.date || '',
                 author: data.author || '',

@@ -13,19 +13,21 @@ LICENSE_FILE=	${WRKSRC}/LICENSE
 MASTER_SITES=	file://${DISTDIR}/
 DISTFILES=	${PORTNAME}-${DISTVERSION}${EXTRACT_SUFX}
 
-USES=		nodejs:22,build,run
+USES=		nodejs:lts,build,run
 USE_RC_SUBR=	mdweb
 
 NO_ARCH=	yes
 
-BUILD_DEPENDS=	npm-node22>0:www/npm-node22
+# npm major follows the selected Node LTS (nodejs.mk sets NODEJS_VERSION)
+BUILD_DEPENDS=	npm-node${NODEJS_VERSION}>0:www/npm-node${NODEJS_VERSION}
 
 WRKSRC=		${WRKDIR}/${PORTNAME}-${DISTVERSION}
 
 ETCDIR=		${PREFIX}/etc/${PORTNAME}
 
-# pkg-plist is generated after stage via scripts/gen-plist.sh
-# (node_modules is too large to maintain by hand)
+# pkg-plist holds only static entries (@sample, @dir, man page). The vite build
+# (hashed asset names) and node_modules are appended to the packing list in
+# post-install, so `make package` is self-contained and the plist never drifts.
 
 do-build:
 	@${ECHO_MSG} "===>  npm ci + build (frontend) + production prune"
@@ -55,5 +57,11 @@ do-install:
 	${INSTALL_DATA} ${FILESDIR}/users.json.sample ${STAGEDIR}${ETCDIR}/
 	${INSTALL_DATA} ${FILESDIR}/mdweb.env.sample ${STAGEDIR}${ETCDIR}/
 	${INSTALL_MAN} ${WRKSRC}/mdweb.1 ${STAGEDIR}${PREFIX}/share/man/man1
+
+post-install:
+	@${FIND} ${STAGEDIR}${WWWDIR} \( -type f -o -type l \) \
+		| ${SED} -e 's,^${STAGEDIR}${PREFIX}/,,' | ${SORT} >> ${TMPPLIST}
+	@${FIND} ${STAGEDIR}/var/db/mdweb \( -type f -o -type l \) \
+		| ${SED} -e 's,^${STAGEDIR},,' | ${SORT} >> ${TMPPLIST}
 
 .include <bsd.port.mk>

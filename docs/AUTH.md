@@ -39,7 +39,7 @@ Everyone must log in again after a mode change.
 
 Production still needs a strong secret for **either** mode:
 
-- `JWT_SECRET` in `/usr/local/etc/mdweb.env` (recommended)
+- `JWT_SECRET` in `/usr/local/etc/mdweb/mdweb.env` (recommended)
 - or `SESSION_SECRET` (used when set; falls back to `JWT_SECRET`)
 - or `config.jwtSecret` (discouraged for production)
 
@@ -53,4 +53,8 @@ Default insecure value is rejected in production.
 
 Session cookies use `SameSite=Lax` and assume a same-origin SPA. Cross-site cookie POSTs are out of scope for v1.
 
-See also: [UPGRADE.md](./UPGRADE.md), [ADMIN.md](./ADMIN.md).
+## Personal access tokens (MCP / API)
+
+Long-lived `mdw_…` Bearer tokens can be minted in Admin → **Tokens** (or `POST /api/tokens`). They authenticate both REST `/api/*` and the MCP endpoint `POST /mcp` with the owning user’s live role. Details: [MCP.md](./MCP.md).
+
+See also: [UPGRADE.md](./UPGRADE.md), [ADMIN.md](./ADMIN.md), [MCP.md](./MCP.md).

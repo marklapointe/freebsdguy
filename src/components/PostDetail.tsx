@@ -24,16 +24,23 @@ export const PostDetail = () => {
             setError('Post not found');
             return;
         }
-        api.get(`/posts/${slug}`)
+        // Ignore responses that arrive after the slug changed (stale navigation)
+        let cancelled = false;
+        api.get(`/posts/${encodeURIComponent(slug)}`)
             .then(res => {
+                if (cancelled) return;
                 setPost(res.data);
                 siteConfig.load().then(cfg => {
+                    if (cancelled) return;
                     document.title = res.data.title ? `${res.data.title} - ${cfg.siteName}` : cfg.siteName;
                 });
             })
             .catch(() => {
-                setError('Post not found');
+                if (!cancelled) setError('Post not found');
             });
+        return () => {
+            cancelled = true;
+        };
     }, [slug]);
 
     useEffect(() => {

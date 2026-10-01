@@ -10,6 +10,8 @@ const get = vi.fn();
 
 vi.mock('../src/lib/api', () => ({
     api: { get: (...a: unknown[]) => get(...a), post: vi.fn() },
+    getPublicConfig: () => get('/config').then((r: any) => r.data),
+    invalidatePublicConfig: () => {},
     getMdEditorTheme: () => 'dark',
     getEffectiveThemeMode: () => 'dark'
 }));

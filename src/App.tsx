@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { api, applyTheme, getEffectiveThemeMode, setAuthModeCache } from './lib/api';
+import { api, applyTheme, getEffectiveThemeMode, getPublicConfig, setAuthModeCache, siteConfig } from './lib/api';
 import { Navbar } from './components/Navbar';
 import { Home } from './components/Home';
 import { PostDetail } from './components/PostDetail';
@@ -46,28 +46,36 @@ function App() {
 
     useEffect(() => {
         // Theme pack is site-wide; light/dark mode is per-browser (localStorage)
-        api.get('/config').then(res => {
-            setSiteName(res.data.siteName || 'MDWeb');
-            setSiteLogo(res.data.siteLogo);
-            setAuthModeCache(res.data.security?.authMode);
-            if (res.data.footer) {
+        const applyPublic = (data: Record<string, any>) => {
+            setSiteName(data.siteName || 'MDWeb');
+            setSiteLogo(data.siteLogo);
+            setAuthModeCache(data.security?.authMode);
+            if (data.footer) {
                 setFooter({
-                    show: res.data.footer.show !== false,
+                    show: data.footer.show !== false,
                     copyrightText:
-                        typeof res.data.footer.copyrightText === 'string'
-                            ? res.data.footer.copyrightText
+                        typeof data.footer.copyrightText === 'string'
+                            ? data.footer.copyrightText
                             : '© {year} {siteName}. All rights reserved.',
-                    creditText: typeof res.data.footer.creditText === 'string' ? res.data.footer.creditText : ''
+                    creditText: typeof data.footer.creditText === 'string' ? data.footer.creditText : ''
                 });
             }
-            const appearance = res.data.appearance || {};
-            applyTheme(res.data.currentTheme || 'dark', {
+        };
+        // One shared /config request for the whole cold load (Navbar/Home reuse it)
+        getPublicConfig().then(data => {
+            applyPublic(data);
+            const appearance = data.appearance || {};
+            applyTheme(data.currentTheme || 'dark', {
                 mode: getEffectiveThemeMode(appearance.themeMode),
                 crtEffects: appearance.crtEffects !== false,
                 textGlow: appearance.textGlow !== false
             });
         }).catch(() => {
             /* public config optional at boot */
+        });
+        // Admin saves (siteConfig.refresh) push name/logo/footer here without a reload
+        const offSite = siteConfig.subscribe(() => {
+            getPublicConfig().then(applyPublic).catch(() => {});
         });
         // Session mode: refresh identity from cookie if localStorage is thin
         api.get('/me')
@@ -82,6 +90,7 @@ function App() {
             .catch(() => {
                 /* not logged in */
             });
+        return offSite;
     }, []);
 
     const [modal, setModal] = useState<{ isOpen: boolean; title: string; message: string; type: string; onConfirm: () => void }>({ isOpen: false, title: '', message: '', type: 'alert', onConfirm: () => {} });

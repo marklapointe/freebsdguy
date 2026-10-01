@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Plus, Pin } from 'lucide-react';
 import { MdPreview } from 'md-editor-rt';
-import { api, getMdEditorTheme } from '../lib/api';
+import { api, getMdEditorTheme, getPublicConfig } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
 import { Post } from '../types';
 
@@ -21,11 +21,11 @@ export const Home = () => {
     }, []);
 
     useEffect(() => {
-        api.get('/config')
-            .then(res => {
-                const pageSize = Number(res.data.pagination) || 10;
+        getPublicConfig()
+            .then(data => {
+                const pageSize = Number(data.pagination) || 10;
                 setLimit(pageSize);
-                const place = res.data.searchPlacement || 'top';
+                const place = data.searchPlacement || 'top';
                 // left/right → top for now (full sidebar layout later)
                 setSearchPlacement(
                     place === 'none' || place === 'bottom' ? place : place === 'top' ? 'top' : 'top'

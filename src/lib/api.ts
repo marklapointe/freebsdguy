@@ -42,12 +42,17 @@ api.interceptors.response.use(
                 msg === 'jwt expired' ||
                 msg === 'invalid signature';
 
-            const token = localStorage.getItem('token');
             const path = error.config?.url || '';
             // Never treat /login failures as "clear session and bounce"
             const isLoginAttempt = String(path).includes('/login');
+            // Session-cookie mode stores role/username without a client token (Login.tsx),
+            // so "had an identity" must not depend on `token` alone (review finding #7).
+            const hadIdentity =
+                !!localStorage.getItem('token') ||
+                !!localStorage.getItem('role') ||
+                !!localStorage.getItem('username');
 
-            if (token && isJwtFailure && !isLoginAttempt) {
+            if (hadIdentity && isJwtFailure && !isLoginAttempt) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('role');
                 localStorage.removeItem('username');
@@ -60,11 +65,49 @@ api.interceptors.response.use(
     }
 );
 
-// Singleton site config store
+/** Shape of GET /api/config (public projection). */
+export interface PublicSiteConfig {
+    siteName?: string;
+    siteLogo?: string;
+    currentTheme?: string;
+    pagination?: number;
+    searchPlacement?: string;
+    appearance?: Partial<PublicAppearance>;
+    footer?: { show?: boolean; copyrightText?: string; creditText?: string };
+    security?: { authMode?: string; [k: string]: unknown };
+    [k: string]: unknown;
+}
+
+/**
+ * Memoized GET /api/config. Every component that needs the public config on
+ * cold load shares one in-flight request (App, Navbar, Home, PostDetail,
+ * applyTheme). Admin saves call invalidatePublicConfig()/siteConfig.refresh().
+ */
+let publicConfigPromise: Promise<PublicSiteConfig> | null = null;
+
+export function invalidatePublicConfig(): void {
+    publicConfigPromise = null;
+}
+
+export function getPublicConfig(force = false): Promise<PublicSiteConfig> {
+    if (force || !publicConfigPromise) {
+        const p = api.get('/config').then(res => (res.data || {}) as PublicSiteConfig);
+        publicConfigPromise = p;
+        // A failed fetch must not poison later callers
+        p.catch(() => {
+            if (publicConfigPromise === p) publicConfigPromise = null;
+        });
+    }
+    return publicConfigPromise;
+}
+
+type SiteConfigSummary = { siteName: string; siteLogo?: string; currentTheme: string; appearance?: Partial<PublicAppearance> };
+
+// Singleton site config store (name/logo/theme for chrome components)
 class SiteConfig {
     private static instance: SiteConfig;
-    private config: { siteName: string; siteLogo?: string; currentTheme: string } | null = null;
-    private listeners: Array<(config: { siteName: string; siteLogo?: string; currentTheme: string }) => void> = [];
+    private config: SiteConfigSummary | null = null;
+    private listeners: Array<(config: SiteConfigSummary) => void> = [];
 
     private constructor() {}
 
@@ -75,17 +118,21 @@ class SiteConfig {
         return SiteConfig.instance;
     }
 
-    async load(): Promise<{ siteName: string; siteLogo?: string; currentTheme: string }> {
+    private project(data: PublicSiteConfig): SiteConfigSummary {
+        return {
+            siteName: data.siteName || 'MDWeb',
+            siteLogo: data.siteLogo,
+            currentTheme: data.currentTheme || 'dark',
+            appearance: data.appearance
+        };
+    }
+
+    async load(): Promise<SiteConfigSummary> {
         if (this.config) {
             return this.config;
         }
         try {
-            const res = await api.get('/config');
-            this.config = {
-                siteName: res.data.siteName || 'MDWeb',
-                siteLogo: res.data.siteLogo,
-                currentTheme: res.data.currentTheme || 'dark'
-            };
+            this.config = this.project(await getPublicConfig());
             if (this.config.siteName) {
                 document.title = this.config.siteName;
             }
@@ -98,11 +145,19 @@ class SiteConfig {
         /* v8 ignore stop */
     }
 
-    get(): { siteName: string; siteLogo?: string; currentTheme: string } | null {
+    /** Re-fetch /config (after an admin save) and notify subscribers (Navbar, PostDetail...). */
+    async refresh(): Promise<SiteConfigSummary> {
+        this.config = this.project(await getPublicConfig(true));
+        document.title = this.config.siteName;
+        this.notify();
         return this.config;
     }
 
-    subscribe(listener: (config: { siteName: string; siteLogo?: string; currentTheme: string }) => void): () => void {
+    get(): SiteConfigSummary | null {
+        return this.config;
+    }
+
+    subscribe(listener: (config: SiteConfigSummary) => void): () => void {
         this.listeners.push(listener);
         return () => {
             this.listeners = this.listeners.filter(l => l !== listener);
@@ -251,10 +306,10 @@ export const applyTheme = async (
 
         if (!name || mode === undefined || crtEffects === undefined || textGlow === undefined) {
             try {
-                const res = await api.get('/config');
+                const data = await getPublicConfig();
                 if (gen !== applyGeneration) return null;
-                name = name || res.data.currentTheme || 'dark';
-                const a = (res.data.appearance || {}) as Partial<PublicAppearance>;
+                name = name || data.currentTheme || 'dark';
+                const a = (data.appearance || {}) as Partial<PublicAppearance>;
                 if (mode === undefined) mode = getEffectiveThemeMode(a.themeMode);
                 if (crtEffects === undefined) crtEffects = a.crtEffects !== false;
                 if (textGlow === undefined) textGlow = a.textGlow !== false;
@@ -328,3 +383,49 @@ export const setSiteTheme = async (themeId: string): Promise<boolean> => {
         return false;
     }
 };
+
+/** Personal access token metadata (never includes hash/plaintext). */
+export interface TokenPublic {
+    id: string;
+    username: string;
+    label: string;
+    prefix: string;
+    createdAt: number;
+    lastUsedAt?: number;
+    revokedAt?: number;
+}
+
+export interface MintedToken {
+    token: string;
+    id: string;
+    prefix: string;
+    label: string;
+    username: string;
+    createdAt: number;
+}
+
+export async function listMyTokens(): Promise<TokenPublic[]> {
+    const res = await api.get('/tokens');
+    return Array.isArray(res.data?.tokens) ? res.data.tokens : [];
+}
+
+export async function mintMyToken(label = ''): Promise<MintedToken> {
+    const res = await api.post('/tokens', { label });
+    return res.data as MintedToken;
+}
+
+export async function listAdminTokens(username?: string): Promise<TokenPublic[]> {
+    const res = await api.get('/admin/tokens', {
+        params: username ? { username } : undefined
+    });
+    return Array.isArray(res.data?.tokens) ? res.data.tokens : [];
+}
+
+export async function mintAdminToken(username: string, label = ''): Promise<MintedToken> {
+    const res = await api.post('/admin/tokens', { username, label });
+    return res.data as MintedToken;
+}
+
+export async function revokeToken(id: string): Promise<void> {
+    await api.delete(`/tokens/${encodeURIComponent(id)}`);
+}

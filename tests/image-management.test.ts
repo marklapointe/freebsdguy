@@ -4,7 +4,7 @@ import { app } from '../server/index';
 import fs from 'fs';
 import path from 'path';
 import jwt from 'jsonwebtoken';
-import { loadConfig, configPath } from '../server/lib/config';
+import { loadConfig, configPath, loadUsers, saveUsers } from '../server/lib/config';
 
 const SECRET = process.env.JWT_SECRET || 'freebsd_guy_secret_key';
 
@@ -33,6 +33,15 @@ describe('Image Management End-to-End', () => {
         if (!fs.existsSync(imagesDir)) {
             fs.mkdirSync(imagesDir, { recursive: true });
         }
+
+        const users = loadUsers();
+        users.users = users.users.filter((u) => u.username !== 'contributor');
+        users.users.push({
+            username: 'contributor',
+            passwordHash: 'not-empty-hash',
+            role: 'contributor'
+        });
+        saveUsers(users);
 
         await request(app)
             .post('/api/admin/config')

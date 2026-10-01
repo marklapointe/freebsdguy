@@ -27,23 +27,20 @@ SIZE (mdweb-${VERSION}.tar.gz) = ${SIZE}
 EOF
 echo "Updated distinfo SHA256=${SHA} SIZE=${SIZE}"
 
-echo "==> Ensure node/npm on remote"
-"${SSH[@]}" 'sudo pkg install -y node22 npm-node22 ca_root_nss 2>/dev/null || sudo pkg install -y node npm ca_root_nss'
+echo "==> Ensure node/npm on remote (Node LTS = 24, matches ports USES=nodejs:lts)"
+"${SSH[@]}" 'sudo pkg install -y node24 npm-node24 ca_root_nss 2>/dev/null || sudo pkg install -y node npm ca_root_nss'
 
 echo "==> Sync port skeleton + distfile"
 "${SSH[@]}" "sudo mkdir -p ${REMOTE_PORT_DIR}/files ${REMOTE_DIST} && sudo chown -R ${USER} ${REMOTE_PORT_DIR} ${REMOTE_DIST} 2>/dev/null || true"
-rsync -az -e "ssh -o BatchMode=yes" \
-  "${ROOT}/ports/www/mdweb/" "${USER}@${HOST}:${REMOTE_PORT_DIR}/"
+# tar over ssh: no rsync dependency on the FreeBSD side
+tar -C "${ROOT}/ports/www/mdweb" -cf - . | "${SSH[@]}" "tar -C ${REMOTE_PORT_DIR} -xf -"
 "${SCP[@]}" "${TAR}" \
   "${USER}@${HOST}:${REMOTE_DIST}/mdweb-${VERSION}.tar.gz"
 
-echo "==> make stage + regenerate pkg-plist + package (npm build; can take a while)"
-# node_modules + hashed vite assets change every build; plist must match stage.
-"${SCP[@]}" "${ROOT}/scripts/gen-plist.sh" "${USER}@${HOST}:/tmp/gen-plist.sh"
-"${SSH[@]}" "chmod +x /tmp/gen-plist.sh && cd ${REMOTE_PORT_DIR} && \
+echo "==> make stage + package (npm build; can take a while)"
+# post-install in the port appends dist/ + node_modules to the packing list, so no plist step here.
+"${SSH[@]}" "cd ${REMOTE_PORT_DIR} && \
   make clean DISTDIR=${REMOTE_DIST} && \
-  make stage DISTDIR=${REMOTE_DIST} DISABLE_VULNERABILITIES=yes && \
-  /tmp/gen-plist.sh ${REMOTE_PORT_DIR} && \
   make package DISTDIR=${REMOTE_DIST} DISABLE_VULNERABILITIES=yes"
 
 echo "==> Locate package"
@@ -75,13 +72,14 @@ if [ -d /usr/local/www/mdweb/server/themes ]; then
     fi
   done
 fi
-if [ ! -f /usr/local/etc/mdweb.env ] || ! grep -q '^JWT_SECRET=.' /usr/local/etc/mdweb.env 2>/dev/null; then
-  printf 'JWT_SECRET=%s\n' "\$(openssl rand -hex 32)" > /usr/local/etc/mdweb.env
+# pkg @sample may have created mdweb.env from the sample (placeholder secret) — replace unless it is a generated 64-hex secret
+if [ ! -f /usr/local/etc/mdweb/mdweb.env ] || ! grep -Eq '^JWT_SECRET=[0-9a-f]{64}$' /usr/local/etc/mdweb/mdweb.env 2>/dev/null; then
+  printf 'JWT_SECRET=%s\n' "\$(openssl rand -hex 32)" > /usr/local/etc/mdweb/mdweb.env
 fi
-chmod 0600 /usr/local/etc/mdweb.env
+chmod 0600 /usr/local/etc/mdweb/mdweb.env
 chown www:www /usr/local/etc/mdweb/users.json
 chown -R www:www /var/db/mdweb
-chown root:wheel /usr/local/etc/mdweb.env
+chown root:wheel /usr/local/etc/mdweb/mdweb.env
 sysrc mdweb_enable=YES >/dev/null
 sysrc mdweb_port=${PORT} >/dev/null || true
 
@@ -102,7 +100,7 @@ sleep 1
 service mdweb start || true
 sleep 2
 if ! curl -fsS http://127.0.0.1:${PORT}/api/health >/dev/null 2>&1; then
-  . /usr/local/etc/mdweb.env
+  . /usr/local/etc/mdweb/mdweb.env
   /usr/sbin/daemon -f -p /var/run/mdweb/mdweb.pid -o /tmp/mdweb.out -u www \\
     /usr/bin/env NODE_ENV=production CONFIG_DIR=/usr/local/etc/mdweb PORT=${PORT} JWT_SECRET="\${JWT_SECRET}" \\
     /usr/local/www/mdweb/node_modules/.bin/tsx /usr/local/www/mdweb/server/index.ts -p ${PORT}
@@ -125,5 +123,5 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 echo "FAILED health check; recent logs:"
-"${SSH[@]}" 'sudo cat /var/log/messages | tail -30; ls -la /usr/local/www/mdweb | head; ls -la /usr/local/etc/mdweb; cat /usr/local/etc/mdweb.env | sed "s/=.*/=***/"; cat /tmp/mdweb.out 2>/dev/null || true'
+"${SSH[@]}" 'sudo cat /var/log/messages | tail -30; ls -la /usr/local/www/mdweb | head; ls -la /usr/local/etc/mdweb; cat /usr/local/etc/mdweb/mdweb.env | sed "s/=.*/=***/"; cat /tmp/mdweb.out 2>/dev/null || true'
 exit 1

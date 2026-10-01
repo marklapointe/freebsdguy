@@ -26,7 +26,11 @@ describe('Preflight Check', () => {
             jwtSecret: 'test-secret-at-least-16'
         });
         (config.loadUsers as any).mockReturnValue({
-            admin: { username: 'admin' },
+            admin: {
+                username: 'admin',
+                // bcrypt of "secure-not-default" — not the shipped default password
+                passwordHash: '$2b$04$LXKxlvHBmdZ8gSr1FQyqjuxnaU8E1sf29xrf9yElEaDb69xbnaqG6'
+            },
             users: []
         });
     });

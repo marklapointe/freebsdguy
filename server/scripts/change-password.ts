@@ -1,5 +1,6 @@
 import { loadUsers, saveUsers } from '../lib/config.ts';
 import { updatePassword } from '../lib/auth.ts';
+import { FileSessionStore, defaultSessionDir } from '../lib/session-store.ts';
 
 const changePassword = async (username: string, newPassword: string) => {
     const usersConfig = loadUsers();
@@ -11,7 +12,11 @@ const changePassword = async (username: string, newPassword: string) => {
     }
 
     saveUsers(updatedUsersConfig);
+    const purged = new FileSessionStore(defaultSessionDir()).destroyForUser(username);
     console.log(`Password updated successfully for user '${username}'.`);
+    if (purged > 0) {
+        console.log(`Purged ${purged} active session(s) for '${username}'.`);
+    }
 };
 
 // Simple CLI handling

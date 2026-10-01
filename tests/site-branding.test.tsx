@@ -22,15 +22,19 @@ vi.mock('axios', () => {
 
 const siteConfigLoad = vi.hoisted(() => vi.fn());
 
-vi.mock('../src/lib/api', () => ({
-    api: {
+vi.mock('../src/lib/api', () => {
+    const apiMock = {
         get: vi.fn(),
         post: vi.fn(),
         interceptors: {
             request: { use: vi.fn(), eject: vi.fn() },
             response: { use: vi.fn(), eject: vi.fn() }
         }
-    },
+    };
+    return {
+    api: apiMock,
+    getPublicConfig: () => apiMock.get('/config').then((r: any) => r.data),
+    invalidatePublicConfig: vi.fn(),
     applyTheme: vi.fn().mockResolvedValue(null),
     getMdEditorTheme: vi.fn().mockReturnValue('dark'),
     getStoredThemeMode: vi.fn().mockReturnValue(null),
@@ -44,11 +48,13 @@ vi.mock('../src/lib/api', () => ({
     setSiteTheme: vi.fn(),
     siteConfig: {
         load: (...args: unknown[]) => siteConfigLoad(...args),
+        refresh: (...args: unknown[]) => siteConfigLoad(...args),
         get: vi.fn().mockReturnValue(null),
         subscribe: vi.fn().mockReturnValue(() => {}),
         notify: vi.fn()
     }
-}));
+    };
+});
 
 import App from '../src/App';
 import { api } from '../src/lib/api';

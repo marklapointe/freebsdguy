@@ -1,10 +1,12 @@
 /**
- * RoleGuardFactory — Express middleware for JWT and classical session auth.
+ * RoleGuardFactory — Express middleware for JWT, PAT, and classical session auth.
  */
 
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import type { AuthMode } from '../lib/config.ts';
+import { findUserByUsername } from '../lib/config.ts';
+import { isPatToken, verifyToken } from '../lib/api-tokens.ts';
 import {
     FileSessionStore,
     parseCookies,
@@ -19,11 +21,28 @@ export function isAllowedRole(role: unknown): role is Role {
     return role === 'admin' || role === 'contributor';
 }
 
+/** Live identity from users.json — rejects deleted/locked accounts; role from disk. */
+export function liveIdentity(
+    username: unknown,
+    sessionStore?: FileSessionStore,
+    sessionId?: string
+): { username: string; role: Role } | null {
+    if (typeof username !== 'string' || !username) return null;
+    const user = findUserByUsername(username);
+    if (!user || !isAllowedRole(user.role)) {
+        if (sessionStore && sessionId) sessionStore.destroy(sessionId);
+        return null;
+    }
+    return { username: user.username, role: user.role };
+}
+
 export interface AuthenticatedRequest extends Request {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     user?: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     file?: any;
+    /** Set when auth came from a personal access token. */
+    authVia?: 'pat' | 'jwt' | 'session';
 }
 
 export interface AuthGuardOptions {
@@ -45,17 +64,43 @@ export class RoleGuardFactory {
         };
     }
 
-    /** Product: require valid JWT or session; attaches req.user */
+    /**
+     * Product: require valid PAT, JWT, or session; attaches req.user from live users.json.
+     * Bearer PAT wins when present (works in both jwt and session site modes).
+     */
     authenticate() {
         const secret = this.secret;
         const opts = this.opts;
         return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (bearer && isPatToken(bearer)) {
+                return this.authenticatePat(req, res, next, bearer);
+            }
             const mode = opts.getMode();
             if (mode === 'session') {
                 return this.authenticateSession(req, res, next);
             }
             return this.authenticateJwt(req, res, next, secret);
         };
+    }
+
+    private authenticatePat(
+        req: AuthenticatedRequest,
+        res: Response,
+        next: NextFunction,
+        plaintext: string
+    ) {
+        const tok = verifyToken(plaintext);
+        if (!tok) {
+            return res.status(403).json({ message: 'Failed to authenticate token' });
+        }
+        const identity = liveIdentity(tok.username);
+        if (!identity) {
+            return res.status(403).json({ message: 'Failed to authenticate token' });
+        }
+        req.user = identity;
+        req.authVia = 'pat';
+        next();
     }
 
     private authenticateJwt(
@@ -72,7 +117,13 @@ export class RoleGuardFactory {
                 console.error(`[AUTH] JWT verification failed: ${err.message}`);
                 return res.status(403).json({ message: 'Failed to authenticate token' });
             }
-            req.user = decoded;
+            const payload = decoded as { username?: string };
+            const identity = liveIdentity(payload?.username);
+            if (!identity) {
+                return res.status(403).json({ message: 'Failed to authenticate token' });
+            }
+            req.user = identity;
+            req.authVia = 'jwt';
             next();
         });
     }
@@ -87,7 +138,12 @@ export class RoleGuardFactory {
         const rec: SessionRecord | null = store.get(sid);
         if (!rec) return res.status(403).json({ message: 'Failed to authenticate token' });
 
-        req.user = { username: rec.username, role: rec.role };
+        const identity = liveIdentity(rec.username, store, rec.id);
+        if (!identity) {
+            return res.status(403).json({ message: 'Failed to authenticate token' });
+        }
+        req.user = identity;
+        req.authVia = 'session';
         next();
     }
 

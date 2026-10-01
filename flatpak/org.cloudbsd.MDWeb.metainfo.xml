@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>org.cloudbsd.MDWeb</id>
+  <name>MDWeb</name>
+  <summary>Markdown personal website (React frontend + Express API)</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>MDWeb serves a Markdown-backed personal website with an admin UI for posts, images, themes and AI-assisted editing.</p>
+    <p>Run with: flatpak run org.cloudbsd.MDWeb — then open http://localhost:5173</p>
+  </description>
+  <url type="homepage">https://github.com/marklapointe/freebsdguy</url>
+  <provides><binary>mdweb</binary></provides>
+</component>

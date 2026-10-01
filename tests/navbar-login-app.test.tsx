@@ -18,6 +18,8 @@ vi.mock('../src/lib/api', () => ({
         get: (...a: unknown[]) => get(...a),
         post: (...a: unknown[]) => post(...a)
     },
+    getPublicConfig: () => get('/config').then((r: any) => r.data),
+    invalidatePublicConfig: () => {},
     applyTheme: (...a: unknown[]) => applyTheme(...a),
     getEffectiveThemeMode: (m?: string) => (m === 'light' ? 'light' : 'dark'),
     getMdEditorTheme: () => 'dark',
@@ -25,6 +27,7 @@ vi.mock('../src/lib/api', () => ({
     toggleThemeMode: (...a: unknown[]) => toggleThemeMode(...a),
     siteConfig: {
         load: (...a: unknown[]) => siteConfigLoad(...a),
+        refresh: (...a: unknown[]) => siteConfigLoad(...a),
         get: () => ({ siteName: 'My Site' }),
         subscribe: () => () => {}
     },
@@ -112,6 +115,10 @@ describe('Navbar', () => {
                 <Navbar user={null} setUser={vi.fn()} />
             </MemoryRouter>
         );
+        // Cold-load paint belongs to App (single /config request); Navbar only re-applies on events.
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('themeChanged', { detail: null }));
+        });
         await waitFor(() => expect(applyTheme).toHaveBeenCalledWith('dark', expect.any(Object)));
         applyTheme.mockClear();
         await act(async () => {

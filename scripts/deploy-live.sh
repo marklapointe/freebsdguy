@@ -85,7 +85,7 @@ rm -f /var/run/mdweb/mdweb.pid
 sleep 1
 
 # Root daemon -u www is the reliable path (rc.subr su -m + -u was broken historically)
-. /usr/local/etc/mdweb.env
+. /usr/local/etc/mdweb/mdweb.env
 /usr/sbin/daemon -f -p /var/run/mdweb/mdweb.pid -o /tmp/mdweb.out -u www \
   /usr/bin/env NODE_ENV=production CONFIG_DIR=/usr/local/etc/mdweb PORT=5173 JWT_SECRET="${JWT_SECRET}" \
   "${REMOTE_APP}/node_modules/.bin/tsx" "${REMOTE_APP}/server/index.ts" -p 5173

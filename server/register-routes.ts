@@ -16,25 +16,34 @@ import {
     configPath,
     loadUsers,
     saveUsers,
-    loadAIConfig,
     isConfigWritable,
     getConfigLoadStatus,
     sanitizeConfig,
-    resolveAuthMode
+    resolveAuthMode,
+    findUserByUsername
 } from './lib/config.ts';
 import {
     parseCookies,
     sessionCookieHeader,
     clearSessionCookieHeader,
-    FileSessionStore
+    FileSessionStore,
+    safeDecode
 } from './lib/session-store.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
-import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName } from './lib/images.ts';
+import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
 import { isSafePath, resolveConfiguredPath, resolvePostsDir, resolveImagesDir } from './lib/safe-path.ts';
 import { isAllowedRole, AuthenticatedRequest } from './middleware/auth.ts';
 import type { AppContext } from './lib/app-context.ts';
+import {
+    mintToken,
+    listTokensForUser,
+    listAllTokens,
+    revokeToken,
+    revokeTokensForUser
+} from './lib/api-tokens.ts';
+import { registerMcpRoutes } from './mcp/register-mcp.ts';
 import {
     isValidThemeId,
     listThemeCatalog,
@@ -50,12 +59,12 @@ const __dirname = path.dirname(__filename);
 /** Config root directory (CONFIG_DIR / platform default). */
 const configDirOf = () => path.dirname(configPath());
 
-/** Absolute posts directory from active or loaded config. */
-const postsDirOf = (config: { postsDir?: string } = loadConfig()) =>
+/** Absolute posts directory for a config (callers pass the active in-memory config). */
+const postsDirOf = (config: { postsDir?: string }) =>
     resolvePostsDir(configDirOf(), config.postsDir);
 
 /** Absolute images directory under posts. */
-const imagesDirOf = (config: { postsDir?: string } = loadConfig()) =>
+const imagesDirOf = (config: { postsDir?: string }) =>
     resolveImagesDir(configDirOf(), config.postsDir);
 
 /**
@@ -63,16 +72,19 @@ const imagesDirOf = (config: { postsDir?: string } = loadConfig()) =>
  * resolveThemeDir() would rewrite missing paths to the repo pack, and admin saves
  * would pollute server/themes. Catalog loaders already search shipped via themeSearchDirs.
  */
-const themeDirForConfig = () => {
-    const config = loadConfig();
-    return resolveConfiguredPath(configDirOf(), config.themeDir || './themes');
-};
+const themeDirForConfig = (config: { themeDir?: string }) =>
+    resolveConfiguredPath(configDirOf(), config.themeDir || './themes');
 
 export function registerRoutes(app: Express, ctx: AppContext): void {
     const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload } = ctx;
     const getActive = ctx.getActiveConfig;
     const setActive = ctx.setActiveConfig;
     const sessionStore = ctx.sessionStore || new FileSessionStore();
+    /** Theme dir from the active config (admin saves call setActive, so this stays fresh). */
+    const themeDirOf = () => themeDirForConfig(getActive());
+
+    // MCP Streamable HTTP (auth required) — before SPA catch-all
+    registerMcpRoutes(app, ctx);
 
     const issueAuthResponse = (
         res: Response,
@@ -117,10 +129,18 @@ app.post('/api/login', async (req: Request, res: Response) => {
 
     console.log(`[AUTH] Login attempt for user: ${username}`);
 
+    const passwordMatches = async (plain: unknown, hash: string | undefined): Promise<boolean> => {
+        if (!hash || typeof plain !== 'string' || !plain) return false;
+        try {
+            return await bcrypt.compare(plain, hash);
+        } catch {
+            return false;
+        }
+    };
+
     // Check admin
     if (username === usersConfig.admin.username) {
-        const match = await bcrypt.compare(password, usersConfig.admin.passwordHash);
-        if (match) {
+        if (await passwordMatches(password, usersConfig.admin.passwordHash)) {
             console.log(`[AUTH] Admin login successful: ${username}`);
             return issueAuthResponse(res, {
                 username: usersConfig.admin.username,
@@ -131,12 +151,9 @@ app.post('/api/login', async (req: Request, res: Response) => {
 
     // Check other users
     const user = usersConfig.users.find(u => u.username === username);
-    if (user) {
-        const match = await bcrypt.compare(password, user.passwordHash);
-        if (match) {
-            console.log(`[AUTH] User login successful: ${username}`);
-            return issueAuthResponse(res, { username: user.username, role: user.role });
-        }
+    if (user && (await passwordMatches(password, user.passwordHash))) {
+        console.log(`[AUTH] User login successful: ${username}`);
+        return issueAuthResponse(res, { username: user.username, role: user.role });
     }
 
     console.warn(`[AUTH] Login failed for user: ${username}`);
@@ -219,8 +236,75 @@ app.delete('/api/admin/users/:username', authenticate, requireAdmin, (req: Authe
     }
 
     saveUsers(usersConfig);
+    sessionStore.destroyForUser(String(username));
+    revokeTokensForUser(String(username));
     console.log(`[INFO] User deleted: ${username}`);
     res.json({ message: 'User deleted' });
+});
+
+// ---- Personal access tokens (PAT) ------------------------------------------
+app.get('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    const username = req.user?.username as string;
+    res.json({ tokens: listTokensForUser(username) });
+});
+
+app.post('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    const username = req.user?.username as string;
+    const label = typeof req.body?.label === 'string' ? req.body.label : '';
+    try {
+        const { plaintext, record } = mintToken(username, label);
+        res.status(201).json({
+            token: plaintext,
+            id: record.id,
+            prefix: record.prefix,
+            label: record.label,
+            username: record.username,
+            createdAt: record.createdAt
+        });
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to mint token';
+        const status = /limit/i.test(msg) ? 400 : 400;
+        res.status(status).json({ message: msg });
+    }
+});
+
+app.delete('/api/tokens/:id', authenticate, (req: AuthenticatedRequest, res: Response) => {
+    const id = String(req.params.id || '');
+    const isAdmin = req.user?.role === 'admin';
+    const ok = revokeToken(id, isAdmin ? undefined : { onlyUsername: req.user?.username });
+    if (!ok) return res.status(404).json({ message: 'Token not found' });
+    res.json({ message: 'Token revoked' });
+});
+
+app.get('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const filter =
+        typeof req.query.username === 'string' && req.query.username.trim()
+            ? req.query.username.trim()
+            : undefined;
+    res.json({ tokens: listAllTokens(filter) });
+});
+
+app.post('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const label = typeof req.body?.label === 'string' ? req.body.label : '';
+    if (!username) return res.status(400).json({ message: 'username is required' });
+    if (!findUserByUsername(username)) {
+        return res.status(404).json({ message: 'User not found' });
+    }
+    try {
+        const { plaintext, record } = mintToken(username, label);
+        res.status(201).json({
+            token: plaintext,
+            id: record.id,
+            prefix: record.prefix,
+            label: record.label,
+            username: record.username,
+            createdAt: record.createdAt
+        });
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to mint token';
+        res.status(400).json({ message: msg });
+    }
 });
 
 // Get posts
@@ -229,7 +313,7 @@ app.get('/api/posts', (req: Request, res: Response) => {
     if (query && getActive().security?.disablePublicSearch) {
         return res.status(403).json({ message: 'Search is disabled by security policy' });
     }
-    const config = loadConfig();
+    const config = getActive();
     const postsDir = postsDirOf(config);
     const posts = getPosts(postsDir, {
         sortBy: (config.sortBy as 'title' | 'date' | 'author') || 'date',
@@ -251,89 +335,115 @@ app.get('/api/posts', (req: Request, res: Response) => {
     });
 });
 
-// AI: Summarize post content
-app.post('/api/ai/summarize', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-    const aiConfig = loadAIConfig();
-    if (!aiConfig?.enabled || getActive().security?.disableAI) {
-        return res.status(403).json({ message: 'AI features are disabled' });
-    }
-    const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
-    if (!content) return res.status(400).json({ message: 'No content provided' });
+// ---- AI proxy routes -------------------------------------------------------
+// Security model (review finding #1):
+//   * Only admins may override provider/baseUrl/modelId per request; contributors
+//     always use the stored aiConfig, so they cannot point the proxy at another host.
+//   * Override baseUrl must be http(s) (no file:, gopher:, etc.).
+//   * The stored apiKey is attached only when the effective baseUrl has the same
+//     origin as the stored baseUrl — the key can never be sent to a third-party host.
+//   * Every AI route honors aiConfig.enabled and security.disableAI.
+type AIProvider = 'ollama' | 'openai';
 
-    const provider = (overrideProvider || aiConfig?.provider) as 'ollama' | 'openai';
-    const baseUrl = overrideBaseUrl || aiConfig?.baseUrl;
-    const modelId = overrideModelId || aiConfig?.modelId;
+interface ResolvedAI {
+    provider: AIProvider;
+    baseUrl: string;
+    modelId: string;
+    apiKey?: string;
+}
 
-    if (!provider || !baseUrl || !modelId) {
-        return res.status(503).json({ message: 'AI configuration not found' });
-    }
-
+const sameOrigin = (a: string, b: string): boolean => {
     try {
-        const service = AIServiceFactory.create(provider, { 
-            baseUrl, 
-            modelId, 
-            apiKey: aiConfig?.apiKey 
-        });
-        const summary = await service.summarize(content);
-        res.json({ summary });
-    } catch (error: any) {
-        console.error('AI Summarization failed:', error.message);
-        res.status(500).json({ message: error.message || 'Failed to summarize content via proxy' });
+        return new URL(a).origin === new URL(b).origin;
+    } catch {
+        return false;
     }
-});
+};
+
+const isHttpUrl = (u: string): boolean => /^https?:\/\//i.test(u);
+
+/**
+ * Resolve the AI target for this request, applying the rules above.
+ * Returns an HTTP error tuple instead of throwing so handlers stay linear.
+ */
+const resolveAIRequest = (
+    req: AuthenticatedRequest,
+    overrides: { provider?: unknown; baseUrl?: unknown; modelId?: unknown },
+    opts: { needModel: boolean }
+): { ok: true; ai: ResolvedAI } | { ok: false; status: number; message: string } => {
+    const aiConfig = getActive().aiConfig;
+    if (!aiConfig?.enabled || getActive().security?.disableAI) {
+        return { ok: false, status: 403, message: 'AI features are disabled' };
+    }
+    const isAdmin = req.user?.role === 'admin';
+    const pick = (v: unknown): string | undefined =>
+        isAdmin && typeof v === 'string' && v.trim() ? v.trim() : undefined;
+
+    const provider = (pick(overrides.provider) || aiConfig.provider) as AIProvider;
+    const baseUrl = pick(overrides.baseUrl) || aiConfig.baseUrl;
+    const modelId = pick(overrides.modelId) || aiConfig.modelId;
+
+    if (!provider || !baseUrl || (opts.needModel && !modelId)) {
+        return opts.needModel
+            ? { ok: false, status: 503, message: 'AI configuration not found' }
+            : { ok: false, status: 400, message: 'AI provider and Base URL are required' };
+    }
+    if (!isHttpUrl(baseUrl)) {
+        return { ok: false, status: 400, message: 'AI Base URL must be an http(s) URL' };
+    }
+    const apiKey =
+        aiConfig.apiKey && aiConfig.baseUrl && sameOrigin(baseUrl, aiConfig.baseUrl)
+            ? aiConfig.apiKey
+            : undefined;
+    return { ok: true, ai: { provider, baseUrl, modelId: modelId || '', apiKey } };
+};
+
+/** Shared handler for summarize/enhance — differ only in method + response key. */
+const aiTransformRoute =
+    (method: 'summarize' | 'enhance', key: 'summary' | 'enhanced', label: string) =>
+    async (req: AuthenticatedRequest, res: Response) => {
+        const { content, provider, baseUrl, modelId } = req.body || {};
+        const r = resolveAIRequest(req, { provider, baseUrl, modelId }, { needModel: true });
+        if (!r.ok) return res.status(r.status).json({ message: r.message });
+        if (!content) return res.status(400).json({ message: 'No content provided' });
+        try {
+            const service = AIServiceFactory.create(r.ai.provider, {
+                baseUrl: r.ai.baseUrl,
+                modelId: r.ai.modelId,
+                apiKey: r.ai.apiKey
+            });
+            const out = await service[method](content);
+            res.json({ [key]: out });
+        } catch (error: any) {
+            console.error(`AI ${label} failed:`, error.message);
+            res.status(500).json({ message: error.message || `Failed to ${method} content via proxy` });
+        }
+    };
+
+// AI: Summarize post content
+app.post('/api/ai/summarize', authenticate, aiTransformRoute('summarize', 'summary', 'Summarization'));
 
 // AI: Enhance post content
-app.post('/api/ai/enhance', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-    const aiConfig = loadAIConfig();
-    if (!aiConfig?.enabled || getActive().security?.disableAI) {
-        return res.status(403).json({ message: 'AI features are disabled' });
-    }
-    const { content, provider: overrideProvider, baseUrl: overrideBaseUrl, modelId: overrideModelId } = req.body;
-    if (!content) return res.status(400).json({ message: 'No content provided' });
-
-    const provider = (overrideProvider || aiConfig?.provider) as 'ollama' | 'openai';
-    const baseUrl = overrideBaseUrl || aiConfig?.baseUrl;
-    const modelId = overrideModelId || aiConfig?.modelId;
-
-    if (!provider || !baseUrl || !modelId) {
-        return res.status(503).json({ message: 'AI configuration not found' });
-    }
-
-    try {
-        const service = AIServiceFactory.create(provider, { 
-            baseUrl, 
-            modelId, 
-            apiKey: aiConfig?.apiKey 
-        });
-        const enhanced = await service.enhance(content);
-        res.json({ enhanced });
-    } catch (error: any) {
-        console.error('AI Enhancement failed:', error.message);
-        res.status(500).json({ message: error.message || 'Failed to enhance content via proxy' });
-    }
-});
+app.post('/api/ai/enhance', authenticate, aiTransformRoute('enhance', 'enhanced', 'Enhancement'));
 
 // AI: Fetch available models
 app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-    const aiConfig = loadAIConfig();
-    if (!aiConfig?.enabled) {
-        return res.status(403).json({ message: 'AI features are disabled' });
+    const r = resolveAIRequest(
+        req,
+        { provider: req.query.provider, baseUrl: req.query.baseUrl },
+        { needModel: false }
+    );
+    if (!r.ok) {
+        if (r.status === 400) console.warn('[AI] ' + r.message);
+        return res.status(r.status).json({ message: r.message });
     }
-    const provider = (req.query.provider as string || aiConfig?.provider) as 'ollama' | 'openai';
-    const baseUrl = req.query.baseUrl as string || aiConfig?.baseUrl;
-
-    console.log(`[AI] Fetching models via proxy. Provider: ${provider}, BaseURL: ${baseUrl}`);
-
-    if (!provider || !baseUrl) {
-        console.warn('[AI] Missing provider or baseUrl');
-        return res.status(400).json({ message: 'AI provider and Base URL are required' });
-    }
+    console.log(`[AI] Fetching models via proxy. Provider: ${r.ai.provider}, BaseURL: ${r.ai.baseUrl}`);
 
     try {
-        const service = AIServiceFactory.create(provider, { 
-            baseUrl, 
+        const service = AIServiceFactory.create(r.ai.provider, {
+            baseUrl: r.ai.baseUrl,
             modelId: '', // modelId not needed for getting models
-            apiKey: aiConfig?.apiKey // never accept API keys via query string
+            apiKey: r.ai.apiKey // never accept API keys via query string
         });
         const models = await service.getModels();
         console.log(`[AI] Successfully fetched ${models.length} models`);
@@ -346,7 +456,7 @@ app.get('/api/ai/models', authenticate, async (req: AuthenticatedRequest, res: R
 
 // Get single post
 app.get('/api/posts/:slug', (req: Request, res: Response) => {
-    const config = loadConfig();
+    const config = getActive();
     const postsDir = postsDirOf(config);
     const slug = req.params.slug as string;
     
@@ -368,8 +478,12 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
 
 // Create/Update post (Contributor or Admin)
 app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
-    const { slug, title, content, summary, date, pinned } = req.body;
-    const config = loadConfig();
+    const { slug: rawSlug, title, content, summary, date, pinned } = req.body;
+    const slug = typeof rawSlug === 'string' ? rawSlug.trim() : '';
+    if (!slug) {
+        return res.status(400).json({ message: 'slug is required' });
+    }
+    const config = getActive();
     const postsDir = postsDirOf(config);
     
     // Security check: prevent directory traversal
@@ -394,12 +508,12 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
 
 // Proxy images through a common endpoint
 app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
-    const config = loadConfig();
+    const config = getActive();
     const imagesDir = imagesDirOf(config);
     
     // Support both query param (preferred) and route param (legacy)
     const filenameRaw = (req.query.fileName as string) || (req.params.filename as string) || '';
-    const filename = filenameRaw ? decodeURIComponent(filenameRaw) : '';
+    const filename = filenameRaw ? safeDecode(filenameRaw) : '';
     
     if (!filename) {
         return res.status(400).json({ message: 'No filename provided' });
@@ -444,7 +558,7 @@ const distPath = path.resolve(__dirname, '../dist');
 console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`);
 if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
-    app.get(/^\/(?!api).*/, (_req: Request, res: Response) => {
+    app.get(/^\/(?!api|mcp).*/, (_req: Request, res: Response) => {
         const indexPath = path.join(distPath, 'index.html');
         if (fs.existsSync(indexPath)) {
             res.sendFile('index.html', { root: distPath }, (err) => {
@@ -512,19 +626,21 @@ app.get('/api/config', (_req: Request, res: Response) => {
 
 // Admin: Update AI config
 app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-    const config = loadConfig();
-    const { enabled, provider, baseUrl, apiKey, modelId } = req.body;
+    const current = loadConfig();
+    const { enabled, provider, baseUrl, apiKey, modelId } = req.body || {};
+    const strip = (v: unknown) => sanitizeHtml(String(v || ''), { allowedTags: [], allowedAttributes: {} });
     // Empty apiKey means "keep existing" so public config redaction cannot wipe secrets
-    const previousKey = config.aiConfig?.apiKey || '';
-    const nextKey = typeof apiKey === 'string' && apiKey.length > 0 ? apiKey : previousKey;
-
-    config.aiConfig = {
-        enabled: !!enabled,
-        provider: provider === 'openai' ? 'openai' : 'ollama',
-        baseUrl: sanitizeHtml(baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-        apiKey: nextKey,
-        modelId: sanitizeHtml(modelId || '', { allowedTags: [], allowedAttributes: {} })
-    };
+    const previousKey = current.aiConfig?.apiKey || '';
+    const { config } = sanitizeConfig({
+        ...current,
+        aiConfig: {
+            enabled: !!enabled,
+            provider,
+            baseUrl: strip(baseUrl),
+            apiKey: typeof apiKey === 'string' && apiKey.length > 0 ? apiKey : previousKey,
+            modelId: strip(modelId)
+        }
+    });
 
     saveConfig(config);
     setActive(config);
@@ -532,9 +648,9 @@ app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: Authenticated
 });
 
 // Admin: Delete image
-app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
-    const filename = decodeURIComponent(req.params.filename as string);
-    const config = loadConfig();
+app.delete('/api/admin/images/:filename', authenticate, requireWriter, async (req: AuthenticatedRequest, res: Response) => {
+    const filename = safeDecode(req.params.filename as string);
+    const config = getActive();
     const imagesDir = imagesDirOf(config);
     const filePath = path.join(imagesDir, filename);
 
@@ -548,11 +664,13 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: Aut
             fs.unlinkSync(filePath);
             
             // Also remove from manifest if it exists
-            const manifest = loadManifest(imagesDir);
-            if (manifest[filename]) {
-                delete manifest[filename];
-                saveManifest(imagesDir, manifest);
-            }
+            await withManifestLock(imagesDir, async () => {
+                const manifest = loadManifest(imagesDir);
+                if (manifest[filename]) {
+                    delete manifest[filename];
+                    saveManifest(imagesDir, manifest);
+                }
+            });
 
             console.log(`[INFO] Image deleted: ${filename}`);
             res.json({ message: 'Image deleted' });
@@ -567,12 +685,12 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, (req: Aut
 });
 
 // Admin: Bulk delete images
-app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (req: AuthenticatedRequest, res: Response) => {
     const { filenames } = req.body;
     if (!Array.isArray(filenames)) return res.status(400).json({ message: 'filenames must be an array' });
 
-    const config = loadConfig();
-    const imagesDir = imagesDirOf(config);
+    const imagesDir = imagesDirOf(getActive());
+    await withManifestLock(imagesDir, async () => {
     const manifest = loadManifest(imagesDir);
     
     let deletedCount = 0;
@@ -602,133 +720,72 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, (req: Aut
 
     saveManifest(imagesDir, manifest);
     res.json({ message: `Deleted ${deletedCount} images`, deletedCount, errors });
+    });
 });
 
 // Admin: Update site config
+// Partial update: merge the request body over the current config section by section,
+// then run the single shared validator (sanitizeConfig) so route and loader never drift.
 app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     try {
-        const config = loadConfig();
-        const {
-            siteName,
-            siteLogo,
-            currentTheme,
-            pagination,
-            sortBy,
-            sortOrder,
-            searchPlacement,
-            aiConfig,
-            service,
-            security,
-            appearance,
-            footer,
-            postsDir,
-            themeDir
-        } = req.body;
+        const current = loadConfig();
+        const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+        const isObj = (v: unknown): v is Record<string, unknown> =>
+            !!v && typeof v === 'object' && !Array.isArray(v);
+        const strip = (v: unknown): string | undefined =>
+            typeof v === 'string' ? sanitizeHtml(v, { allowedTags: [], allowedAttributes: {} }) : undefined;
+        const cleanPath = (v: unknown): string | undefined =>
+            typeof v === 'string' && v.trim() && !v.includes('\0') ? v.trim() : undefined;
 
-        if (siteName) config.siteName = sanitizeHtml(siteName, { allowedTags: [], allowedAttributes: {} });
-        if (siteLogo !== undefined) config.siteLogo = sanitizeHtml(siteLogo || 'logo.webp', { allowedTags: [], allowedAttributes: {} });
-        if (currentTheme) config.currentTheme = sanitizeHtml(currentTheme, { allowedTags: [], allowedAttributes: {} });
-        if (pagination !== undefined) {
-            const n = Number(pagination);
-            if (Number.isFinite(n)) config.pagination = Math.max(1, Math.min(100, Math.floor(n)));
+        const patch: Record<string, unknown> = {};
+        if (b.siteName) patch.siteName = strip(b.siteName);
+        if (b.siteLogo !== undefined) patch.siteLogo = strip(b.siteLogo || 'logo.webp');
+        if (b.currentTheme) patch.currentTheme = strip(b.currentTheme);
+        for (const k of ['pagination', 'sortBy', 'sortOrder', 'searchPlacement'] as const) {
+            if (b[k] !== undefined) patch[k] = b[k];
         }
-        if (sortBy === 'title' || sortBy === 'date' || sortBy === 'author') config.sortBy = sortBy;
-        if (sortOrder === 'asc' || sortOrder === 'desc') config.sortOrder = sortOrder;
-        if (
-            searchPlacement === 'top' ||
-            searchPlacement === 'bottom' ||
-            searchPlacement === 'left' ||
-            searchPlacement === 'right' ||
-            searchPlacement === 'none'
-        ) {
-            config.searchPlacement = searchPlacement;
-        }
+        const postsDir = cleanPath(b.postsDir);
+        if (postsDir) patch.postsDir = postsDir;
+        const themeDir = cleanPath(b.themeDir);
+        if (themeDir) patch.themeDir = themeDir;
 
-        // Advanced paths — reject empty / null-byte / traversal-ish values
-        if (typeof postsDir === 'string' && postsDir.trim() && !postsDir.includes('\0')) {
-            config.postsDir = postsDir.trim();
+        if (isObj(b.footer)) {
+            patch.footer = {
+                ...(current.footer || {}),
+                ...b.footer,
+                ...(typeof b.footer.copyrightText === 'string' ? { copyrightText: strip(b.footer.copyrightText) } : {}),
+                ...(typeof b.footer.creditText === 'string' ? { creditText: strip(b.footer.creditText) } : {})
+            };
         }
-        if (typeof themeDir === 'string' && themeDir.trim() && !themeDir.includes('\0')) {
-            config.themeDir = themeDir.trim();
+        if (isObj(b.appearance)) patch.appearance = { ...(current.appearance || {}), ...b.appearance };
+        if (isObj(b.security)) {
+            // Toggles are a full replacement (omitted → false); connection settings keep prev
+            const prev = current.security || {};
+            patch.security = {
+                authMode: b.security.authMode ?? prev.authMode,
+                sessionTtlSeconds: b.security.sessionTtlSeconds ?? prev.sessionTtlSeconds,
+                sessionCookieName: b.security.sessionCookieName ?? prev.sessionCookieName,
+                disableAI: !!b.security.disableAI,
+                disableImages: !!b.security.disableImages,
+                disablePublicSearch: !!b.security.disablePublicSearch
+            };
         }
-
-        if (footer && typeof footer === 'object') {
-            const prev = config.footer || {};
-            const clip = (s: string) => s.slice(0, 200);
-            config.footer = {
-                show: typeof footer.show === 'boolean' ? footer.show : prev.show !== false,
-                copyrightText:
-                    typeof footer.copyrightText === 'string'
-                        ? clip(sanitizeHtml(footer.copyrightText, { allowedTags: [], allowedAttributes: {} }))
-                        : prev.copyrightText !== undefined
-                          ? prev.copyrightText
-                          : '© {year} {siteName}. All rights reserved.',
-                creditText:
-                    typeof footer.creditText === 'string'
-                        ? clip(sanitizeHtml(footer.creditText, { allowedTags: [], allowedAttributes: {} }))
-                        : prev.creditText || ''
+        if (isObj(b.service)) patch.service = { ...(current.service || {}), ...b.service };
+        if (isObj(b.aiConfig)) {
+            const ai = b.aiConfig;
+            const previousKey = current.aiConfig?.apiKey || '';
+            patch.aiConfig = {
+                ...(current.aiConfig || {}),
+                ...ai,
+                baseUrl: strip(ai.baseUrl || ''),
+                modelId: strip(ai.modelId || ''),
+                // Empty apiKey means "keep existing" so public redaction cannot wipe secrets
+                apiKey: typeof ai.apiKey === 'string' && ai.apiKey.length > 0 ? ai.apiKey : previousKey
             };
         }
 
-        if (appearance && typeof appearance === 'object') {
-            const prev = config.appearance || {};
-            config.appearance = {
-                themeMode:
-                    appearance.themeMode === 'light' || appearance.themeMode === 'dark'
-                        ? appearance.themeMode
-                        : prev.themeMode === 'light'
-                          ? 'light'
-                          : 'dark',
-                crtEffects:
-                    typeof appearance.crtEffects === 'boolean' ? appearance.crtEffects : prev.crtEffects !== false,
-                textGlow: typeof appearance.textGlow === 'boolean' ? appearance.textGlow : prev.textGlow !== false
-            };
-        }
-
-        if (aiConfig) {
-            const previousKey = config.aiConfig?.apiKey || '';
-            const nextKey =
-                typeof aiConfig.apiKey === 'string' && aiConfig.apiKey.length > 0
-                    ? aiConfig.apiKey
-                    : previousKey;
-            config.aiConfig = {
-                enabled: !!aiConfig.enabled,
-                provider: aiConfig.provider === 'openai' ? 'openai' : 'ollama',
-                baseUrl: sanitizeHtml(aiConfig.baseUrl || '', { allowedTags: [], allowedAttributes: {} }),
-                apiKey: nextKey,
-                modelId: sanitizeHtml(aiConfig.modelId || '', { allowedTags: [], allowedAttributes: {} })
-            };
-        }
-
-        if (service) {
-            config.service = {
-                port: Number(service.port) || 3001
-            };
-        }
-
-        if (security && typeof security === 'object') {
-            const prev = config.security || {};
-            config.security = {
-                authMode:
-                    security.authMode === 'session' || security.authMode === 'jwt'
-                        ? security.authMode
-                        : prev.authMode === 'session'
-                          ? 'session'
-                          : 'jwt',
-                sessionTtlSeconds:
-                    typeof security.sessionTtlSeconds === 'number'
-                        ? Math.max(300, Math.min(604800, Math.floor(security.sessionTtlSeconds)))
-                        : prev.sessionTtlSeconds || 86400,
-                sessionCookieName:
-                    typeof security.sessionCookieName === 'string' &&
-                    /^[a-zA-Z0-9._-]{1,64}$/.test(security.sessionCookieName)
-                        ? security.sessionCookieName
-                        : prev.sessionCookieName || 'mdweb.sid',
-                disableAI: !!security.disableAI,
-                disableImages: !!security.disableImages,
-                disablePublicSearch: !!security.disablePublicSearch
-            };
-        }
+        const { config, warnings } = sanitizeConfig({ ...current, ...patch });
+        if (warnings.length) console.warn('[WARN] POST /api/admin/config:', warnings.join('; '));
 
         saveConfig(config);
         setActive(config);
@@ -741,15 +798,14 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
     }
 });
 
-
 // Public theme catalog (ids + labels for pickers)
 app.get('/api/themes', (_req: Request, res: Response) => {
-    res.json(listThemeCatalog(themeDirForConfig()));
+    res.json(listThemeCatalog(themeDirOf()));
 });
 
 // Admin: Get all themes (catalog with metadata)
 app.get('/api/admin/themes', authenticate, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-    res.json(listThemeCatalog(themeDirForConfig()));
+    res.json(listThemeCatalog(themeDirOf()));
 });
 
 // Admin: Update theme colors for any valid theme id
@@ -770,7 +826,7 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
         sanitizedColors.mdEditorTheme = colors.mdEditorTheme;
     }
 
-    const themeDir = themeDirForConfig();
+    const themeDir = themeDirOf();
     const themePath = themeFilePath(themeDir, name);
     if (!themePath) return res.status(400).json({ message: 'Invalid theme path' });
 
@@ -785,7 +841,7 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
 // Admin: Delete post
 app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
     const slug = req.params.slug;
-    const config = loadConfig();
+    const config = getActive();
     const postsDir = postsDirOf(config);
     const postPath = path.join(postsDir, `${slug}.md`);
 
@@ -817,18 +873,18 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
     }
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
+    const imagesDir = imagesDirOf(getActive());
     try {
-        const config = loadConfig();
-        const imagesDir = imagesDirOf(config);
-
         if (!fs.existsSync(imagesDir)) {
             fs.mkdirSync(imagesDir, { recursive: true });
         }
 
+      // Manifest read → sharp await → manifest write must not interleave with other writers
+      await withManifestLock(imagesDir, async () => {
         const manifest = loadManifest(imagesDir);
-        const md5 = calculateMD5(req.file.buffer);
-        const size = req.file.size;
-        const originalName = req.file.originalname;
+        const md5 = calculateMD5(req.file!.buffer);
+        const size = req.file!.size;
+        const originalName = req.file!.originalname;
         const force = req.query.force === 'true';
 
         // 1. Check for content duplication
@@ -881,7 +937,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
                 message: 'Image processing unavailable (sharp not built for this platform). Install libvips and rebuild sharp.'
             });
         }
-        await sharp(req.file.buffer, { animated: true })
+        await sharp(req.file!.buffer, { animated: true })
             .webp({ effort: 4 })
             .toFile(outputPath);
 
@@ -897,6 +953,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 
         console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
         res.json({ filename: newFilename, url: `/api/getimage?fileName=${newFilename}` });
+      });
     } catch (error) {
         console.error('[ERROR] Image processing failed:', error);
         res.status(500).json({ message: 'Image processing failed' });
@@ -905,7 +962,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
 
 // Get images with pagination
 app.get('/api/admin/images', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
-    const config = loadConfig();
+    const config = getActive();
     const imagesDir = imagesDirOf(config);
 
     if (!fs.existsSync(imagesDir)) return res.json({ images: [], total: 0 });
@@ -948,8 +1005,8 @@ app.get('/api/admin/config-status', authenticate, requireAdmin, (_req: Authentic
 });
 
 app.get('/api/theme', (req: Request, res: Response) => {
-    const config = loadConfig();
-    const themeDir = themeDirForConfig();
+    const config = getActive();
+    const themeDir = themeDirOf();
     const themeName = String((req.query.name as string) || config.currentTheme || 'dark');
     // Explicit ?mode= always wins. Site appearance.themeMode only applies when loading
     // the active site theme (no ?name=), so pack inspection returns the authored palette.
@@ -989,7 +1046,7 @@ app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, r
         }
 
         const config = loadConfig();
-        const themeDir = themeDirForConfig();
+        const themeDir = themeDirOf();
         const known = listThemeIds(themeDir);
         if (!known.includes(currentTheme) && !loadThemeColors(themeDir, currentTheme)) {
             return res.status(404).json({ message: `Theme not found: ${currentTheme}` });

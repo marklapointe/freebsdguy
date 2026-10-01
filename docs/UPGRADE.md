@@ -9,7 +9,7 @@ How to upgrade without losing posts, users, site settings, or theme customizatio
 | `/usr/local/www/mdweb` | App code, `dist/`, shipped themes | **Replaced** |
 | `/usr/local/etc/mdweb/config.json` | Site settings, theme pack, AI, appearance | **Preserved** |
 | `/usr/local/etc/mdweb/users.json` | Admin + users | **Preserved** |
-| `/usr/local/etc/mdweb.env` | `JWT_SECRET` | **Preserved** |
+| `/usr/local/etc/mdweb/mdweb.env` | `JWT_SECRET` | **Preserved** |
 | `/var/db/mdweb/posts` | Markdown posts + images | **Preserved** |
 | `/var/db/mdweb/themes` | Runtime theme packs (incl. color overrides) | **Preserved** (missing files seeded only) |
 | `/var/db/mdweb/sessions` | Classical session files (`authMode: session`) | **Preserved** (delete = force re-login) |
@@ -33,7 +33,7 @@ Sample config points data at absolute durable paths:
 
    ```sh
    tar -C / -czf /root/mdweb-backup-$(date +%Y%m%d).tgz \
-     usr/local/etc/mdweb usr/local/etc/mdweb.env var/db/mdweb
+     usr/local/etc/mdweb var/db/mdweb
    ```
 
 2. **Install** new package **or** run agent deploy:

@@ -5,6 +5,7 @@ import {
     fetchThemeCatalog,
     getEffectiveThemeMode,
     getMdEditorTheme,
+    siteConfig,
     type ThemeMeta
 } from '../../lib/api';
 import { axiosErrorMessage } from '../../lib/errors';
@@ -15,8 +16,9 @@ import { User, Post, ImageInfo } from '../../types';
 import {
     Eye, Trash2, Edit, Plus, Upload, Palette,
     Users, FileText, Image as ImageIcon, Cpu,
-    Server, Pin, CheckSquare, Square, RefreshCw, Shield
+    Server, Pin, CheckSquare, Square, RefreshCw, Shield, KeyRound
 } from 'lucide-react';
+import { AdminTokens, MyTokensPanel } from './AdminTokens';
 
 export type AdminProps = {
     user: User | null;
@@ -51,7 +53,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
         searchPlacement: 'top',
         appearance: { themeMode: 'dark', crtEffects: true, textGlow: true },
         aiConfig: { provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', modelId: 'llama3', enabled: true },
-        service: { port: 3001 }
+        service: { port: 5173 }
     });
     const [editingPost, setEditingPost] = useState<any>(null);
     const [isSummarizing, setIsSummarizing] = useState(false);
@@ -65,6 +67,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
     const [newUser, setNewUser] = useState({ username: '', password: '', role: 'contributor' });
     const [showAdvancedSession, setShowAdvancedSession] = useState(false);
+    // True once /config has populated `config` — until then currentTheme is only a placeholder
+    const [configLoaded, setConfigLoaded] = useState(false);
 
     const themeLabelMap: Record<string, string> = {
         '--primary': 'Primary', '--secondary': 'Secondary', '--accent': 'Accent',
@@ -89,13 +93,24 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     }, [themeColors]);
 
     useEffect(() => {
+        // Never fetch for the hard-coded default theme: contributors (no fetchConfig) would
+        // repaint :root with the wrong pack, and admins could race the real theme (finding #9)
+        if (!configLoaded) return;
         if (activeTab === 'appearance' || !themeColors) {
+            let stale = false;
             const mode = getEffectiveThemeMode(config.appearance?.themeMode);
             api.get(
                 `/theme?name=${encodeURIComponent(config.currentTheme)}&mode=${mode}`
-            ).then(res => setThemeColors(res.data));
+            )
+                .then(res => {
+                    if (!stale) setThemeColors(res.data);
+                })
+                .catch(err => console.error('Failed to load theme colors:', err));
+            return () => {
+                stale = true;
+            };
         }
-    }, [activeTab, config.currentTheme, config.appearance?.themeMode]);
+    }, [activeTab, config.currentTheme, config.appearance?.themeMode, configLoaded]);
 
     useEffect(() => {
         return onThemeChanged(newTheme => {
@@ -202,6 +217,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
         data.appearance = { ...defaultAppearance, ...data.appearance };
         data.footer = { ...defaultFooter, ...data.footer };
         setConfig(data);
+        setConfigLoaded(true);
         if (data.service?.port) localStorage.setItem('lastPort', data.service.port.toString());
         return res;
     });
@@ -219,15 +235,16 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     };
     const fetchConfigStatus = () => api.get('/admin/config-status').then(res => { return res; });
 
-    const fetchAIModels = (p?: string, b?: string, k?: string) => {
+    // The server always uses the stored API key (never a query param); sending it here
+    // would only leak it into access logs / browser history (finding #6).
+    const fetchAIModels = (p?: string, b?: string) => {
         const provider = p || config.aiConfig?.provider || 'ollama';
         const baseUrl = b || config.aiConfig?.baseUrl || (provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1');
-        const apiKey = k !== undefined ? k : (config.aiConfig?.apiKey || '');
         if (provider !== 'ollama' || !baseUrl) {
             setModelsList([]);
             return;
         }
-        api.get(`/ai/models?provider=${provider}&baseUrl=${encodeURIComponent(baseUrl)}&apiKey=${encodeURIComponent(apiKey)}`)
+        api.get(`/ai/models?provider=${encodeURIComponent(provider)}&baseUrl=${encodeURIComponent(baseUrl)}`)
             .then(res => {
                 setModelsList(res.data || []);
             })
@@ -251,6 +268,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 setSiteName(config.siteName);
                 setSiteLogo(config.siteLogo || undefined);
                 fetchConfig();
+                // Navbar / PostDetail / footer read the shared store — push the new values live
+                siteConfig.refresh().catch(() => {});
                 previewTheme(config.currentTheme);
                 if (oldPort !== newPort) {
                     showAlert(`Settings saved! Port changed to ${newPort}. You will need to restart the service for this to take effect.`, 'Success');
@@ -271,9 +290,9 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     };
 
     const handleSaveAIConfig = () => {
-        api.post('/admin/ai-config', config.aiConfig).then(() => {
-            fetchConfig().then(() => showAlert('AI settings saved successfully!', 'Success'));
-        });
+        api.post('/admin/ai-config', config.aiConfig)
+            .then(() => fetchConfig().then(() => showAlert('AI settings saved successfully!', 'Success')))
+            .catch((err: unknown) => showAlert(axiosErrorMessage(err, 'Failed to save AI settings'), 'Save failed'));
     };
 
     const handleSaveTheme = () => {
@@ -289,19 +308,23 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
 
     const handleDeleteUser = (username: string) => {
         showConfirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`, () => {
-            api.delete(`/admin/users/${username}`).then(fetchUsers);
+            api.delete(`/admin/users/${encodeURIComponent(username)}`)
+                .then(fetchUsers)
+                .catch((err: unknown) => showAlert(axiosErrorMessage(err, 'Failed to delete user'), 'Delete failed'));
         }, 'Delete User');
     };
 
     const handleDeletePost = (slug: string) => {
         showConfirm(`Are you sure you want to delete post "${slug}"? This action cannot be undone.`, () => {
-            api.delete(`/posts/${slug}`).then(fetchPosts);
+            api.delete(`/posts/${encodeURIComponent(slug)}`)
+                .then(fetchPosts)
+                .catch((err: unknown) => showAlert(axiosErrorMessage(err, 'Failed to delete post'), 'Delete failed'));
         }, 'Delete Post');
     };
 
     const handleDeleteImage = (filename: string) => {
         showConfirm(`Are you sure you want to delete image "${filename}"? This action cannot be undone.`, () => {
-            api.delete(`/admin/images/${filename}`).then(() => {
+            api.delete(`/admin/images/${encodeURIComponent(filename)}`).then(() => {
                 fetchImages();
                 if (showLogoPicker) api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
                 if (config.siteLogo === filename) setConfig((prev: any) => ({...prev, siteLogo: ''}));
@@ -310,7 +333,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                     newSelection.delete(filename);
                     setSelectedImages(newSelection);
                 }
-            });
+            }).catch((err: unknown) => showAlert(axiosErrorMessage(err, 'Failed to delete image'), 'Delete failed'));
         }, 'Delete Image');
     };
 
@@ -332,7 +355,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                 fetchImages();
                 if (showLogoPicker) api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
                 if (deletedFilenames.includes(config.siteLogo || '')) setConfig((prev: any) => ({...prev, siteLogo: ''}));
-            });
+            }).catch((err: unknown) => showAlert(axiosErrorMessage(err, 'Failed to delete images'), 'Delete failed'));
         }, 'Bulk Delete');
     };
 
@@ -351,7 +374,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             setEditingPost(null);
             setEnhancedPreview(null);
             showAlert('Post saved successfully!', 'Success');
-        });
+        }).catch((err: unknown) => showAlert(axiosErrorMessage(err, 'Failed to save post'), 'Save failed'));
     };
 
     const handleAutoSummarize = () => {
@@ -361,8 +384,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             content: editingPost.content,
             provider: config.aiConfig.provider,
             baseUrl: config.aiConfig.baseUrl,
-            modelId: config.aiConfig.modelId,
-            apiKey: config.aiConfig.apiKey
+            modelId: config.aiConfig.modelId
         }).then(res => {
             setEditingPost((prev: any) => ({ ...prev, summary: res.data.summary }));
         }).catch(err => showAlert('Failed to generate summary: ' + err.message, 'Error')).finally(() => setIsSummarizing(false));
@@ -375,23 +397,31 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
             content: editingPost.content,
             provider: config.aiConfig.provider,
             baseUrl: config.aiConfig.baseUrl,
-            modelId: config.aiConfig.modelId,
-            apiKey: config.aiConfig.apiKey
+            modelId: config.aiConfig.modelId
         }).then(res => setEnhancedPreview(res.data.enhanced)).catch(err => showAlert('Failed to enhance content: ' + err.message, 'Error')).finally(() => setIsEnhancing(false));
     };
 
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files || files.length === 0) return;
-        const file = files[0];
-        const formData = new FormData();
-        formData.append('image', file);
-        api.post('/admin/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(_res => {
-            showAlert('Image uploaded successfully!', 'Success');
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (files.length === 0) return;
+        // The picker input is `multiple`: upload every selected file, sequentially
+        let ok = 0;
+        for (const file of files) {
+            const formData = new FormData();
+            formData.append('image', file);
+            try {
+                await api.post('/admin/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+                ok++;
+            } catch (err: any) {
+                showAlert(`Failed to upload image ${file.name || ''}: ` + (err?.message || 'unknown error'), 'Error');
+            }
+        }
+        if (ok > 0) {
+            showAlert(ok === 1 ? 'Image uploaded successfully!' : `${ok} images uploaded successfully!`, 'Success');
             fetchImages();
             if (showLogoPicker) api.get('/admin/images?limit=all').then(res => setPickerImages(res.data.images));
-        }).catch(err => showAlert('Failed to upload image: ' + err.message, 'Error'));
-        e.target.value = '';
+        }
     };
 
     const handleNewPost = () => {
@@ -449,6 +479,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                 <button onClick={() => setActiveTab('users')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'users' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Users size={18} /> Users</button>
                                 <button onClick={() => setActiveTab('ai')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'ai' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Cpu size={18} /> AI Settings</button>
                                 <button onClick={() => setActiveTab('security')} data-testid="admin-security-tab" className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'security' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><Shield size={18} /> Security</button>
+                                <button onClick={() => setActiveTab('tokens')} data-testid="admin-tokens-tab" className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${activeTab === 'tokens' ? 'bg-accent text-on-accent' : 'hover:bg-bg'}`}><KeyRound size={18} /> Tokens</button>
                             </nav>
                         </div>
                     )}
@@ -480,7 +511,17 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                 ))}
                                 {posts.length === 0 && <p className="text-center opacity-50 py-12">No posts yet. Create your first post!</p>}
                             </div>
+                            {user.role !== 'admin' && (
+                                <MyTokensPanel showAlert={showAlert} showConfirm={showConfirm} />
+                            )}
                         </div>
+                    )}
+                    {activeTab === 'tokens' && user.role === 'admin' && (
+                        <AdminTokens
+                            users={users}
+                            showAlert={showAlert}
+                            showConfirm={showConfirm}
+                        />
                     )}
                     {activeTab === 'images' && (
                         <div className="max-w-3xl">

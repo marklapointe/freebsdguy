@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { LogOut, Settings, Sun, Moon } from 'lucide-react';
 import {
     api,
     applyTheme,
     getEffectiveThemeMode,
+    getPublicConfig,
     siteConfig,
     toggleThemeMode,
     type ThemeMode
@@ -25,23 +26,32 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
     const [siteName, setSiteName] = useState('MDWeb');
     const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
     const [themeMode, setThemeMode] = useState<ThemeMode>(() => getEffectiveThemeMode());
-    const location = useLocation();
     const navigate = useNavigate();
 
     useEffect(() => {
-        siteConfig.load().then(cfg => {
+        // Shared, memoized /config (App issues the same request; this reuses it)
+        const apply = (cfg: { siteName: string; siteLogo?: string }) => {
             setSiteName(cfg.siteName);
             setSiteLogo(cfg.siteLogo);
             document.title = cfg.siteName;
-        });
-    }, [location]);
+        };
+        siteConfig.load().then(apply);
+        // Admin "Save Settings" → siteConfig.refresh() → live header update (review finding #10)
+        return siteConfig.subscribe(apply);
+    }, []);
 
     useEffect(() => {
+        // App.tsx paints the site theme on cold load; here we only track the mode for the
+        // toggle icon, and re-apply on theme-changed events (admin preview/save).
+        siteConfig.load().then(cfg => {
+            setThemeMode(getEffectiveThemeMode(cfg.appearance?.themeMode));
+        });
+
         const loadSiteTheme = async () => {
             try {
-                const res = await api.get('/config');
-                const currentTheme = res.data.currentTheme || 'dark';
-                const appearance = res.data.appearance || {};
+                const data = await getPublicConfig(true);
+                const currentTheme = data.currentTheme || 'dark';
+                const appearance = data.appearance || {};
                 const mode = getEffectiveThemeMode(appearance.themeMode);
                 setThemeMode(mode);
                 await applyTheme(currentTheme, {
@@ -53,8 +63,6 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
                 await applyTheme('dark', { mode: getEffectiveThemeMode('dark') });
             }
         };
-
-        loadSiteTheme();
 
         const offTheme = onThemeChanged(async detail => {
             if (detail && typeof detail === 'string') {

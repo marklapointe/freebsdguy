@@ -2,9 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import enquirer from 'enquirer';
+import bcrypt from 'bcryptjs';
 import { loadConfig, saveConfig, configPath, loadUsers } from './config.ts';
 import { INSECURE_DEFAULT_JWT_SECRET, isInsecureJwtSecret } from './jwt-secret.ts';
 import { resolvePostsDir, resolveImagesDir } from './safe-path.ts';
+import { DEFAULT_ADMIN_PASSWORD } from './default-credentials.ts';
 
 export interface PreflightIssue {
     id: string;
@@ -82,7 +84,9 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
     }
 
     // 2. Check JWT Secret (INV-SEC-2)
-    const SECRET = process.env.JWT_SECRET || config.jwtSecret || INSECURE_DEFAULT_JWT_SECRET;
+    // Same resolution order as server/index.ts (session mode may use SESSION_SECRET)
+    const SECRET =
+        process.env.SESSION_SECRET || process.env.JWT_SECRET || config.jwtSecret || INSECURE_DEFAULT_JWT_SECRET;
     if (isInsecureJwtSecret(SECRET)) {
         issues.push({
             id: 'JWT_SECRET_DEFAULT',
@@ -100,6 +104,29 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
             critical: true,
             fixable: false
         });
+    } else if (!users.admin.passwordHash) {
+        issues.push({
+            id: 'ADMIN_PASSWORD_LOCKED',
+            description:
+                'Admin password hash is empty (users.json locked or corrupt). Run mdweb-setup / change-password.',
+            critical: true,
+            fixable: false
+        });
+    } else {
+        try {
+            const isDefault = await bcrypt.compare(DEFAULT_ADMIN_PASSWORD, users.admin.passwordHash);
+            if (isDefault) {
+                issues.push({
+                    id: 'DEFAULT_ADMIN_PASSWORD',
+                    description:
+                        'Admin still uses the default password. Change it before exposing the service.',
+                    critical: process.env.NODE_ENV === 'production',
+                    fixable: false
+                });
+            }
+        } catch {
+            /* ignore compare errors */
+        }
     }
 
     if (issues.length > 0) {

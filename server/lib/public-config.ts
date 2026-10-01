@@ -167,8 +167,8 @@ export class PublicConfigBuilder {
             postsDir: this.source.postsDir,
             themeDir: this.source.themeDir,
             service: this.includeService
-                ? (this.source.service || { port: 3001 })
-                : { port: 3001 }
+                ? (this.source.service || { port: 5173 })
+                : { port: 5173 }
         };
 
         if (this.includeAI) {

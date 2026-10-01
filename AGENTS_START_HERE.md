@@ -18,7 +18,9 @@ You are working on **MDWeb**, a personal website stack designed for FreeBSD.
 - `ports/www/mdweb/`: FreeBSD port definitions (when present; see `.plan/4.0`).
 - `server/`: Backend source code.
 - `src/`: Frontend source code.
-- Test host for package regression: `mlapointe@172.16.176.133` (see `.plan/4.1`).
+- Test hosts for package regression: `mlapointe@172.16.176.133` and `mlapointe@freedev007.cloudbsd.org`
+  (`MDWEB_FREEBSD_HOST=freedev007.cloudbsd.org npm run regression:freebsd`; see `.plan/4.1`).
+- Linux: `scripts/build-flatpak.sh` produces an installable `.flatpak` bundle.
 
 ## Mandatory Verification
 Before submitting any work, you **MUST**:

@@ -308,7 +308,7 @@ describe('public-config remaining', () => {
             .build();
         expect(pub.aiConfig).toBeUndefined();
         expect(pub.security).toBeUndefined();
-        expect(pub.service).toEqual({ port: 3001 });
+        expect(pub.service).toEqual({ port: 5173 });
     });
 
     it('projectAdminAIConfig returns null when no ai', () => {

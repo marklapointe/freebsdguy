@@ -53,8 +53,8 @@ That is it. No separate database server to install or tune.
 2. Create a strong secret (required in production):
 
    ```sh
-   printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" | sudo tee /usr/local/etc/mdweb.env
-   sudo chmod 0600 /usr/local/etc/mdweb.env
+   printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" | sudo tee /usr/local/etc/mdweb/mdweb.env
+   sudo chmod 0600 /usr/local/etc/mdweb/mdweb.env
    ```
 
 3. Enable and start the service:
@@ -123,6 +123,7 @@ Posts in development are ordinary Markdown files under `server/posts/`.
 | Site name, home list, copyright | Admin → **Site** — posts per page, sort, search placement, footer text (or hide/clear copyright) |
 | Users | Admin → Users (admin only) — create or delete accounts |
 | Auth style | Admin → **Security** — JWT (default) or classical session cookies; see [docs/AUTH.md](docs/AUTH.md) |
+| MCP / API tokens | Admin → **Tokens** — mint a `mdw_…` PAT for Cursor/agents; see [docs/MCP.md](docs/MCP.md) |
 
 Showcase posts (math, code, Mermaid, kitchen-sink Markdown) can appear on first install; they are only copied if those files are not already present, so your writing is never overwritten. Markdown notes: [docs/MARKDOWN.md](docs/MARKDOWN.md).
 
@@ -134,6 +135,7 @@ Showcase posts (math, code, Mermaid, kitchen-sink Markdown) can appear on first 
 |-----|----------|
 | [docs/ADMIN.md](docs/ADMIN.md) | Running the admin UI |
 | [docs/AUTH.md](docs/AUTH.md) | JWT vs session login |
+| [docs/MCP.md](docs/MCP.md) | Streamable HTTP MCP + personal access tokens |
 | [docs/UPGRADE.md](docs/UPGRADE.md) | Backups, upgrades, durable paths |
 | [docs/MARKDOWN.md](docs/MARKDOWN.md) | What works in posts |
 | [docs/THEMES.md](docs/THEMES.md) | Full theme gallery |
@@ -147,3 +149,18 @@ Showcase posts (math, code, Mermaid, kitchen-sink Markdown) can appear on first 
 Copyright (c) 2026 Mark LaPointe  
 
 Free to use, modify, and distribute, subject to the terms in [LICENSE](./LICENSE). Provided as-is, without warranty.
+
+## Flatpak (Linux)
+
+A self-contained bundle (Node 22 LTS + built app) is produced by:
+
+```sh
+scripts/build-flatpak.sh            # → artifacts/flatpak/org.cloudbsd.MDWeb-<version>.flatpak
+flatpak install --user artifacts/flatpak/org.cloudbsd.MDWeb-1.0.0.flatpak
+flatpak run org.cloudbsd.MDWeb      # http://localhost:5173
+flatpak run --env=PORT=8080 org.cloudbsd.MDWeb
+```
+
+Requires only `flatpak` and `org.freedesktop.Platform//25.08` (no flatpak-builder).
+Data (config.json, users.json, posts/, themes/, generated `mdweb.env`) lives in
+`~/.var/app/org.cloudbsd.MDWeb/data/mdweb`.

@@ -22,7 +22,8 @@ vi.mock('../src/lib/api', () => ({
         { id: 'matrix', label: 'Matrix', mdEditorTheme: 'dark' }
     ]),
     getMdEditorTheme: () => 'dark',
-    getEffectiveThemeMode: () => 'dark'
+    getEffectiveThemeMode: () => 'dark',
+    siteConfig: { refresh: vi.fn().mockResolvedValue({}), load: vi.fn().mockResolvedValue({}), subscribe: () => () => {}, notify: vi.fn() }
 }));
 
 vi.mock('md-editor-rt', () => ({

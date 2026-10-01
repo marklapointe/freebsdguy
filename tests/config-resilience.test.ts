@@ -218,17 +218,19 @@ describe('config resilience (bad configs never kill the process)', () => {
     });
 
     describe('loadUsers / sanitizeUsers', () => {
-        it('corrupt JSON → quarantine + default admin', () => {
+        it('corrupt JSON → quarantine + locked admin (no loginable default hash)', () => {
             fs.writeFileSync(usersFile, '{bad');
             const u = assertNeverThrows(() => loadUsers(usersFile)) as ReturnType<typeof loadUsers>;
             expect(u.admin.username).toBe('admin');
-            expect(u.admin.passwordHash).toBeTruthy();
+            expect(u.admin.passwordHash).toBe('');
+            expect(fs.existsSync(usersFile)).toBe(false);
             expect(fs.readdirSync(tempDir).some((f) => f.includes('.bad-'))).toBe(true);
         });
 
-        it('missing admin block → default admin injected', () => {
+        it('missing admin block → locked admin (empty hash)', () => {
             const { users, warnings } = sanitizeUsers({ users: [] });
             expect(users.admin.username).toBe('admin');
+            expect(users.admin.passwordHash).toBe('');
             expect(warnings.some((w) => w.includes('admin'))).toBe(true);
         });
 

@@ -40,7 +40,10 @@ describe('Preflight interactive + fixIssue', () => {
             jwtSecret: 'test-secret-at-least-16-chars'
         });
         (config.loadUsers as any).mockReturnValue({
-            admin: { username: 'admin' },
+            admin: {
+                username: 'admin',
+                passwordHash: '$2b$04$LXKxlvHBmdZ8gSr1FQyqjuxnaU8E1sf29xrf9yElEaDb69xbnaqG6'
+            },
             users: []
         });
         prompt.mockResolvedValue({ fix: true });

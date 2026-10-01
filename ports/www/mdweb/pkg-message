@@ -6,8 +6,8 @@ MDWeb has been installed.
 1. Set a strong JWT secret (required in production):
 
      install -m 0600 /usr/local/etc/mdweb/mdweb.env.sample \
-       /usr/local/etc/mdweb.env
-     # edit /usr/local/etc/mdweb.env and set JWT_SECRET
+       /usr/local/etc/mdweb/mdweb.env
+     # edit /usr/local/etc/mdweb/mdweb.env and set JWT_SECRET
 
 2. Copy sample config if needed:
 

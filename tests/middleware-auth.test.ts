@@ -1,10 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { RoleGuardFactory, isAllowedRole, ALLOWED_ROLES } from '../server/middleware/auth.ts';
 import { FileSessionStore } from '../server/lib/session-store.ts';
+import { loadUsers, saveUsers } from '../server/lib/config.ts';
 
 function mockRes() {
     const res: any = {
@@ -30,6 +31,17 @@ describe('RoleGuardFactory', () => {
     beforeEach(() => {
         dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mdweb-auth-'));
         store = new FileSessionStore(dir);
+        // Auth now re-resolves identity from users.json
+        const users = loadUsers();
+        users.users = [
+            { username: 'bob', passwordHash: 'not-empty-hash', role: 'contributor' },
+            { username: 'a', passwordHash: 'not-empty-hash', role: 'admin' }
+        ];
+        // Keep admin loginable for other suites sharing the file
+        if (!users.admin.passwordHash) {
+            users.admin.passwordHash = 'not-empty-hash';
+        }
+        saveUsers(users);
     });
 
     afterEach(() => {

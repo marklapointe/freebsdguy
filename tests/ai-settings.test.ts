@@ -96,6 +96,11 @@ describe('AI settings API', () => {
     });
 
     it('summarize returns 403 when AI disabled', async () => {
+        // Routes read the active (in-memory) config; disable through the API like an admin would
+        await request(app)
+            .post('/api/admin/ai-config')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ enabled: false, provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', modelId: 'llama3' });
         const res = await request(app)
             .post('/api/ai/summarize')
             .set('Authorization', `Bearer ${adminToken}`)
