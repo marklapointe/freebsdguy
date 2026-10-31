@@ -26,7 +26,9 @@ Mint from the CLI (scope is required):
 npm run mint-token -- --username admin --label cursor --scope read
 ```
 
-A `read` token receives HTTP 403, or an MCP tool error, for any create, edit, or delete. `write` is the scope used when the admin UI does not say otherwise. Tokens that predate scopes are treated as `write`.
+New tokens default to **read**. Pass `--scope write` (or choose write in the admin UI) to mint a token that can change the site. A record without an explicit `"scope": "write"` is read.
+
+A read token may call only `get_playbook`, `health`, `list_posts`, `get_post`, `list_images`, and `list_themes`. Every other tool — including `list_users`, `list_tokens`, `get_config`, `ai_list_models`, and any tool added later — is refused. HTTP create, edit, and delete routes also return 403.
 
 ## Cursor / HTTP client config
 

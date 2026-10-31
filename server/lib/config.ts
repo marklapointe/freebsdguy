@@ -6,8 +6,9 @@ import {
     DEFAULT_ADMIN_USERNAME,
     DEFAULT_ADMIN_PASSWORD_HASH
 } from './default-credentials.ts';
-import { isValidBindHost, DEFAULT_BIND_HOST } from './bind-address.ts';
+import { isValidBindHost, normalizeBindHost, DEFAULT_BIND_HOST } from './bind-address.ts';
 import { parseOriginList } from './cors-policy.ts';
+import { parseTrustProxy } from './trust-proxy.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,6 +158,11 @@ export interface SecurityConfig {
     disableAI?: boolean;
     disableImages?: boolean;
     disablePublicSearch?: boolean;
+    /**
+     * Express trust proxy. Default "loopback": only a reverse proxy on loopback
+     * may set X-Forwarded-For. false trusts nobody. A number is a hop count.
+     */
+    trustProxy?: boolean | number | string;
 }
 
 /** Resolve auth mode: env MDWEB_AUTH_MODE wins, then config, default jwt. */
@@ -239,7 +245,8 @@ export function defaultConfig(): Config {
                 sessionCookieName: 'mdweb.sid',
                 disableAI: false,
                 disableImages: false,
-                disablePublicSearch: false
+                disablePublicSearch: false,
+                trustProxy: 'loopback'
             }
         };
     }
@@ -265,7 +272,8 @@ export function defaultConfig(): Config {
             sessionCookieName: 'mdweb.sid',
             disableAI: false,
             disableImages: false,
-            disablePublicSearch: false
+            disablePublicSearch: false,
+            trustProxy: 'loopback'
         }
     };
 }
@@ -513,7 +521,8 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
             const port = asPort(s.port);
             let host = DEFAULT_BIND_HOST;
             if (s.host !== undefined) {
-                if (typeof s.host === 'string' && isValidBindHost(s.host.trim())) host = s.host.trim();
+                const normalized = typeof s.host === 'string' ? normalizeBindHost(s.host) : '';
+                if (normalized && isValidBindHost(normalized)) host = normalized;
                 else warnings.push('service.host invalid; using 127.0.0.1');
             } else if (base.service?.host && isValidBindHost(base.service.host)) {
                 host = base.service.host;
@@ -560,6 +569,9 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
                 disableImages: asBool(sec.disableImages, false),
                 disablePublicSearch: asBool(sec.disablePublicSearch, false)
             };
+            const trust = parseTrustProxy(sec.trustProxy);
+            if (!trust.ok) warnings.push('security.trustProxy invalid; using loopback');
+            config.security.trustProxy = trust.value;
             if (typeof sec.apiRateLimitWindow === 'number') config.security.apiRateLimitWindow = sec.apiRateLimitWindow;
             if (typeof sec.apiRateLimitMax === 'number') config.security.apiRateLimitMax = sec.apiRateLimitMax;
             if (typeof sec.loginRateLimitWindow === 'number') {

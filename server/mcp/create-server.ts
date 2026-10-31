@@ -34,7 +34,7 @@ import {
     revokeToken
 } from '../lib/api-tokens.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
-import { isMutatingMcpTool, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
+import { isReadAllowedMcpTool, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
 import { MDWEB_MCP_INSTRUCTIONS, MDWEB_MCP_PLAYBOOK } from './playbook.ts';
 import sanitizeHtml from 'sanitize-html';
 
@@ -94,7 +94,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         handler: (args: any, extra?: any) => any
     ) =>
         server.registerTool(name, config as never, (async (args: any, extra: any) => {
-            if (tokenScope === 'read' && isMutatingMcpTool(name)) {
+            if (tokenScope === 'read' && !isReadAllowedMcpTool(name)) {
                 return err(READ_ONLY_TOKEN_MESSAGE);
             }
             return handler(args, extra);

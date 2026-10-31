@@ -62,6 +62,8 @@ Session cookies use `SameSite=Lax` and assume a same-origin SPA. Cross-site cook
 
 ## Personal access tokens (MCP / API)
 
-Long-lived `mdw_…` Bearer tokens can be minted in Admin → **Tokens** (or `POST /api/tokens`). Each token has a scope, `read` or `write`, stored next to its hash in `tokens.json`. A read token can fetch; it is refused on create, edit, and delete routes and MCP tools. Details: [MCP.md](./MCP.md).
+Long-lived `mdw_…` Bearer tokens can be minted in Admin → **Tokens** (or `POST /api/tokens`). Each token has a scope, `read` or `write`, stored next to its hash in `tokens.json`. The default scope is **read**. Write is stored only when it is requested explicitly. A read token's MCP tools are an allowlist (`health`, posts, images, themes, playbook). Details: [MCP.md](./MCP.md).
+
+`security.trustProxy` defaults to `loopback`. A client that connects directly (for example on a WireGuard address) cannot change its rate-limit identity with `X-Forwarded-For`. Set `trustProxy` to a hop count or `true` only behind a reverse proxy you control. `service.host` accepts IPv4 and IPv6 literals.
 
 See also: [UPGRADE.md](./UPGRADE.md), [ADMIN.md](./ADMIN.md), [MCP.md](./MCP.md).

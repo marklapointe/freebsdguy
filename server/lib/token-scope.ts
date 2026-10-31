@@ -6,6 +6,19 @@ export type TokenScope = 'read' | 'write';
 
 export const READ_ONLY_TOKEN_MESSAGE = 'Read-only token cannot create, edit, or delete';
 
+/**
+ * Tools a read token may call. Anything not listed — including tools added later —
+ * is refused. list_users, list_tokens, get_config, and ai_list_models are not included.
+ */
+const READ_ALLOWED_MCP_TOOLS = new Set([
+    'get_playbook',
+    'health',
+    'list_posts',
+    'get_post',
+    'list_images',
+    'list_themes'
+]);
+
 const MUTATING_MCP_TOOLS = new Set([
     'create_post',
     'update_post',
@@ -23,14 +36,19 @@ const MUTATING_MCP_TOOLS = new Set([
     'ai_enhance'
 ]);
 
-export function parseTokenScope(value: unknown, fallback: TokenScope = 'write'): TokenScope {
+export function parseTokenScope(value: unknown, fallback: TokenScope = 'read'): TokenScope {
     if (value === undefined || value === null || value === '') return fallback;
     if (value === 'read' || value === 'write') return value;
     throw new Error('Invalid token scope; allowed: read, write');
 }
 
+/** Missing or unknown stored scope is read. Write is only the explicit value "write". */
 export function storedTokenScope(value: unknown): TokenScope {
-    return value === 'read' ? 'read' : 'write';
+    return value === 'write' ? 'write' : 'read';
+}
+
+export function isReadAllowedMcpTool(name: string): boolean {
+    return READ_ALLOWED_MCP_TOOLS.has(name);
 }
 
 export function isMutatingMcpTool(name: string): boolean {

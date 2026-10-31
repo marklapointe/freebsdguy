@@ -27,7 +27,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
     const [tokens, setTokens] = useState<TokenPublic[]>([]);
     const [username, setUsername] = useState(users[0]?.username || 'admin');
     const [label, setLabel] = useState('');
-    const [scope, setScope] = useState<'read' | 'write'>('write');
+    const [scope, setScope] = useState<'read' | 'write'>('read');
     const [revealed, setRevealed] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 

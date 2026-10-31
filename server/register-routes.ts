@@ -821,7 +821,8 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
                 loginRateLimitMax: b.security.loginRateLimitMax ?? prev.loginRateLimitMax,
                 mcpRateLimitWindow: b.security.mcpRateLimitWindow ?? prev.mcpRateLimitWindow,
                 mcpRateLimitMax: b.security.mcpRateLimitMax ?? prev.mcpRateLimitMax,
-                corsOrigins: b.security.corsOrigins ?? prev.corsOrigins
+                corsOrigins: b.security.corsOrigins ?? prev.corsOrigins,
+                trustProxy: b.security.trustProxy ?? prev.trustProxy
             };
         }
         if (isObj(b.service)) patch.service = { ...(current.service || {}), ...b.service };

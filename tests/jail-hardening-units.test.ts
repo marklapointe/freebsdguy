@@ -42,14 +42,15 @@ import crypto from 'crypto';
 
 describe('token scope helpers', () => {
     it('parses scopes and classifies mutating calls', () => {
-        expect(parseTokenScope(undefined)).toBe('write');
-        expect(parseTokenScope(null)).toBe('write');
-        expect(parseTokenScope('')).toBe('write');
+        expect(parseTokenScope(undefined)).toBe('read');
+        expect(parseTokenScope(null)).toBe('read');
+        expect(parseTokenScope('')).toBe('read');
         expect(parseTokenScope('read')).toBe('read');
         expect(parseTokenScope('write', 'read')).toBe('write');
         expect(() => parseTokenScope('root')).toThrow(/scope/i);
         expect(storedTokenScope('read')).toBe('read');
-        expect(storedTokenScope(undefined)).toBe('write');
+        expect(storedTokenScope(undefined)).toBe('read');
+        expect(storedTokenScope('nope')).toBe('read');
         expect(storedTokenScope('write')).toBe('write');
         expect(isMutatingMcpTool('create_post')).toBe(true);
         expect(isMutatingMcpTool('delete_image')).toBe(true);
@@ -139,7 +140,9 @@ describe('bind host', () => {
         expect(isValidBindHost('has space')).toBe(false);
         expect(isValidBindHost('999.1.1.1')).toBe(false);
         expect(isValidBindHost('01.2.3.4')).toBe(false);
-        expect(isValidBindHost('::1')).toBe(false);
+        expect(isValidBindHost('::1')).toBe(true);
+        expect(isValidBindHost('not:a:host')).toBe(false);
+        expect(isValidBindHost('[::1')).toBe(false);
         expect(isValidBindHost('a'.repeat(254))).toBe(false);
         expect(isValidBindHost('localhost')).toBe(true);
         expect(isValidBindHost('-bad')).toBe(false);

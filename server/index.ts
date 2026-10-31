@@ -9,6 +9,7 @@ import { SecretFileError } from './lib/secret-file.ts';
 import { resolveBindHost, startHttpServer } from './lib/bind-address.ts';
 import { createRateLimitMiddleware, resolveRateLimitSettings } from './lib/rate-limit.ts';
 import { corsOriginDecision, resolveAllowedOrigins } from './lib/cors-policy.ts';
+import { resolveTrustProxy } from './lib/trust-proxy.ts';
 import { isDefaultAdminCredential } from './lib/setup-admin.ts';
 import { createDefaultImageUpload } from './lib/upload-options.ts';
 import { RoleGuardFactory } from './middleware/auth.ts';
@@ -20,7 +21,6 @@ import { resolveConfiguredPath, resolvePostsDir } from './lib/safe-path.ts';
 import { registerRoutes } from './register-routes.ts';
 
 const app = express();
-app.set('trust proxy', 1);
 export { app };
 
 /** Parse CLI --port / -p from an argv-like array (testable). */
@@ -53,6 +53,7 @@ if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
 }
 
 const configHolder = createActiveConfigHolder(loadConfig());
+app.set('trust proxy', resolveTrustProxy(configHolder.get().security?.trustProxy));
 const PORT = cliPort || configHolder.get().service?.port || process.env.PORT || 5173;
 
 // Populate runtime themeDir + demo posts (missing files only)

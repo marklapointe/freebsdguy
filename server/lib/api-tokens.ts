@@ -99,7 +99,7 @@ function activeForUser(records: TokenRecord[], username: string): TokenRecord[] 
 export function mintToken(
     username: string,
     label = '',
-    scope: unknown = 'write'
+    scope?: unknown
 ): { plaintext: string; record: TokenRecord } {
     const parsedScope = parseTokenScope(scope);
     if (!username || !findUserByUsername(username)) {

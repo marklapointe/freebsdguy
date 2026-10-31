@@ -410,7 +410,7 @@ export async function listMyTokens(): Promise<TokenPublic[]> {
     return Array.isArray(res.data?.tokens) ? res.data.tokens : [];
 }
 
-export async function mintMyToken(label = '', scope: 'read' | 'write' = 'write'): Promise<MintedToken> {
+export async function mintMyToken(label = '', scope: 'read' | 'write' = 'read'): Promise<MintedToken> {
     const res = await api.post('/tokens', { label, scope });
     return res.data as MintedToken;
 }
@@ -425,7 +425,7 @@ export async function listAdminTokens(username?: string): Promise<TokenPublic[]>
 export async function mintAdminToken(
     username: string,
     label = '',
-    scope: 'read' | 'write' = 'write'
+    scope: 'read' | 'write' = 'read'
 ): Promise<MintedToken> {
     const res = await api.post('/admin/tokens', { username, label, scope });
     return res.data as MintedToken;
