@@ -49,7 +49,10 @@ vi.mock('../src/lib/api', () => {
         load: vi.fn().mockResolvedValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
         refresh: vi.fn().mockResolvedValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
         get: vi.fn().mockReturnValue({ siteName: 'MDWeb', currentTheme: 'dark' }),
-        subscribe: vi.fn().mockReturnValue(() => {}),
+        subscribe: vi.fn((listener: (config: { siteName: string; currentTheme: string }) => void) => {
+            listener({ siteName: 'MDWeb', currentTheme: 'dark' });
+            return () => {};
+        }),
         notify: vi.fn()
     }
     };

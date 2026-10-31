@@ -14,6 +14,7 @@
     "mint-token": "tsx server/scripts/mint-token.ts",
     "change-password": "tsx server/scripts/change-password.ts",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:full": "playwright test --reporter=list",
