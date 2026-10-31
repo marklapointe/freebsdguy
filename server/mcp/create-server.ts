@@ -34,6 +34,7 @@ import {
     revokeToken
 } from '../lib/api-tokens.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
+import { isReadAllowedMcpTool, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
 import { MDWEB_MCP_INSTRUCTIONS, MDWEB_MCP_PLAYBOOK } from './playbook.ts';
 import sanitizeHtml from 'sanitize-html';
 
@@ -43,6 +44,8 @@ export interface McpServerDeps {
     user: McpUser;
     getActive: () => Config;
     setActive: (c: Config) => void;
+    /** Omitted for JWT/session callers, who are not scope-limited. */
+    tokenScope?: TokenScope;
 }
 
 function text(data: unknown) {
@@ -78,12 +81,24 @@ function imagesDir(cfg: Config) {
 }
 
 export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
-    const { user, getActive, setActive } = deps;
+    const { user, getActive, setActive, tokenScope } = deps;
 
     const server = new McpServer(
         { name: 'mdweb', version: process.env.npm_package_version || '1.0.0' },
         { instructions: MDWEB_MCP_INSTRUCTIONS }
     );
+
+    const registerGuarded = (
+        name: string,
+        config: object,
+        handler: (args: any, extra?: any) => any
+    ) =>
+        server.registerTool(name, config as never, (async (args: any, extra: any) => {
+            if (tokenScope === 'read' && !isReadAllowedMcpTool(name)) {
+                return err(READ_ONLY_TOKEN_MESSAGE);
+            }
+            return handler(args, extra);
+        }) as never);
 
     server.registerResource(
         'playbook',
@@ -94,13 +109,13 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         })
     );
 
-    server.registerTool(
+    registerGuarded(
         'get_playbook',
         { description: 'Return MDWeb MCP workflows and auth notes', inputSchema: {} },
         async () => text(MDWEB_MCP_PLAYBOOK)
     );
 
-    server.registerTool(
+    registerGuarded(
         'health',
         { description: 'Service health probe (authenticated)', inputSchema: {} },
         async () => {
@@ -114,7 +129,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'list_posts',
         {
             description: 'List post metadata',
@@ -149,7 +164,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'get_post',
         {
             description: 'Get a full post by slug',
@@ -166,7 +181,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'create_post',
         {
             description: 'Create or overwrite a post (same as update)',
@@ -203,7 +218,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'update_post',
         {
             description: 'Update an existing post (create_post alias)',
@@ -241,7 +256,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'delete_post',
         {
             description: 'Delete a post by slug',
@@ -262,7 +277,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'list_images',
         {
             description: 'List uploaded images',
@@ -291,7 +306,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'upload_image',
         {
             description: 'Upload an image from base64 (converted to WebP)',
@@ -344,7 +359,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'delete_image',
         {
             description: 'Delete an image by filename',
@@ -372,7 +387,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'get_config',
         { description: 'Get public site config projection (admin)', inputSchema: {} },
         async () => {
@@ -385,7 +400,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'update_config',
         {
             description: 'Merge and save site config (admin)',
@@ -404,7 +419,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'list_themes',
         { description: 'List theme catalog (admin)', inputSchema: {} },
         async () => {
@@ -418,7 +433,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'set_theme',
         {
             description: 'Set current site theme id (admin)',
@@ -438,7 +453,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'save_theme',
         {
             description: 'Save theme color JSON for a theme id (admin)',
@@ -467,7 +482,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'list_users',
         { description: 'List users (admin)', inputSchema: {} },
         async () => {
@@ -484,7 +499,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'create_user',
         {
             description: 'Create a user (admin)',
@@ -516,7 +531,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'delete_user',
         {
             description: 'Delete a non-primary user (admin)',
@@ -540,7 +555,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'list_tokens',
         {
             description: 'List API tokens (own, or all if admin)',
@@ -558,26 +573,28 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'create_token',
         {
             description: 'Mint a PAT (plaintext returned once). Admin may set username.',
             inputSchema: {
                 label: z.string().optional(),
-                username: z.string().optional()
+                username: z.string().optional(),
+                scope: z.enum(['read', 'write']).optional()
             }
         },
-        async ({ label, username }) => {
+        async ({ label, username, scope }) => {
             try {
                 const target = user.role === 'admin' && username ? username : user.username;
                 if (!findUserByUsername(target)) return err('User not found');
-                const { plaintext, record } = mintToken(target, label || '');
+                const { plaintext, record } = mintToken(target, label || '', parseTokenScope(scope));
                 return text({
                     token: plaintext,
                     id: record.id,
                     prefix: record.prefix,
                     username: record.username,
                     label: record.label,
+                    scope: record.scope,
                     createdAt: record.createdAt,
                     note: 'Store this token securely; it will not be shown again.'
                 });
@@ -587,7 +604,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'revoke_token',
         {
             description: 'Revoke a token by id',
@@ -615,7 +632,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         return cfg.aiConfig;
     };
 
-    server.registerTool(
+    registerGuarded(
         'ai_summarize',
         {
             description: 'Summarize markdown via configured AI',
@@ -637,7 +654,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'ai_enhance',
         {
             description: 'Enhance markdown via configured AI',
@@ -659,7 +676,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         }
     );
 
-    server.registerTool(
+    registerGuarded(
         'ai_list_models',
         { description: 'List models from configured AI provider', inputSchema: {} },
         async () => {

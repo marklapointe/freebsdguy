@@ -31,8 +31,8 @@ describe('MCP /mcp', () => {
         users.users = users.users.filter((u) => u.username !== 'writer');
         users.users.push({ username: 'writer', passwordHash: 'h', role: 'contributor' });
         saveUsers(users);
-        adminPat = mintToken('admin', 'mcp-admin').plaintext;
-        writerPat = mintToken('writer', 'mcp-writer').plaintext;
+        adminPat = mintToken('admin', 'mcp-admin', 'write').plaintext;
+        writerPat = mintToken('writer', 'mcp-writer', 'write').plaintext;
     });
 
     afterEach(() => {

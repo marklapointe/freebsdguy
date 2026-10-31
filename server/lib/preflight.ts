@@ -2,11 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import enquirer from 'enquirer';
-import bcrypt from 'bcryptjs';
 import { loadConfig, saveConfig, configPath, loadUsers } from './config.ts';
 import { INSECURE_DEFAULT_JWT_SECRET, isInsecureJwtSecret } from './jwt-secret.ts';
 import { resolvePostsDir, resolveImagesDir } from './safe-path.ts';
-import { DEFAULT_ADMIN_PASSWORD } from './default-credentials.ts';
+import { isDefaultAdminCredential } from './setup-admin.ts';
+import { readMode0600File, SecretFileError } from './secret-file.ts';
 
 export interface PreflightIssue {
     id: string;
@@ -84,9 +84,23 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
     }
 
     // 2. Check JWT Secret (INV-SEC-2)
-    // Same resolution order as server/index.ts (session mode may use SESSION_SECRET)
-    const SECRET =
+    // JWT_SECRET_FILE (mode 0600) wins over environment values. Same order as index.ts.
+    let SECRET =
         process.env.SESSION_SECRET || process.env.JWT_SECRET || config.jwtSecret || INSECURE_DEFAULT_JWT_SECRET;
+    if (process.env.JWT_SECRET_FILE) {
+        try {
+            SECRET = readMode0600File(process.env.JWT_SECRET_FILE);
+        } catch (e) {
+            const message = e instanceof SecretFileError ? e.message : `Cannot read JWT secret file`;
+            issues.push({
+                id: 'JWT_SECRET_FILE',
+                description: message,
+                critical: true,
+                fixable: false
+            });
+            SECRET = INSECURE_DEFAULT_JWT_SECRET;
+        }
+    }
     if (isInsecureJwtSecret(SECRET)) {
         issues.push({
             id: 'JWT_SECRET_DEFAULT',
@@ -114,13 +128,13 @@ export const runPreflight = async (interactive: boolean = false): Promise<Prefli
         });
     } else {
         try {
-            const isDefault = await bcrypt.compare(DEFAULT_ADMIN_PASSWORD, users.admin.passwordHash);
+            const isDefault = await isDefaultAdminCredential(users.admin.passwordHash);
             if (isDefault) {
                 issues.push({
                     id: 'DEFAULT_ADMIN_PASSWORD',
                     description:
-                        'Admin still uses the default password. Change it before exposing the service.',
-                    critical: process.env.NODE_ENV === 'production',
+                        'Refusing default admin credentials. Create the admin with a one-time setup token or stdin.',
+                    critical: true,
                     fixable: false
                 });
             }

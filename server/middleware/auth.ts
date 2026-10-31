@@ -7,6 +7,8 @@ import jwt from 'jsonwebtoken';
 import type { AuthMode } from '../lib/config.ts';
 import { findUserByUsername } from '../lib/config.ts';
 import { isPatToken, verifyToken } from '../lib/api-tokens.ts';
+import { readTokenDenied, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
+import { writeAudit } from '../lib/audit-log.ts';
 import {
     FileSessionStore,
     parseCookies,
@@ -43,6 +45,8 @@ export interface AuthenticatedRequest extends Request {
     file?: any;
     /** Set when auth came from a personal access token. */
     authVia?: 'pat' | 'jwt' | 'session';
+    /** Present for personal access tokens. JWT and session logins are not scoped. */
+    tokenScope?: TokenScope;
 }
 
 export interface AuthGuardOptions {
@@ -100,6 +104,17 @@ export class RoleGuardFactory {
         }
         req.user = identity;
         req.authVia = 'pat';
+        req.tokenScope = tok.scope;
+        writeAudit({
+            event: 'token',
+            action: 'use',
+            username: identity.username,
+            tokenId: tok.id,
+            scope: tok.scope
+        });
+        if (readTokenDenied(tok.scope, req.method, req.originalUrl || req.path)) {
+            return res.status(403).json({ message: READ_ONLY_TOKEN_MESSAGE });
+        }
         next();
     }
 

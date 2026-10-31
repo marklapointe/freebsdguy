@@ -2,9 +2,15 @@ import express from 'express';
 import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
-import { loadConfig, configPath, resolveAuthMode } from './lib/config.ts';
+import { loadConfig, configPath, resolveAuthMode, loadUsers } from './lib/config.ts';
 import { runPreflight } from './lib/preflight.ts';
-import { JwtSecretFactory, JwtSecretError, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
+import { JwtSecretFactory, JwtSecretError, resolveJwtSecret, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
+import { SecretFileError } from './lib/secret-file.ts';
+import { resolveBindHost, startHttpServer } from './lib/bind-address.ts';
+import { createRateLimitMiddleware, resolveRateLimitSettings } from './lib/rate-limit.ts';
+import { corsOriginDecision, resolveAllowedOrigins } from './lib/cors-policy.ts';
+import { resolveTrustProxy } from './lib/trust-proxy.ts';
+import { isDefaultAdminCredential } from './lib/setup-admin.ts';
 import { createDefaultImageUpload } from './lib/upload-options.ts';
 import { RoleGuardFactory } from './middleware/auth.ts';
 import { createActiveConfigHolder } from './lib/app-context.ts';
@@ -15,7 +21,6 @@ import { resolveConfiguredPath, resolvePostsDir } from './lib/safe-path.ts';
 import { registerRoutes } from './register-routes.ts';
 
 const app = express();
-app.set('trust proxy', 1);
 export { app };
 
 /** Parse CLI --port / -p from an argv-like array (testable). */
@@ -48,6 +53,7 @@ if (preflightIssues.some(i => i.critical && !i.fixed) && !process.env.VITEST) {
 }
 
 const configHolder = createActiveConfigHolder(loadConfig());
+app.set('trust proxy', resolveTrustProxy(configHolder.get().security?.trustProxy));
 const PORT = cliPort || configHolder.get().service?.port || process.env.PORT || 5173;
 
 // Populate runtime themeDir + demo posts (missing files only)
@@ -78,10 +84,17 @@ console.log(`[INFO] Auth mode: ${authModeAtBoot}`);
 
 let SECRET: string;
 try {
-    // Session mode may use SESSION_SECRET; JWT factory still accepts JWT_SECRET / config
-    const envSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+    if (!process.env.VITEST) {
+        const bootUsers = loadUsers();
+        if (await isDefaultAdminCredential(bootUsers.admin?.passwordHash)) {
+            console.error('[FATAL] Refusing to start with default admin credentials. Run bootstrap-admin.');
+            process.exit(1);
+        }
+    }
+    // JWT_SECRET_FILE (mode 0600) wins. resolveJwtSecret also accepts SESSION_SECRET / JWT_SECRET.
+    SECRET = resolveJwtSecret(configHolder.get());
     const jwtResult = JwtSecretFactory.forMode()
-        .fromEnv(envSecret)
+        .fromEnv(SECRET)
         .fromConfig(configHolder.get())
         .create();
     SECRET = jwtResult.secret;
@@ -91,7 +104,7 @@ try {
     }
 /* istanbul ignore next */
 } catch (e) {
-    if (e instanceof JwtSecretError) {
+    if (e instanceof JwtSecretError || e instanceof SecretFileError) {
         console.error(`[FATAL] ${e.message}`);
         if (!process.env.VITEST) process.exit(1);
         SECRET = INSECURE_DEFAULT_JWT_SECRET;
@@ -134,10 +147,21 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Rate limiting is intentionally not applied here — handle at the reverse proxy / edge.
-// credentials: true so session cookies work when authMode=session
-app.use(cors({ origin: true, credentials: true }));
+// Allowlist only. A missing Origin is not a CORS request. "*" is never echoed.
+app.use(cors({
+    origin(origin, callback) {
+        const allowed = resolveAllowedOrigins(
+            configHolder.get().security?.corsOrigins,
+            process.env.MDWEB_CORS_ORIGINS
+        );
+        callback(null, corsOriginDecision(allowed, origin));
+    },
+    credentials: true
+}));
 app.use(express.json());
+app.use(createRateLimitMiddleware({
+    getSettings: () => resolveRateLimitSettings(configHolder.get().security, process.env)
+}));
 
 registerRoutes(app, {
     secret: SECRET,
@@ -152,7 +176,9 @@ registerRoutes(app, {
 
 if (shouldStartHttpListener()) {
     /* istanbul ignore next */
-    app.listen(PORT, () => {
-        console.log(`Server running at http://localhost:${PORT}`);
+    const host = resolveBindHost(configHolder.get().service);
+    const portNum = typeof PORT === 'string' ? parseInt(PORT, 10) : Number(PORT);
+    startHttpServer(app, portNum, host, () => {
+        console.log(`Server running at http://${host}:${portNum}`);
     });
 }

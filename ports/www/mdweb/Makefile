@@ -1,5 +1,5 @@
 PORTNAME=	mdweb
-DISTVERSION=	1.0.0
+DISTVERSION=	1.1.0
 CATEGORIES=	www
 
 MAINTAINER=	mark@cloudbsd.org

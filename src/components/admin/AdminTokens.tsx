@@ -27,6 +27,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
     const [tokens, setTokens] = useState<TokenPublic[]>([]);
     const [username, setUsername] = useState(users[0]?.username || 'admin');
     const [label, setLabel] = useState('');
+    const [scope, setScope] = useState<'read' | 'write'>('read');
     const [revealed, setRevealed] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -48,7 +49,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
 
     const handleGenerate = () => {
         setLoading(true);
-        mintAdminToken(username, label)
+        mintAdminToken(username, label, scope)
             .then((res) => {
                 setRevealed(res.token);
                 setLabel('');
@@ -89,7 +90,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
                 <h2 className="font-bold flex items-center gap-2">
                     <KeyRound size={18} /> Generate token
                 </h2>
-                <div className="grid sm:grid-cols-3 gap-3">
+                <div className="grid sm:grid-cols-4 gap-3">
                     <select
                         data-testid="token-mint-username"
                         value={username}
@@ -110,6 +111,15 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
                         onChange={(e) => setLabel(e.target.value)}
                         className="p-3 bg-bg border border-accent rounded text-text sm:col-span-1"
                     />
+                    <select
+                        data-testid="token-mint-scope"
+                        value={scope}
+                        onChange={(e) => setScope(e.target.value === 'read' ? 'read' : 'write')}
+                        className="p-3 bg-bg border border-accent rounded text-text"
+                    >
+                        <option value="write">write</option>
+                        <option value="read">read</option>
+                    </select>
                     <button
                         type="button"
                         data-testid="token-mint-submit"
@@ -169,6 +179,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
                             <th className="pb-3">Prefix</th>
                             <th className="pb-3">Label</th>
                             <th className="pb-3">User</th>
+                            <th className="pb-3">Scope</th>
                             <th className="pb-3">Created</th>
                             <th className="pb-3">Last used</th>
                             <th className="pb-3">Status</th>
@@ -181,6 +192,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
                                 <td className="py-3 font-mono text-sm">mdw_{t.prefix}…</td>
                                 <td className="py-3">{t.label || '—'}</td>
                                 <td className="py-3">{t.username}</td>
+                                <td className="py-3 text-sm">{t.scope || 'write'}</td>
                                 <td className="py-3 text-sm opacity-70">
                                     {new Date(t.createdAt).toLocaleString()}
                                 </td>
@@ -204,7 +216,7 @@ export const AdminTokens = ({ users, showAlert, showConfirm }: AdminTokensProps)
                         ))}
                         {tokens.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="py-6 opacity-50 text-center">
+                                <td colSpan={8} className="py-6 opacity-50 text-center">
                                     No tokens yet
                                 </td>
                             </tr>
@@ -226,6 +238,7 @@ export const MyTokensPanel = ({
 }) => {
     const [tokens, setTokens] = useState<TokenPublic[]>([]);
     const [label, setLabel] = useState('');
+    const [scope, setScope] = useState<'read' | 'write'>('read');
     const [revealed, setRevealed] = useState<string | null>(null);
 
     const refresh = useCallback(() => {
@@ -257,13 +270,22 @@ export const MyTokensPanel = ({
                     onChange={(e) => setLabel(e.target.value)}
                     className="p-2 bg-bg border border-accent rounded text-text flex-1 min-w-[12rem]"
                 />
+                <select
+                    data-testid="my-token-scope"
+                    value={scope}
+                    onChange={(e) => setScope(e.target.value === 'write' ? 'write' : 'read')}
+                    className="p-2 bg-bg border border-accent rounded text-text"
+                >
+                    <option value="read">read</option>
+                    <option value="write">write</option>
+                </select>
                 <button
                     type="button"
                     data-testid="my-token-mint"
                     className="bg-accent text-on-accent px-4 py-2 rounded font-bold"
                     onClick={() => {
                         api
-                            .post('/tokens', { label })
+                            .post('/tokens', { label, scope })
                             .then((res) => {
                                 setRevealed(res.data?.token);
                                 setLabel('');

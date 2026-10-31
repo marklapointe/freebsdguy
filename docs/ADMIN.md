@@ -14,7 +14,7 @@
 | **Identity** | Site name, logo |
 | **Home page** | Posts per page, sort field/order, search box placement (top / bottom / hidden) |
 | **Footer & copyright** | Show/hide footer, copyright line (`{year}`, `{siteName}`), clear or reset, optional credit line |
-| **Service** | Listen port (restart required after change) |
+| **Service** | Listen port and bind host (default `127.0.0.1`; restart required) |
 | **Advanced paths** | Posts directory, themes directory (be careful) |
 
 Save with **Save site settings**.
@@ -31,6 +31,7 @@ Save with **Save site settings**.
 - Auth mode: JWT (default) or session cookie — [AUTH.md](./AUTH.md)
 - Session lifetime and cookie name (session mode)
 - Disable public search, image uploads, or AI
+- CORS origin allowlist and rate limits (login, `/api`, `/mcp`)
 
 ## AI
 

@@ -1,4 +1,4 @@
-.Dd April 21, 2026
+.Dd October 31, 2026
 .Dt MDWEB 1
 .Os
 .Sh NAME
@@ -26,8 +26,17 @@ Specify the port to listen on (default is 5173).
 .It Pa /usr/local/etc/mdweb/config.json
 Main configuration file.
 .It Pa /usr/local/etc/mdweb/users.json
-User credentials and roles.
-.It Pa /usr/local/www/MDWeb
+User credentials and roles. There is no default admin/admin password.
+.It Pa /usr/local/etc/mdweb/jwt.secret
+Signing secret. Must be mode 0600. Pointed to by
+.Ev JWT_SECRET_FILE .
+.It Pa /usr/local/etc/mdweb/config.json
+Includes
+.Va service.host
+(default 127.0.0.1),
+.Va security.corsOrigins ,
+and rate limits.
+.It Pa /usr/local/www/mdweb
 Default directory for the web application files.
 .El
 .Sh SEE ALSO

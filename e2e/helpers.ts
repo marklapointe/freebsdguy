@@ -5,6 +5,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 export const adminUser = process.env.MDWEB_ADMIN_USER || 'admin';
+/** Set MDWEB_ADMIN_PASS. The app refuses the password "admin". */
 export const adminPass = process.env.MDWEB_ADMIN_PASS || 'admin';
 
 export function uniqueId(prefix = 'e2e'): string {

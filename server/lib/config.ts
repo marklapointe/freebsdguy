@@ -6,6 +6,9 @@ import {
     DEFAULT_ADMIN_USERNAME,
     DEFAULT_ADMIN_PASSWORD_HASH
 } from './default-credentials.ts';
+import { isValidBindHost, normalizeBindHost, DEFAULT_BIND_HOST } from './bind-address.ts';
+import { parseOriginList } from './cors-policy.ts';
+import { parseTrustProxy } from './trust-proxy.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,6 +76,8 @@ export interface UsersConfig {
 
 export interface ServiceConfig {
     port?: number;
+    /** Bind address. Default 127.0.0.1 (loopback only). */
+    host?: string;
 }
 
 /** Site-wide appearance prefs (theme pack is currentTheme; mode is light/dark of that pack). */
@@ -136,17 +141,28 @@ export interface SecurityConfig {
     sessionTtlSeconds?: number;
     /** Session cookie name. Default mdweb.sid */
     sessionCookieName?: string;
-    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
+    /** Window length in seconds for /api (excluding login). */
     apiRateLimitWindow?: number;
-    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
+    /** Max requests per window for /api (excluding login). */
     apiRateLimitMax?: number;
-    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
+    /** Window length in seconds for POST /api/login. */
     loginRateLimitWindow?: number;
-    /** @deprecated Not enforced — rate limiting belongs at the reverse proxy / edge */
+    /** Max login attempts per window. */
     loginRateLimitMax?: number;
+    /** Window length in seconds for /mcp. */
+    mcpRateLimitWindow?: number;
+    /** Max requests per window for /mcp. */
+    mcpRateLimitMax?: number;
+    /** Allowed browser origins. Never "*". Empty means same-origin only. */
+    corsOrigins?: string[];
     disableAI?: boolean;
     disableImages?: boolean;
     disablePublicSearch?: boolean;
+    /**
+     * Express trust proxy. Default "loopback": only a reverse proxy on loopback
+     * may set X-Forwarded-For. false trusts nobody. A number is a hop count.
+     */
+    trustProxy?: boolean | number | string;
 }
 
 /** Resolve auth mode: env MDWEB_AUTH_MODE wins, then config, default jwt. */
@@ -215,7 +231,7 @@ export function defaultConfig(): Config {
                 copyrightText: DEFAULT_FOOTER_COPYRIGHT,
                 creditText: ''
             },
-            service: { port: 5173 },
+            service: { port: 5173, host: DEFAULT_BIND_HOST },
             aiConfig: {
                 enabled: false,
                 provider: 'ollama',
@@ -229,7 +245,8 @@ export function defaultConfig(): Config {
                 sessionCookieName: 'mdweb.sid',
                 disableAI: false,
                 disableImages: false,
-                disablePublicSearch: false
+                disablePublicSearch: false,
+                trustProxy: 'loopback'
             }
         };
     }
@@ -248,23 +265,29 @@ export function defaultConfig(): Config {
             copyrightText: DEFAULT_FOOTER_COPYRIGHT,
             creditText: ''
         },
-        service: { port: 5173 },
+        service: { port: 5173, host: DEFAULT_BIND_HOST },
         security: {
             authMode: 'jwt',
             sessionTtlSeconds: 86400,
             sessionCookieName: 'mdweb.sid',
             disableAI: false,
             disableImages: false,
-            disablePublicSearch: false
+            disablePublicSearch: false,
+            trustProxy: 'loopback'
         }
     };
 }
 
+/**
+ * Test runs still seed the known hash so existing suites can sign JWTs for admin.
+ * Every other environment gets an unusable hash — there is no admin/admin account.
+ */
 export function defaultUsers(): UsersConfig {
+    const seedKnownPassword = process.env.VITEST === 'true' || process.env.VITEST === '1' || process.env.NODE_ENV === 'test';
     return {
         admin: {
             username: DEFAULT_ADMIN_USERNAME,
-            passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+            passwordHash: seedKnownPassword ? DEFAULT_ADMIN_PASSWORD_HASH : '',
             role: 'admin'
         },
         users: []
@@ -496,7 +519,15 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
         if (o.service && typeof o.service === 'object' && !Array.isArray(o.service)) {
             const s = o.service as Record<string, unknown>;
             const port = asPort(s.port);
-            config.service = port !== undefined ? { port } : { ...base.service };
+            let host = DEFAULT_BIND_HOST;
+            if (s.host !== undefined) {
+                const normalized = typeof s.host === 'string' ? normalizeBindHost(s.host) : '';
+                if (normalized && isValidBindHost(normalized)) host = normalized;
+                else warnings.push('service.host invalid; using 127.0.0.1');
+            } else if (base.service?.host && isValidBindHost(base.service.host)) {
+                host = base.service.host;
+            }
+            config.service = { port: port !== undefined ? port : base.service?.port, host };
             if (s.port !== undefined && port === undefined) warnings.push('service.port invalid; using default');
         } else {
             warnings.push('service invalid; using default');
@@ -538,12 +569,23 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
                 disableImages: asBool(sec.disableImages, false),
                 disablePublicSearch: asBool(sec.disablePublicSearch, false)
             };
+            const trust = parseTrustProxy(sec.trustProxy);
+            if (!trust.ok) warnings.push('security.trustProxy invalid; using loopback');
+            config.security.trustProxy = trust.value;
             if (typeof sec.apiRateLimitWindow === 'number') config.security.apiRateLimitWindow = sec.apiRateLimitWindow;
             if (typeof sec.apiRateLimitMax === 'number') config.security.apiRateLimitMax = sec.apiRateLimitMax;
             if (typeof sec.loginRateLimitWindow === 'number') {
                 config.security.loginRateLimitWindow = sec.loginRateLimitWindow;
             }
             if (typeof sec.loginRateLimitMax === 'number') config.security.loginRateLimitMax = sec.loginRateLimitMax;
+            if (typeof sec.mcpRateLimitWindow === 'number') config.security.mcpRateLimitWindow = sec.mcpRateLimitWindow;
+            if (typeof sec.mcpRateLimitMax === 'number') config.security.mcpRateLimitMax = sec.mcpRateLimitMax;
+            if (sec.corsOrigins !== undefined) {
+                config.security.corsOrigins = parseOriginList(sec.corsOrigins);
+                if (sec.corsOrigins === '*' || (Array.isArray(sec.corsOrigins) && sec.corsOrigins.includes('*'))) {
+                    warnings.push('security.corsOrigins wildcard ignored; credentials cannot use *');
+                }
+            }
         } else {
             warnings.push('security invalid; using defaults');
         }
