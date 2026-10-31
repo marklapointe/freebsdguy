@@ -37,13 +37,20 @@ Everyone must log in again after a mode change.
 
 ## Secrets
 
-Production still needs a strong secret for **either** mode:
+Production reads the signing secret from a file, not from the command line:
 
-- `JWT_SECRET` in `/usr/local/etc/mdweb/mdweb.env` (recommended)
-- or `SESSION_SECRET` (used when set; falls back to `JWT_SECRET`)
-- or `config.jwtSecret` (discouraged for production)
+- `JWT_SECRET_FILE` (default in the rc script: `/usr/local/etc/mdweb/jwt.secret`)
+- the file must be mode `0600` or the process refuses to start
+- `SESSION_SECRET` or `JWT_SECRET` in the environment still work for development
+- `config.jwtSecret` is discouraged
 
-Default insecure value is rejected in production.
+The known insecure value is rejected in production. The rc script exports only the file path.
+
+## First admin
+
+MDWeb does not ship `admin` / `admin`. If that password hash is present, startup is refused and login returns 403.
+
+Create the account with `bootstrap-admin` (one-time setup token, or stdin on the console). `change-password` reads the new password from stdin or `--password-file` (also mode `0600`). It will not take the password as an argument.
 
 ## Logout
 
@@ -55,6 +62,6 @@ Session cookies use `SameSite=Lax` and assume a same-origin SPA. Cross-site cook
 
 ## Personal access tokens (MCP / API)
 
-Long-lived `mdw_…` Bearer tokens can be minted in Admin → **Tokens** (or `POST /api/tokens`). They authenticate both REST `/api/*` and the MCP endpoint `POST /mcp` with the owning user’s live role. Details: [MCP.md](./MCP.md).
+Long-lived `mdw_…` Bearer tokens can be minted in Admin → **Tokens** (or `POST /api/tokens`). Each token has a scope, `read` or `write`, stored next to its hash in `tokens.json`. A read token can fetch; it is refused on create, edit, and delete routes and MCP tools. Details: [MCP.md](./MCP.md).
 
 See also: [UPGRADE.md](./UPGRADE.md), [ADMIN.md](./ADMIN.md), [MCP.md](./MCP.md).

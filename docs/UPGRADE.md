@@ -9,7 +9,9 @@ How to upgrade without losing posts, users, site settings, or theme customizatio
 | `/usr/local/www/mdweb` | App code, `dist/`, shipped themes | **Replaced** |
 | `/usr/local/etc/mdweb/config.json` | Site settings, theme pack, AI, appearance | **Preserved** |
 | `/usr/local/etc/mdweb/users.json` | Admin + users | **Preserved** |
-| `/usr/local/etc/mdweb/mdweb.env` | `JWT_SECRET` | **Preserved** |
+| `/usr/local/etc/mdweb/jwt.secret` | Signing secret (mode 0600). `JWT_SECRET_FILE` points here | **Preserved** |
+| `/usr/local/etc/mdweb/mdweb.env` | Non-secret environment | **Preserved** |
+| `/usr/local/etc/mdweb/audit.log` | JSON-lines audit log | **Preserved** |
 | `/var/db/mdweb/posts` | Markdown posts + images | **Preserved** |
 | `/var/db/mdweb/themes` | Runtime theme packs (incl. color overrides) | **Preserved** (missing files seeded only) |
 | `/var/db/mdweb/sessions` | Classical session files (`authMode: session`) | **Preserved** (delete = force re-login) |

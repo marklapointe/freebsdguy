@@ -2,7 +2,7 @@
 # Create a source tarball for the FreeBSD port (www/mdweb).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.0.0}"
+VERSION="${1:-1.1.0}"
 NAME="mdweb-${VERSION}"
 OUT_DIR="${2:-${ROOT}/artifacts/distfiles}"
 STAGE="$(mktemp -d)"
@@ -21,6 +21,7 @@ rsync -a \
   --exclude 'server/config/users.json' \
   --exclude playwright-report \
   --exclude test-results \
+  --exclude ports/www/mdweb/distinfo \
   "${ROOT}/" "${STAGE}/${NAME}/"
 
 # Ensure LICENSE exists

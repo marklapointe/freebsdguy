@@ -18,7 +18,15 @@ Every MCP call requires a **personal access token (PAT)**. The token acts as the
 
 REST equivalents: `POST /api/tokens`, `POST /api/admin/tokens`, `GET /api/tokens`, `DELETE /api/tokens/:id`.
 
-Plaintext is returned only at mint. Disk stores SHA-256 hashes in `tokens.json` next to `users.json` (`CONFIG_DIR` / `/usr/local/etc/mdweb/tokens.json` on FreeBSD packages).
+Plaintext is returned only at mint. Disk stores SHA-256 hashes in `tokens.json` next to `users.json` (`CONFIG_DIR` / `/usr/local/etc/mdweb/tokens.json` on FreeBSD packages), plus a `scope` of `read` or `write`.
+
+Mint from the CLI (scope is required):
+
+```sh
+npm run mint-token -- --username admin --label cursor --scope read
+```
+
+A `read` token receives HTTP 403, or an MCP tool error, for any create, edit, or delete. `write` is the scope used when the admin UI does not say otherwise. Tokens that predate scopes are treated as `write`.
 
 ## Cursor / HTTP client config
 
@@ -56,6 +64,8 @@ Call `get_playbook` (or read resource `mdweb://playbook`) for workflows.
 - A PAT is as powerful as that user’s password for API/MCP — rotate by revoking in Admin.
 - Deleting a user revokes their PATs. Password change does **not** auto-revoke PATs.
 - Max 20 active tokens per user.
-- Prefer loopback or TLS (`MDWEB_TLS=1` behind a reverse proxy) when the host is reachable beyond localhost.
+- Prefer loopback (`service.host` defaults to `127.0.0.1`) or TLS (`MDWEB_TLS=1` behind a reverse proxy).
+- CORS is an allowlist (`security.corsOrigins` or `MDWEB_CORS_ORIGINS`). `*` is ignored and is never combined with credentials.
+- `/mcp`, `/api`, and `POST /api/login` are rate limited. Excess requests get HTTP 429. Tune `security.mcpRateLimitMax`, `apiRateLimitMax`, and `loginRateLimitMax` (windows are in seconds).
 
 See also [AUTH.md](./AUTH.md).

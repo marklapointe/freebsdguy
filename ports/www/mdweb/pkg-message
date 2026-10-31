@@ -3,11 +3,16 @@
   message: <<EOM
 MDWeb has been installed.
 
-1. Set a strong JWT secret (required in production):
+1. Create a JWT secret file (mode 0600, owned by www). Do not put the
+   secret in rc.conf or on the command line:
 
-     install -m 0600 /usr/local/etc/mdweb/mdweb.env.sample \
-       /usr/local/etc/mdweb/mdweb.env
-     # edit /usr/local/etc/mdweb/mdweb.env and set JWT_SECRET
+     umask 077
+     openssl rand -hex 32 > /usr/local/etc/mdweb/jwt.secret
+     chown www:www /usr/local/etc/mdweb/jwt.secret
+     chmod 0600 /usr/local/etc/mdweb/jwt.secret
+
+   The rc script sets JWT_SECRET_FILE to that path. Any other mode
+   refuses to start.
 
 2. Copy sample config if needed:
 
@@ -15,22 +20,36 @@ MDWeb has been installed.
        /usr/local/etc/mdweb/config.json
      cp /usr/local/etc/mdweb/users.json.sample \
        /usr/local/etc/mdweb/users.json
-     chown www:www /usr/local/etc/mdweb/users.json
+     chown www:www /usr/local/etc/mdweb/config.json \
+       /usr/local/etc/mdweb/users.json
      chmod 0600 /usr/local/etc/mdweb/users.json
 
-3. Change the default admin password immediately
-   (default is admin / admin until you change it):
+   service.host defaults to 127.0.0.1. security.corsOrigins is an
+   allowlist (never "*"). Rate limits on /api/login, /api, and /mcp
+   return HTTP 429 when exceeded.
 
-     cd /usr/local/www/mdweb && \
-       env CONFIG_DIR=/usr/local/etc/mdweb \
-       ./node_modules/.bin/tsx server/scripts/change-password.ts admin 'your-strong-password'
+3. Create the admin. There is no admin/admin password. The password
+   comes from stdin or a mode-0600 file, never argv:
 
-4. Enable and start the service:
+     cd /usr/local/www/mdweb
+     env CONFIG_DIR=/usr/local/etc/mdweb \
+       ./node_modules/.bin/tsx server/scripts/bootstrap-admin.ts --issue-token
+     printf '%s\n' 'a-long-password' | env CONFIG_DIR=/usr/local/etc/mdweb \
+       ./node_modules/.bin/tsx server/scripts/bootstrap-admin.ts \
+       --username admin --setup-token 'THE_TOKEN'
+
+   Later password changes:
+
+     printf '%s\n' 'a-new-password' | env CONFIG_DIR=/usr/local/etc/mdweb \
+       ./node_modules/.bin/tsx server/scripts/change-password.ts admin
+
+4. Enable and start:
 
      sysrc mdweb_enable=YES
      service mdweb start
 
 Health check: curl http://127.0.0.1:5173/api/health
+Audit log: /usr/local/etc/mdweb/audit.log (JSON lines; no tokens or passwords)
 EOM
 }
 ]
