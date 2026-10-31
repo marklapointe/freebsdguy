@@ -19,6 +19,7 @@ load_rc_config $name
 # Legacy location (pre-1.0.1 docs) still honored when the canonical file is absent
 : ${mdweb_env_file_legacy:="/usr/local/etc/mdweb.env"}
 : ${mdweb_config_dir:="/usr/local/etc/mdweb"}
+: ${mdweb_jwt_secret_file:="/usr/local/etc/mdweb/jwt.secret"}
 
 pidfile="/var/run/${name}.pid"
 procname="/usr/local/bin/node"
@@ -36,25 +37,34 @@ fi
 export NODE_ENV=production
 export CONFIG_DIR="${mdweb_config_dir}"
 export PORT="${mdweb_port}"
-# Secrets stay in the process environment — never on argv (ps-visible).
-if [ -n "${JWT_SECRET:-}" ]; then
-	export JWT_SECRET
-fi
-if [ -n "${SESSION_SECRET:-}" ]; then
-	export SESSION_SECRET
-fi
+# The secret stays in a mode-0600 file. Do not export it or place it on argv.
+unset JWT_SECRET
+unset SESSION_SECRET
+export JWT_SECRET_FILE="${mdweb_jwt_secret_file}"
 
 # -f: run in foreground (daemon handles backgrounding)
 # -p: write child pid to pidfile
 # -r: restart child if it exits
 # -u: run as user
-# daemon inherits exported env; do not pass JWT_SECRET= on the env/argv line.
+# daemon inherits JWT_SECRET_FILE (a path). The secret value is not on argv.
 command_args="-f -p ${pidfile} -r -u ${mdweb_user} /usr/bin/env NODE_ENV=production CONFIG_DIR=${mdweb_config_dir} PORT=${mdweb_port} ${mdweb_dir}/node_modules/.bin/tsx ${mdweb_dir}/server/index.ts -p ${mdweb_port}"
 
 start_precmd="mdweb_prestart"
 stop_postcmd="mdweb_postclean"
 
 mdweb_prestart() {
+    if [ ! -f "${mdweb_jwt_secret_file}" ]; then
+        echo "${name}: JWT secret file missing: ${mdweb_jwt_secret_file} (mode 0600)." >&2
+        return 1
+    fi
+    _mode=$(stat -f '%Lp' "${mdweb_jwt_secret_file}" 2>/dev/null || stat -c '%a' "${mdweb_jwt_secret_file}" 2>/dev/null || echo '')
+    case "${_mode}" in
+    600|0600) ;;
+    *)
+        echo "${name}: ${mdweb_jwt_secret_file} must be mode 0600 (is ${_mode:-unknown})." >&2
+        return 1
+        ;;
+    esac
     if [ ! -d "/var/run" ]; then
         mkdir -p /var/run
     fi

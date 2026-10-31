@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { AdminTokens } from '../src/components/admin/AdminTokens';
+import { AdminTokens, MyTokensPanel } from '../src/components/admin/AdminTokens';
 
 vi.mock('../src/lib/api', async () => {
     const actual = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
@@ -51,9 +51,11 @@ describe('AdminTokens', () => {
         fireEvent.change(screen.getByTestId('token-mint-label'), {
             target: { value: 'cursor' }
         });
+        fireEvent.change(screen.getByTestId('token-mint-scope'), { target: { value: 'read' } });
+        fireEvent.change(screen.getByTestId('token-mint-scope'), { target: { value: 'write' } });
         fireEvent.click(screen.getByTestId('token-mint-submit'));
 
-        await waitFor(() => expect(mintAdminToken).toHaveBeenCalledWith('admin', 'cursor'));
+        await waitFor(() => expect(mintAdminToken).toHaveBeenCalledWith('admin', 'cursor', 'write'));
         await waitFor(() =>
             expect(screen.getByTestId('token-reveal-value').textContent).toContain('mdw_')
         );
@@ -81,5 +83,23 @@ describe('AdminTokens', () => {
         await waitFor(() => screen.getByTestId('token-revoke-tok1'));
         fireEvent.click(screen.getByTestId('token-revoke-tok1'));
         await waitFor(() => expect(revokeToken).toHaveBeenCalledWith('tok1'));
+    });
+});
+
+describe('MyTokensPanel', () => {
+    it('mints a read token for the signed-in user', async () => {
+        const { api } = await import('../src/lib/api');
+        const get = vi.spyOn(api, 'get').mockResolvedValue({ data: { tokens: [] } } as never);
+        const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { token: 'mdw_mine' } } as never);
+        const showAlert = vi.fn();
+        const showConfirm = vi.fn();
+        render(<MyTokensPanel showAlert={showAlert} showConfirm={showConfirm} />);
+        await waitFor(() => expect(get).toHaveBeenCalled());
+        fireEvent.change(screen.getByTestId('my-token-scope'), { target: { value: 'write' } });
+        fireEvent.change(screen.getByTestId('my-token-scope'), { target: { value: 'read' } });
+        fireEvent.click(screen.getByTestId('my-token-mint'));
+        await waitFor(() => expect(post).toHaveBeenCalledWith('/tokens', { label: '', scope: 'read' }));
+        get.mockRestore();
+        post.mockRestore();
     });
 });

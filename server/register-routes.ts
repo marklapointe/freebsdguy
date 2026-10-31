@@ -43,6 +43,10 @@ import {
     revokeToken,
     revokeTokensForUser
 } from './lib/api-tokens.ts';
+import { parseTokenScope } from './lib/token-scope.ts';
+import { writeAudit } from './lib/audit-log.ts';
+import { DEFAULT_ADMIN_PASSWORD } from './lib/default-credentials.ts';
+import { isDefaultAdminCredential } from './lib/setup-admin.ts';
 import { registerMcpRoutes } from './mcp/register-mcp.ts';
 import {
     isValidThemeId,
@@ -138,10 +142,22 @@ app.post('/api/login', async (req: Request, res: Response) => {
         }
     };
 
+    const auditName = typeof username === 'string' ? username.slice(0, 120) : undefined;
+
+    const rejectDefault = async (hash: string | undefined) => {
+        if (password === DEFAULT_ADMIN_PASSWORD) return true;
+        return isDefaultAdminCredential(hash);
+    };
+
     // Check admin
     if (username === usersConfig.admin.username) {
         if (await passwordMatches(password, usersConfig.admin.passwordHash)) {
+            if (await rejectDefault(usersConfig.admin.passwordHash)) {
+                writeAudit({ event: 'login', outcome: 'rejected', username: auditName });
+                return res.status(403).json({ message: 'Default credentials are disabled' });
+            }
             console.log(`[AUTH] Admin login successful: ${username}`);
+            writeAudit({ event: 'login', outcome: 'success', username: auditName });
             return issueAuthResponse(res, {
                 username: usersConfig.admin.username,
                 role: usersConfig.admin.role
@@ -152,11 +168,17 @@ app.post('/api/login', async (req: Request, res: Response) => {
     // Check other users
     const user = usersConfig.users.find(u => u.username === username);
     if (user && (await passwordMatches(password, user.passwordHash))) {
+        if (await rejectDefault(user.passwordHash)) {
+            writeAudit({ event: 'login', outcome: 'rejected', username: auditName });
+            return res.status(403).json({ message: 'Default credentials are disabled' });
+        }
         console.log(`[AUTH] User login successful: ${username}`);
+        writeAudit({ event: 'login', outcome: 'success', username: auditName });
         return issueAuthResponse(res, { username: user.username, role: user.role });
     }
 
     console.warn(`[AUTH] Login failed for user: ${username}`);
+    writeAudit({ event: 'login', outcome: 'failure', username: auditName });
     res.status(401).json({ message: 'Invalid credentials' });
 });
 
@@ -216,6 +238,7 @@ app.post('/api/admin/users', authenticate, requireAdmin, async (req: Authenticat
     saveUsers(usersConfig);
 
     console.log(`[INFO] New user created: ${cleanUsername} with role ${cleanRole}`);
+    writeAudit({ event: 'content', action: 'create', resource: 'user', id: cleanUsername, username: req.user?.username });
     res.json({ message: 'User created' });
 });
 
@@ -239,6 +262,7 @@ app.delete('/api/admin/users/:username', authenticate, requireAdmin, (req: Authe
     sessionStore.destroyForUser(String(username));
     revokeTokensForUser(String(username));
     console.log(`[INFO] User deleted: ${username}`);
+    writeAudit({ event: 'content', action: 'delete', resource: 'user', id: String(username), username: req.user?.username });
     res.json({ message: 'User deleted' });
 });
 
@@ -251,14 +275,23 @@ app.get('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) 
 app.post('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) => {
     const username = req.user?.username as string;
     const label = typeof req.body?.label === 'string' ? req.body.label : '';
+    let scope: ReturnType<typeof parseTokenScope>;
     try {
-        const { plaintext, record } = mintToken(username, label);
+        scope = parseTokenScope(req.body?.scope);
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Invalid token scope';
+        return res.status(400).json({ message: msg });
+    }
+    try {
+        const { plaintext, record } = mintToken(username, label, scope);
+        writeAudit({ event: 'token', action: 'mint', username, tokenId: record.id, scope: record.scope });
         res.status(201).json({
             token: plaintext,
             id: record.id,
             prefix: record.prefix,
             label: record.label,
             username: record.username,
+            scope: record.scope,
             createdAt: record.createdAt
         });
     } catch (e: unknown) {
@@ -273,6 +306,7 @@ app.delete('/api/tokens/:id', authenticate, (req: AuthenticatedRequest, res: Res
     const isAdmin = req.user?.role === 'admin';
     const ok = revokeToken(id, isAdmin ? undefined : { onlyUsername: req.user?.username });
     if (!ok) return res.status(404).json({ message: 'Token not found' });
+    writeAudit({ event: 'token', action: 'revoke', username: req.user?.username, tokenId: id });
     res.json({ message: 'Token revoked' });
 });
 
@@ -291,14 +325,23 @@ app.post('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedReq
     if (!findUserByUsername(username)) {
         return res.status(404).json({ message: 'User not found' });
     }
+    let scope: ReturnType<typeof parseTokenScope>;
     try {
-        const { plaintext, record } = mintToken(username, label);
+        scope = parseTokenScope(req.body?.scope);
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Invalid token scope';
+        return res.status(400).json({ message: msg });
+    }
+    try {
+        const { plaintext, record } = mintToken(username, label, scope);
+        writeAudit({ event: 'token', action: 'mint', username, tokenId: record.id, scope: record.scope });
         res.status(201).json({
             token: plaintext,
             id: record.id,
             prefix: record.prefix,
             label: record.label,
             username: record.username,
+            scope: record.scope,
             createdAt: record.createdAt
         });
     } catch (e: unknown) {
@@ -503,6 +546,7 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
         author: req.user.username
     });
 
+    writeAudit({ event: 'content', action: 'update', resource: 'post', id: slug, username: req.user?.username });
     res.json({ message: 'Post saved' });
 });
 
@@ -644,6 +688,7 @@ app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: Authenticated
 
     saveConfig(config);
     setActive(config);
+    writeAudit({ event: 'content', action: 'update', resource: 'ai-config', username: req.user?.username });
     res.json({ message: 'AI Configuration updated' });
 });
 
@@ -673,6 +718,7 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, async (re
             });
 
             console.log(`[INFO] Image deleted: ${filename}`);
+            writeAudit({ event: 'content', action: 'delete', resource: 'image', id: String(req.params.filename || ''), username: req.user?.username });
             res.json({ message: 'Image deleted' });
         } catch (error: any) {
             console.error(`[ERROR] Failed to delete image ${filename}:`, error.message);
@@ -719,6 +765,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
     }
 
     saveManifest(imagesDir, manifest);
+    writeAudit({ event: 'content', action: 'delete', resource: 'image', username: req.user?.username });
     res.json({ message: `Deleted ${deletedCount} images`, deletedCount, errors });
     });
 });
@@ -767,7 +814,14 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
                 sessionCookieName: b.security.sessionCookieName ?? prev.sessionCookieName,
                 disableAI: !!b.security.disableAI,
                 disableImages: !!b.security.disableImages,
-                disablePublicSearch: !!b.security.disablePublicSearch
+                disablePublicSearch: !!b.security.disablePublicSearch,
+                apiRateLimitWindow: b.security.apiRateLimitWindow ?? prev.apiRateLimitWindow,
+                apiRateLimitMax: b.security.apiRateLimitMax ?? prev.apiRateLimitMax,
+                loginRateLimitWindow: b.security.loginRateLimitWindow ?? prev.loginRateLimitWindow,
+                loginRateLimitMax: b.security.loginRateLimitMax ?? prev.loginRateLimitMax,
+                mcpRateLimitWindow: b.security.mcpRateLimitWindow ?? prev.mcpRateLimitWindow,
+                mcpRateLimitMax: b.security.mcpRateLimitMax ?? prev.mcpRateLimitMax,
+                corsOrigins: b.security.corsOrigins ?? prev.corsOrigins
             };
         }
         if (isObj(b.service)) patch.service = { ...(current.service || {}), ...b.service };
@@ -790,6 +844,7 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         saveConfig(config);
         setActive(config);
 
+        writeAudit({ event: 'content', action: 'update', resource: 'config', username: req.user?.username });
         res.json({ message: 'Configuration updated', currentTheme: config.currentTheme });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to save configuration';
@@ -835,6 +890,7 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
     }
 
     fs.writeFileSync(themePath, JSON.stringify(sanitizedColors, null, 2));
+    writeAudit({ event: 'content', action: 'update', resource: 'theme', id: name, username: req.user?.username });
     res.json({ message: `Theme ${name} saved` });
 });
 
@@ -852,6 +908,7 @@ app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedR
 
     if (fs.existsSync(postPath)) {
         fs.unlinkSync(postPath);
+        writeAudit({ event: 'content', action: 'delete', resource: 'post', id: String(slug), username: req.user?.username });
         res.json({ message: 'Post deleted' });
     } else {
         res.status(404).json({ message: 'Post not found' });
@@ -952,6 +1009,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
         saveManifest(imagesDir, manifest);
 
         console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
+        writeAudit({ event: 'content', action: 'create', resource: 'image', id: newFilename, username: req.user?.username });
         res.json({ filename: newFilename, url: `/api/getimage?fileName=${newFilename}` });
       });
     } catch (error) {
@@ -1056,6 +1114,7 @@ app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, r
         saveConfig(config);
         setActive(config);
         console.log(`[INFO] Admin set site theme to: ${currentTheme}`);
+        writeAudit({ event: 'content', action: 'update', resource: 'site-theme', id: String(currentTheme), username: req.user?.username });
         res.json({ message: 'Site theme updated', currentTheme });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to set theme';

@@ -1,6 +1,8 @@
+import fs from 'fs';
 import { loadUsers, saveUsers } from '../lib/config.ts';
 import { updatePassword } from '../lib/auth.ts';
 import { FileSessionStore, defaultSessionDir } from '../lib/session-store.ts';
+import { parseChangePasswordArgs, readPasswordInput } from '../lib/cli-password.ts';
 
 const changePassword = async (username: string, newPassword: string) => {
     const usersConfig = loadUsers();
@@ -19,15 +21,23 @@ const changePassword = async (username: string, newPassword: string) => {
     }
 };
 
-// Simple CLI handling
-const args = process.argv.slice(2);
-if (args.length !== 2) {
-    console.log('Usage: npm run change-password <username> <new_password>');
-    process.exit(1);
-}
+const main = async () => {
+    const parsed = parseChangePasswordArgs(process.argv);
+    let stdinText = '';
+    if (!parsed.passwordFile) {
+        if (process.stdin.isTTY) {
+            console.error(
+                'Refusing to read the password from the command line. Pass it on stdin or --password-file.'
+            );
+            process.exit(1);
+        }
+        stdinText = fs.readFileSync(0, 'utf8');
+    }
+    const password = readPasswordInput({ passwordFile: parsed.passwordFile, stdinText });
+    await changePassword(parsed.username, password);
+};
 
-const [username, newPassword] = args;
-changePassword(username, newPassword).catch(err => {
-    console.error('Error updating password:', err);
+main().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
     process.exit(1);
 });

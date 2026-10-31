@@ -237,19 +237,20 @@ describe('P0: rc scripts do not put JWT_SECRET on argv', () => {
             path.join(process.cwd(), 'ports/www/mdweb/files/mdweb.in'),
             'utf8'
         );
-        expect(src).toMatch(/export\s+JWT_SECRET/);
-        // command_args block must not interpolate JWT_SECRET into env argv
+        expect(src).toMatch(/JWT_SECRET_FILE=/);
+        expect(src).not.toMatch(/export\s+JWT_SECRET\s*(\n|$)/);
         const argsLine = src
             .split('\n')
             .filter((l) => l.includes('command_args') || l.includes('JWT_SECRET='))
             .join('\n');
         expect(argsLine).not.toMatch(/command_args=.*JWT_SECRET=\$/);
-        expect(src).not.toMatch(/env[^\\n]*JWT_SECRET=\$\{JWT_SECRET\}/);
+        expect(src).not.toMatch(/JWT_SECRET=\$\{JWT_SECRET\}/);
     });
 
     it('root mdweb.rc omits JWT_SECRET from daemon argv', () => {
         const src = fs.readFileSync(path.join(process.cwd(), 'mdweb.rc'), 'utf8');
         expect(src).not.toMatch(/JWT_SECRET=\$\{JWT_SECRET\}/);
-        expect(src).toMatch(/export\s+JWT_SECRET/);
+        expect(src).toMatch(/JWT_SECRET_FILE=/);
+        expect(src).not.toMatch(/export\s+JWT_SECRET\s*(\n|$)/);
     });
 });

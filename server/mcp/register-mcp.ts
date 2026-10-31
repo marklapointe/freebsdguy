@@ -7,6 +7,7 @@ import type { AppContext } from '../lib/app-context.ts';
 import type { AuthenticatedRequest } from '../middleware/auth.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
 import { createMdwebMcpServer } from './create-server.ts';
+import { writeAudit } from '../lib/audit-log.ts';
 
 export function registerMcpRoutes(app: Express, ctx: AppContext): void {
     const { authenticate, getActiveConfig, setActiveConfig } = ctx;
@@ -21,8 +22,14 @@ export function registerMcpRoutes(app: Express, ctx: AppContext): void {
         const server = createMdwebMcpServer({
             user: { username, role: role as Role },
             getActive: getActiveConfig,
-            setActive: setActiveConfig
+            setActive: setActiveConfig,
+            tokenScope: req.tokenScope
         });
+        const rpc = req.body as { method?: string; params?: { name?: string } } | undefined;
+        if (rpc?.method === 'tools/call') {
+            const tool = typeof rpc.params?.name === 'string' ? rpc.params.name : 'unknown';
+            writeAudit({ event: 'mcp', tool, username, outcome: 'accepted' });
+        }
 
         try {
             const transport = new StreamableHTTPServerTransport({

@@ -22,6 +22,7 @@ load_rc_config $name
 # Legacy location (pre-1.0.1 docs) still honored when the canonical file is absent
 : ${mdweb_env_file_legacy:="/usr/local/etc/mdweb.env"}
 : ${mdweb_config_dir:="/usr/local/etc/mdweb"}
+: ${mdweb_jwt_secret_file:="/usr/local/etc/mdweb/jwt.secret"}
 
 pidfile="/var/run/mdweb/${name}.pid"
 procname="%%LOCALBASE%%/bin/node"
@@ -38,13 +39,10 @@ fi
 export NODE_ENV=production
 export CONFIG_DIR="${mdweb_config_dir}"
 export PORT="${mdweb_port}"
-# Secrets stay in the process environment (sourced above) — never on argv (ps-visible).
-if [ -n "${JWT_SECRET:-}" ]; then
-	export JWT_SECRET
-fi
-if [ -n "${SESSION_SECRET:-}" ]; then
-	export SESSION_SECRET
-fi
+# The secret stays in a mode-0600 file. Do not export it or place it on argv.
+unset JWT_SECRET
+unset SESSION_SECRET
+export JWT_SECRET_FILE="${mdweb_jwt_secret_file}"
 
 # Root runs daemon; -u drops to www; -p writes child (node) pid for status.
 # daemon inherits exported env; do not pass JWT_SECRET= on the env/argv line.
@@ -57,10 +55,18 @@ stop_postcmd="mdweb_postclean"
 
 mdweb_prestart()
 {
-	if [ -z "${JWT_SECRET}" ] || [ "${JWT_SECRET}" = "freebsd_guy_secret_key" ]; then
-		echo "${name}: JWT_SECRET is missing or insecure. Set it in ${mdweb_env_file}." >&2
+	if [ ! -f "${mdweb_jwt_secret_file}" ]; then
+		echo "${name}: JWT secret file missing: ${mdweb_jwt_secret_file} (mode 0600, owned by ${mdweb_runas})." >&2
 		return 1
 	fi
+	_mode=$(stat -f '%Lp' "${mdweb_jwt_secret_file}" 2>/dev/null || stat -c '%a' "${mdweb_jwt_secret_file}" 2>/dev/null || echo '')
+	case "${_mode}" in
+	600|0600) ;;
+	*)
+		echo "${name}: ${mdweb_jwt_secret_file} must be mode 0600 (is ${_mode:-unknown})." >&2
+		return 1
+		;;
+	esac
 
 	install -d -o root -g wheel -m 0755 /var/run/mdweb
 	# child process (www) must write the pidfile

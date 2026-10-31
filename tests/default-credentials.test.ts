@@ -17,7 +17,7 @@ describe('Default admin credentials (shipped sample)', () => {
         expect(ok).toBe(true);
     });
 
-    it('DEFAULT_ADMIN_PASSWORD is the documented first-boot password "admin"', () => {
+    it('DEFAULT_ADMIN_PASSWORD is the rejected shipped password "admin"', () => {
         expect(DEFAULT_ADMIN_USERNAME).toBe('admin');
         expect(DEFAULT_ADMIN_PASSWORD).toBe('admin');
     });
@@ -27,11 +27,12 @@ describe('Default admin credentials (shipped sample)', () => {
         expect(await bcrypt.compare('password', DEFAULT_ADMIN_PASSWORD_HASH)).toBe(false);
     });
 
-    it('ports sample users.json uses the same hash constant', () => {
+    it('ports sample users.json does not ship a usable default password', () => {
         const samplePath = path.resolve(process.cwd(), 'ports/www/mdweb/files/users.json.sample');
         const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8'));
         expect(sample.admin.username).toBe(DEFAULT_ADMIN_USERNAME);
-        expect(sample.admin.passwordHash).toBe(DEFAULT_ADMIN_PASSWORD_HASH);
+        expect(sample.admin.passwordHash).toBe('');
+        expect(sample.admin.passwordHash).not.toBe(DEFAULT_ADMIN_PASSWORD_HASH);
     });
 });
 
@@ -62,14 +63,13 @@ describe('Login with shipped default users', () => {
         }
     });
 
-    it('POST /api/login accepts admin / admin with shipped hash', async () => {
+    it('POST /api/login refuses admin / admin even when the shipped hash is on disk', async () => {
         const res = await request(app)
             .post('/api/login')
             .send({ username: DEFAULT_ADMIN_USERNAME, password: DEFAULT_ADMIN_PASSWORD });
-        expect(res.status).toBe(200);
-        expect(res.body.token).toBeTruthy();
-        expect(res.body.role).toBe('admin');
-        expect(res.body.username).toBe(DEFAULT_ADMIN_USERNAME);
+        expect(res.status).toBe(403);
+        expect(res.body.token).toBeFalsy();
+        expect(JSON.stringify(res.body)).toMatch(/default/i);
     });
 
     it('POST /api/login rejects admin123 against shipped hash', async () => {

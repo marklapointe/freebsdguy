@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { usersPath, writeJsonAtomic, findUserByUsername } from './config.ts';
+import { parseTokenScope, storedTokenScope, type TokenScope } from './token-scope.ts';
 
 export const PAT_PREFIX = 'mdw_';
 export const MAX_TOKENS_PER_USER = 20;
@@ -16,6 +17,7 @@ export interface TokenRecord {
     label: string;
     hash: string;
     prefix: string;
+    scope: TokenScope;
     createdAt: number;
     lastUsedAt?: number;
     revokedAt?: number;
@@ -27,6 +29,7 @@ export interface TokenPublic {
     username: string;
     label: string;
     prefix: string;
+    scope: TokenScope;
     createdAt: number;
     lastUsedAt?: number;
     revokedAt?: number;
@@ -82,6 +85,7 @@ function toPublic(r: TokenRecord): TokenPublic {
         username: r.username,
         label: r.label,
         prefix: r.prefix,
+        scope: storedTokenScope(r.scope),
         createdAt: r.createdAt,
         lastUsedAt: r.lastUsedAt,
         revokedAt: r.revokedAt
@@ -94,8 +98,10 @@ function activeForUser(records: TokenRecord[], username: string): TokenRecord[] 
 
 export function mintToken(
     username: string,
-    label = ''
+    label = '',
+    scope: unknown = 'write'
 ): { plaintext: string; record: TokenRecord } {
+    const parsedScope = parseTokenScope(scope);
     if (!username || !findUserByUsername(username)) {
         throw new Error('User not found or locked');
     }
@@ -114,6 +120,7 @@ export function mintToken(
         label: String(label || '').slice(0, 120),
         hash: hashToken(plaintext),
         prefix,
+        scope: parsedScope,
         createdAt: Date.now()
     };
     records.push(record);

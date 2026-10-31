@@ -14,6 +14,7 @@
  */
 
 import type { Config } from './config.ts';
+import { readMode0600File, SecretFileError } from './secret-file.ts';
 
 export const INSECURE_DEFAULT_JWT_SECRET = 'freebsd_guy_secret_key';
 
@@ -101,10 +102,22 @@ export class JwtSecretFactory {
     }
 }
 
-/** Convenience for call sites that only need the string. */
+/**
+ * Secret material for signing.
+ * JWT_SECRET_FILE wins and must be mode 0600. A bad file is never ignored in favor of argv/env.
+ */
 export function resolveJwtSecret(config?: Pick<Config, 'jwtSecret'> | null, mode?: JwtResolveMode): string {
+    let envSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+    if (process.env.JWT_SECRET_FILE) {
+        try {
+            envSecret = readMode0600File(process.env.JWT_SECRET_FILE);
+        } catch (e) {
+            if (e instanceof SecretFileError) throw new JwtSecretError(e.message);
+            throw e;
+        }
+    }
     return JwtSecretFactory.forMode(mode)
-        .fromEnv(process.env.JWT_SECRET)
+        .fromEnv(envSecret)
         .fromConfig(config ?? undefined)
         .create().secret;
 }

@@ -390,6 +390,7 @@ export interface TokenPublic {
     username: string;
     label: string;
     prefix: string;
+    scope?: 'read' | 'write';
     createdAt: number;
     lastUsedAt?: number;
     revokedAt?: number;
@@ -409,8 +410,8 @@ export async function listMyTokens(): Promise<TokenPublic[]> {
     return Array.isArray(res.data?.tokens) ? res.data.tokens : [];
 }
 
-export async function mintMyToken(label = ''): Promise<MintedToken> {
-    const res = await api.post('/tokens', { label });
+export async function mintMyToken(label = '', scope: 'read' | 'write' = 'write'): Promise<MintedToken> {
+    const res = await api.post('/tokens', { label, scope });
     return res.data as MintedToken;
 }
 
@@ -421,8 +422,12 @@ export async function listAdminTokens(username?: string): Promise<TokenPublic[]>
     return Array.isArray(res.data?.tokens) ? res.data.tokens : [];
 }
 
-export async function mintAdminToken(username: string, label = ''): Promise<MintedToken> {
-    const res = await api.post('/admin/tokens', { username, label });
+export async function mintAdminToken(
+    username: string,
+    label = '',
+    scope: 'read' | 'write' = 'write'
+): Promise<MintedToken> {
+    const res = await api.post('/admin/tokens', { username, label, scope });
     return res.data as MintedToken;
 }
 
