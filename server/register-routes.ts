@@ -80,6 +80,38 @@ const imagesDirOf = (config: { postsDir?: string }) =>
 const themeDirForConfig = (config: { themeDir?: string }) =>
     resolveConfiguredPath(configDirOf(), config.themeDir || './themes');
 
+/**
+ * Express error handler — never leak the originating error message or status
+ * details beyond a generic body. Top-level so it can be unit-tested directly.
+ */
+export function jsonErrorHandler(
+    err: unknown,
+    _req: Request,
+    res: Response,
+    next: NextFunction
+): void {
+    const e = err as { status?: unknown; statusCode?: unknown; message?: unknown } | null;
+    const pick = (v: unknown) =>
+        typeof v === 'number' && v >= 400 && v <= 599 ? v : undefined;
+    const status = pick(e?.status) ?? pick(e?.statusCode) ?? 500;
+    if (res.headersSent) {
+        next(err);
+        return;
+    }
+    if (status === 500) {
+        console.error('[ERROR]', status, e?.message);
+    }
+    let message: string;
+    if (status === 500) {
+        message = 'Internal Server Error';
+    } else if (status === 400) {
+        message = 'Bad Request';
+    } else {
+        message = 'Error';
+    }
+    res.status(status).json({ message });
+}
+
 export function registerRoutes(app: Express, ctx: AppContext): void {
     const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload } = ctx;
     const getActive = ctx.getActiveConfig;
@@ -1125,5 +1157,11 @@ app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, r
     }
 });
 
+    // 404 handler (must be after every route, including the SPA catch-all and /api/health)
+    app.use((_req: Request, res: Response) => {
+        res.status(404).json({ message: 'Not Found' });
+    });
 
+    // Error handler — never leak Express/framework details.
+    app.use(jsonErrorHandler);
 }

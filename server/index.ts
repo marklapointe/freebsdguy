@@ -21,6 +21,7 @@ import { resolveConfiguredPath, resolvePostsDir } from './lib/safe-path.ts';
 import { registerRoutes } from './register-routes.ts';
 
 const app = express();
+app.disable('x-powered-by');
 export { app };
 
 /** Parse CLI --port / -p from an argv-like array (testable). */
@@ -137,8 +138,8 @@ app.use(helmet({
         useDefaults: true,
         directives: {
             "img-src": ["'self'", "data:", "https:"],
-            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-            "connect-src": ["'self'", "https://api.openai.com", "http://localhost:*", "http://127.0.0.1:*"],
+            "script-src": ["'self'"],
+            "connect-src": ["'self'"],
             "upgrade-insecure-requests": null,
         },
     },
