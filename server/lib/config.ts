@@ -112,6 +112,8 @@ export interface Config {
     sortBy?: 'date' | 'title' | 'author';
     sortOrder?: 'asc' | 'desc';
     searchPlacement?: 'top' | 'bottom' | 'left' | 'right' | 'none';
+    /** Seed the shipped demo posts on start (default true; MDWEB_DEMO_POSTS overrides). */
+    demoPosts?: boolean;
     appearance?: AppearanceConfig;
     footer?: FooterConfig;
     aiConfig?: AIConfig;
@@ -220,7 +222,6 @@ export function defaultConfig(): Config {
             themeDir: '/var/db/mdweb/themes',
             currentTheme: 'dark',
             siteName: 'MDWeb',
-            siteLogo: 'logo.webp',
             pagination: 10,
             sortBy: 'date',
             sortOrder: 'desc',
@@ -435,6 +436,9 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
 
     if (typeof o.siteLogo === 'string') config.siteLogo = o.siteLogo;
 
+    if (typeof o.demoPosts === 'boolean') config.demoPosts = o.demoPosts;
+    else if (o.demoPosts !== undefined) warnings.push('demoPosts invalid; using default');
+
     if (o.pagination !== undefined) {
         config.pagination = asPagination(o.pagination, base.pagination || 10);
         if (typeof o.pagination !== 'number' && typeof o.pagination !== 'string') {
@@ -602,6 +606,7 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
         'currentTheme',
         'siteName',
         'siteLogo',
+        'demoPosts',
         'pagination',
         'sortBy',
         'sortOrder',

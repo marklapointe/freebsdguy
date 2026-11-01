@@ -15,7 +15,7 @@ import { createDefaultImageUpload } from './lib/upload-options.ts';
 import { RoleGuardFactory } from './middleware/auth.ts';
 import { createActiveConfigHolder } from './lib/app-context.ts';
 import { ensureRuntimeThemeCatalog } from './lib/themes.ts';
-import { ensureDemoPosts } from './lib/demo-posts.ts';
+import { ensureDemoPosts, demoPostsEnabled } from './lib/demo-posts.ts';
 import { FileSessionStore, defaultSessionDir } from './lib/session-store.ts';
 import { resolveConfiguredPath, resolvePostsDir } from './lib/safe-path.ts';
 import { registerRoutes } from './register-routes.ts';
@@ -69,7 +69,7 @@ try {
     console.log(`[INFO] Theme catalog ready: ${seed.total} preset(s)`);
 
     const postsDir = resolvePostsDir(configDir, cfg.postsDir);
-    const demo = ensureDemoPosts(postsDir);
+    const demo = ensureDemoPosts(postsDir, { enabled: demoPostsEnabled(cfg) });
     /* istanbul ignore next */
     if (demo.copied.length) {
         console.log(`[INFO] Seeded demo post(s): ${demo.copied.join(', ')}`);

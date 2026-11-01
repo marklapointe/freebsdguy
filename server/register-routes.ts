@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import sanitizeHtml from 'sanitize-html';
 import express from 'express';
 import { fileURLToPath } from 'url';
+import { packageVersion } from './lib/package-version.ts';
 import {
     loadConfig,
     saveConfig,
@@ -628,7 +629,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
     const postsDir = postsDirOf(config);
     res.json({
         ok: true,
-        version: process.env.npm_package_version || '1.0.0',
+        version: packageVersion(),
         env: process.env.NODE_ENV || 'development',
         auth: {
             mode: resolveAuthMode(config)
@@ -656,7 +657,7 @@ app.get('/api/config', (_req: Request, res: Response) => {
         const { config: safe } = sanitizeConfig(config);
         res.json({
             siteName: safe.siteName || 'MDWeb',
-            siteLogo: safe.siteLogo || 'logo.webp',
+            siteLogo: safe.siteLogo || '',
             currentTheme: safe.currentTheme || 'dark',
             appearance: safe.appearance || { themeMode: 'dark', crtEffects: true, textGlow: true },
             pagination: safe.pagination || 10,
@@ -786,7 +787,7 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
 
         const patch: Record<string, unknown> = {};
         if (b.siteName) patch.siteName = strip(b.siteName);
-        if (b.siteLogo !== undefined) patch.siteLogo = strip(b.siteLogo || 'logo.webp');
+        if (b.siteLogo !== undefined) patch.siteLogo = strip(b.siteLogo) || '';
         if (b.currentTheme) patch.currentTheme = strip(b.currentTheme);
         for (const k of ['pagination', 'sortBy', 'sortOrder', 'searchPlacement'] as const) {
             if (b[k] !== undefined) patch[k] = b[k];

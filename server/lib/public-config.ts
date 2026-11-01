@@ -156,7 +156,7 @@ export class PublicConfigBuilder {
     build(): PublicConfig {
         const out: PublicConfig = {
             siteName: this.source.siteName || 'Generic Blog',
-            siteLogo: this.source.siteLogo || 'logo.webp',
+            siteLogo: this.source.siteLogo || '',
             currentTheme: this.source.currentTheme || 'dark',
             appearance: projectAppearance(this.source.appearance),
             footer: projectFooter(this.source.footer),

@@ -1,6 +1,7 @@
 /**
  * Build a per-request McpServer with tools bound to the authenticated user.
  */
+import { packageVersion } from '../lib/package-version.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import fs from 'fs';
@@ -84,7 +85,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
     const { user, getActive, setActive, tokenScope } = deps;
 
     const server = new McpServer(
-        { name: 'mdweb', version: process.env.npm_package_version || '1.0.0' },
+        { name: 'mdweb', version: packageVersion() },
         { instructions: MDWEB_MCP_INSTRUCTIONS }
     );
 
