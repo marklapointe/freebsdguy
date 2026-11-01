@@ -128,16 +128,16 @@ describe('MCP tool bodies and route edges', () => {
         expect(uploadedInner.filename).toBeTruthy();
         expect(await call(admin, 'delete_image', { filename: uploadedInner.filename || '' })).toMatch(/Image deleted/);
 
-        expect(await call(writer, 'get_config', {})).toMatch(/Forbidden|admin/i);
+        expect(await call(writer, 'get_config', {})).toMatch(/Forbidden|admin|not found/i);
         expect(await call(admin, 'get_config', {})).toMatch(/siteName|Coverage/);
-        expect(await call(writer, 'list_themes', {})).toMatch(/Forbidden|admin/i);
+        expect(await call(writer, 'list_themes', {})).toMatch(/Forbidden|admin|not found/i);
         expect(await call(admin, 'list_themes', {})).toMatch(/\[/);
         expect(await call(admin, 'set_theme', { themeId: 'Not A Theme' })).toMatch(/Invalid theme/i);
         expect(await call(admin, 'set_theme', { themeId: 'dark' })).toMatch(/Theme set/);
         expect(await call(admin, 'save_theme', { name: '../x', colors: { '--bg': '#111111' } })).toMatch(/Invalid theme/i);
         expect(await call(admin, 'save_theme', { name: 'z-cov-theme', colors: { '--bg': '<b>#010101</b>' } })).toMatch(/saved/i);
 
-        expect(await call(writer, 'list_users', {})).toMatch(/Forbidden|admin/i);
+        expect(await call(writer, 'list_users', {})).toMatch(/Forbidden|admin|not found/i);
         expect(await call(admin, 'list_users', {})).toMatch(/writer/);
         expect(await call(admin, 'create_user', { username: '<b></b>', password: 'long-enough', role: 'contributor' })).toMatch(/Invalid|created/i);
         expect(await call(admin, 'create_user', { username: 'admin', password: 'long-enough', role: 'contributor' })).toMatch(/already exists/i);
@@ -266,7 +266,7 @@ describe('MCP tool bodies and route edges', () => {
             name: 'create_post',
             arguments: { slug: 'x', title: 'T', content: 'C' }
         });
-        expect(JSON.stringify(deniedWriter)).toMatch(/contributor or admin/i);
+        expect(JSON.stringify(deniedWriter)).toMatch(/contributor or admin|not found/i);
         await ghostClient.close();
         await ghost.close();
 

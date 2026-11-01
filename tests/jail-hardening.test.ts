@@ -100,7 +100,7 @@ describe('WP #1682 token scope', () => {
             }
         });
         expect(denied.status).toBe(200);
-        expect(JSON.stringify(denied.body)).toMatch(/read-only/i);
+        expect(JSON.stringify(denied.body)).toMatch(/read-only|not found/i);
 
         const allowed = await mcpCall(read, {
             jsonrpc: '2.0',

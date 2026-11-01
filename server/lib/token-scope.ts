@@ -68,3 +68,27 @@ export function isMutatingHttpRequest(method: string, rawPath: string): boolean 
 export function readTokenDenied(scope: TokenScope | undefined, method: string, rawPath: string): boolean {
     return scope === 'read' && isMutatingHttpRequest(method, rawPath);
 }
+
+/** MCP tools only an admin may run (their handlers call requireAdmin). */
+export const ADMIN_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
+    'get_config', 'update_config', 'list_themes', 'set_theme', 'save_theme',
+    'list_users', 'create_user', 'delete_user'
+]);
+
+/** MCP tools that need contributor or admin (their handlers call requireWriter). */
+export const WRITER_MCP_TOOLS: ReadonlySet<string> = new Set([
+    'create_post', 'update_post', 'delete_post', 'list_images', 'upload_image',
+    'delete_image', 'ai_summarize', 'ai_enhance', 'ai_list_models'
+]);
+
+/**
+ * Whether tools/list should show a tool (Track #1701 F9). Hidden tools are not
+ * registered at all, so calling one fails as an unknown tool. Handlers keep
+ * their own role and scope checks.
+ */
+export function mcpToolVisible(name: string, role: string, scope?: TokenScope): boolean {
+    if (scope === 'read' && !isReadAllowedMcpTool(name)) return false;
+    if (ADMIN_ONLY_MCP_TOOLS.has(name)) return role === 'admin';
+    if (WRITER_MCP_TOOLS.has(name)) return role === 'admin' || role === 'contributor';
+    return true;
+}
