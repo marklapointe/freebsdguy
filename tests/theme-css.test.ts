@@ -80,3 +80,8 @@ describe('index.css: scroll + responsive', () => {
         expect(Number(m![1])).toBeGreaterThanOrEqual(390);
     });
 });
+describe('index.css: review fix — long site title may shrink', () => {
+    it('.site-title has min-width: 0', () => {
+        expect(css).toMatch(/\.site-title\s*\{[^}]*min-width:\s*0/);
+    });
+});

@@ -200,7 +200,7 @@ body, .prose, .md-editor-preview, .post-summary {
 .md-editor-preview img, img { max-width: 100%; height: auto; }
 /* Comfortable measure on desktop. */
 .md-editor-preview p, .md-editor-preview li, .post-summary { max-width: 70ch; }
-.site-title { overflow-wrap: break-word; }
+.site-title { overflow-wrap: break-word; min-width: 0; flex-shrink: 1; }
 /* Phones: full-width column with ~1rem gutters; header never overflows. */
 @media (max-width: 639px) {
   .content-col { max-width: 100%; padding-left: 1rem; padding-right: 1rem; }

@@ -290,6 +290,12 @@ describe('og-meta integration (SPA catch-all)', () => {
         expect(res.text).toContain('<meta property="og:title" content="The FreeBSD Guy">');
     });
 
+    it('review fix: HTML varies by Host, so the shell is never cached (no-store, Vary: Host)', async () => {
+        const res = await request(app).get('/').set('User-Agent', DISCORD_UA);
+        expect(res.headers['cache-control']).toMatch(/no-store/);
+        expect(String(res.headers['vary'] || '')).toMatch(/host/i);
+    });
+
     it('GET / serves website meta (og:type website, description = siteTagline)', async () => {
         const res = await request(app).get('/');
         expect(res.status).toBe(200);
@@ -311,5 +317,16 @@ describe('og-meta: description length', () => {
 describe('og-meta: truncate by code point', () => {
     it('never splits a surrogate pair', () => {
         expect(truncate('ab😀cd', 3)).toBe('ab😀');
+    });
+});
+
+describe('og-meta: review fix — card type follows the image', () => {
+    it('uses summary card with no image, and twitter:image on home when og:image exists', () => {
+        const none = buildMetaTags(makeArgs({ path: '/', isPost: false, post: null, config: { siteName: 'X', siteTagline: 't', shareImage: '' } as any })).meta.join('\n');
+        expect(none).toContain('<meta name="twitter:card" content="summary">');
+        expect(none).not.toContain('og:image');
+        const withImg = buildMetaTags(makeArgs({ path: '/', isPost: false, post: null })).meta.join('\n');
+        expect(withImg).toContain('<meta name="twitter:card" content="summary_large_image">');
+        expect(withImg).toContain('<meta name="twitter:image" content="http://localhost:3000/img/cover.png">');
     });
 });

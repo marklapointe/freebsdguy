@@ -159,10 +159,12 @@ export function buildMetaTags(args: MetaArgs): MetaTags {
         tags.push(`<meta property="og:description" content="${descriptionContent(post, false, config)}">`);
         if (contentImage) {
             tags.push(`<meta property="og:image" content="${contentImage}">`);
+            tags.push(`<meta name="twitter:image" content="${contentImage}">`);
         }
     }
 
-    tags.push(`<meta name="twitter:card" content="${TWITTER_CARD}">`);
+    // No image: a large-image card would render empty, so fall back to "summary".
+    tags.push(`<meta name="twitter:card" content="${contentImage ? TWITTER_CARD : 'summary'}">`);
     tags.push(`<meta name="twitter:title" content="${htmlEscape(isPost ? post!.title || '' : title)}">`);
     tags.push(`<meta name="twitter:description" content="${descriptionContent(post, isPost, config)}">`);
     tags.push(`<meta name="description" content="${descriptionContent(post, isPost, config)}">`);

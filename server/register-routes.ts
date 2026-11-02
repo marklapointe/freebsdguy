@@ -690,6 +690,9 @@ if (fs.existsSync(distPath)) {
                 isPost
             };
             const { title, meta } = buildMetaTags(args);
+            // og:url/canonical can follow Host when siteUrl is unset: never let a shared cache keep it.
+            res.set('Cache-Control', 'no-store');
+            res.vary('Host');
             res.send(injectMeta(shell, { title, meta }));
         } catch (err) {
             /* istanbul ignore next */
