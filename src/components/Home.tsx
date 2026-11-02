@@ -79,17 +79,17 @@ export const Home = () => {
         ) : null;
 
     if (!ready) {
-        return <div className="container mx-auto p-4 max-w-[85%] opacity-50">Loading…</div>;
+        return <div className="content-col mx-auto w-full max-w-3xl px-4 py-4 opacity-50">Loading…</div>;
     }
 
     return (
-        <div className="container mx-auto p-4 max-w-[85%]">
+        <div className="content-col mx-auto w-full max-w-3xl px-4 py-4">
             {searchPlacement !== 'bottom' && searchBox}
             <div className="grid gap-6">
                 {filteredPosts.map(post => (
                     <div
                         key={post.slug}
-                        className="p-6 bg-secondary rounded-lg shadow-lg hover:shadow-xl transition border-l-4 border-accent"
+                        className="p-4 sm:p-6 bg-secondary rounded-lg shadow-lg hover:shadow-xl transition border-l-4 border-accent"
                     >
                         <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
                             {post.pinned && (
@@ -104,7 +104,7 @@ export const Home = () => {
                         <p className="opacity-70 text-sm mb-4">
                             {post.date ? new Date(post.date).toLocaleDateString() : ''}
                         </p>
-                        <div className="mb-4 prose-sm max-w-none">
+                        <div className="post-summary mb-4 prose-sm max-w-none">
                             <MdPreview modelValue={post.summary || ''} theme={editorTheme} language="en-US" />
                         </div>
                         <Link to={`/post/${post.slug}`} className="text-accent font-semibold hover:underline">

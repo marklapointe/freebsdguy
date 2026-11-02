@@ -63,9 +63,9 @@ export const PostDetail = () => {
     if (!post) return <div className="p-8 text-center text-primary">Loading...</div>;
 
     return (
-        <div className="container mx-auto p-4 max-w-[90%] bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden border border-accent border-opacity-10">
-            <div className="p-8">
-                <h1 className="text-4xl font-extrabold mb-4 border-b border-accent border-opacity-30 pb-4 text-primary">{post.title}</h1>
+        <div className="content-col mx-auto w-full max-w-3xl bg-secondary my-4 sm:my-8 rounded-lg shadow-2xl overflow-hidden border border-accent border-opacity-10">
+            <div className="p-4 sm:p-8">
+                <h1 className="text-3xl sm:text-4xl font-extrabold mb-4 border-b border-accent border-opacity-30 pb-4 text-primary">{post.title}</h1>
                 <div className="flex gap-4 text-sm opacity-70 mb-8 text-primary">
                     <span>{new Date(post.date).toLocaleDateString()}</span>
                     {post.author && <span>by {post.author}</span>}

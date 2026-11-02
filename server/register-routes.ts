@@ -31,6 +31,7 @@ import {
     safeDecode
 } from './lib/session-store.ts';
 import { getPosts, getPost, savePost } from './lib/posts.ts';
+import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
@@ -634,22 +635,67 @@ app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response
 const distPath = path.resolve(__dirname, '../dist');
 console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`);
 if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-    app.get(/^\/(?!api|mcp).*/, (_req: Request, res: Response) => {
+    // index:false — the SPA catch-all below reads index.html itself on every
+    // request (no caching) so post edits are reflected immediately.
+    app.use(express.static(distPath, { index: false }));
+    app.get(/^\/(?!api|mcp).*/, (req: Request, res: Response) => {
         const indexPath = path.join(distPath, 'index.html');
-        if (fs.existsSync(indexPath)) {
-            res.sendFile('index.html', { root: distPath }, (err) => {
-                /* istanbul ignore next */
-                if (err) {
-                    console.error('[ERROR] Failed to send index.html:', err);
-                    if (!res.headersSent) {
-                        res.status(404).send('Not Found');
-                    }
-                }
-            });
-        /* istanbul ignore next */
-        } else {
+        if (!fs.existsSync(indexPath)) {
             res.status(404).send('Not Found');
+            return;
+        }
+        let shell: string;
+        try {
+            shell = fs.readFileSync(indexPath, 'utf8');
+        } catch (err) {
+            /* istanbul ignore next */
+            console.error('[ERROR] Failed to read index.html:', err);
+            /* istanbul ignore next */
+            res.status(500).send('');
+            return;
+        }
+
+        try {
+            const activeConfig = getActive();
+            // Prefer the configured public origin; fall back to the request's
+            // scheme + the Host header nginx set for the matched vhost. Never trust
+            // X-Forwarded-Host for a published og:url/canonical (link poisoning).
+            const origin =
+                activeConfig.siteUrl ||
+                `${req.protocol}://${String(req.headers.host || 'localhost').replace(/[^A-Za-z0-9.:[\]-]/g, '')}`;
+
+            const pathMatch = req.path.match(/^\/post\/([A-Za-z0-9_-]{1,120})$/);
+            let post = null;
+            let isPost = false;
+
+            if (pathMatch) {
+                const slug = pathMatch[1];
+                const postsDir = postsDirOf(activeConfig);
+                const gp = getPost(postsDir, slug);
+                if (gp) {
+                    post = gp;
+                    isPost = true;
+                }
+            }
+
+            const args = {
+                config: {
+                    siteName: activeConfig.siteName || 'MDWeb',
+                    siteTagline: activeConfig.siteTagline,
+                    shareImage: activeConfig.shareImage
+                },
+                origin,
+                path: req.path,
+                post,
+                isPost
+            };
+            const { title, meta } = buildMetaTags(args);
+            res.send(injectMeta(shell, { title, meta }));
+        } catch (err) {
+            /* istanbul ignore next */
+            console.error('[ERROR] meta injection failed:', err);
+            /* istanbul ignore next */
+            res.send(shell);
         }
     });
 }

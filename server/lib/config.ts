@@ -108,6 +108,12 @@ export interface Config {
     currentTheme: string;
     siteName?: string;
     siteLogo?: string;
+    /** Link-preview description for the home page (og:description). */
+    siteTagline?: string;
+    /** Default share image for og:image (absolute http(s) URL or /path). */
+    shareImage?: string;
+    /** Public origin for og:url, e.g. https://freebsdguy.ca (no trailing slash). */
+    siteUrl?: string;
     pagination?: number;
     sortBy?: 'date' | 'title' | 'author';
     sortOrder?: 'asc' | 'desc';
@@ -436,6 +442,14 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
 
     if (typeof o.siteLogo === 'string') config.siteLogo = o.siteLogo;
 
+    // Link-preview settings (Track #1682 slice P). Strict: they land in HTML attributes.
+    if (typeof o.siteTagline === 'string' && o.siteTagline.length <= 300) config.siteTagline = o.siteTagline;
+    else if (o.siteTagline !== undefined) warnings.push('siteTagline invalid; using default');
+    if (typeof o.shareImage === 'string' && (o.shareImage === '' || /^(https?:\/\/[^\s"'<>]+|\/[^\s"'<>]*)$/.test(o.shareImage)) && o.shareImage.length <= 2048) config.shareImage = o.shareImage;
+    else if (o.shareImage !== undefined) warnings.push('shareImage invalid; using default');
+    if (typeof o.siteUrl === 'string' && (o.siteUrl === '' || /^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/.test(o.siteUrl))) config.siteUrl = o.siteUrl;
+    else if (o.siteUrl !== undefined) warnings.push('siteUrl invalid; using default');
+
     if (typeof o.demoPosts === 'boolean') config.demoPosts = o.demoPosts;
     else if (o.demoPosts !== undefined) warnings.push('demoPosts invalid; using default');
 
@@ -606,6 +620,9 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
         'currentTheme',
         'siteName',
         'siteLogo',
+        'siteTagline',
+        'shareImage',
+        'siteUrl',
         'demoPosts',
         'pagination',
         'sortBy',

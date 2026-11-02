@@ -163,3 +163,47 @@ body.crt-active {
   margin-left: 2px;
   box-shadow: 0 0 8px var(--primary), 0 0 15px var(--primary);
 }
+
+/* ---- Track #1682 slice 1: readable post text on every width ---- */
+/* Wrap long words/URLs at the edge only; never split ordinary words mid-word. */
+body, .prose, .md-editor-preview, .post-summary {
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
+}
+.md-editor-preview a, .md-editor-preview code {
+  overflow-wrap: anywhere; /* only long URLs/paths may break anywhere */
+}
+/* md-editor-rt ships break-all word breaking on the preview, its headings and .md-editor-html,
+   and its stylesheet loads after ours: beat it explicitly. */
+.md-editor-preview, .md-editor-html,
+.md-editor-preview h1, .md-editor-preview h2, .md-editor-preview h3,
+.md-editor-preview h4, .md-editor-preview h5, .md-editor-preview h6 {
+  word-break: normal !important;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+/* md-editor-rt paints its own (black) preview surface: let the card show through. */
+.md-editor, .md-editor-preview-wrapper, .md-editor-preview, .md-editor-dark, .md-editor-previewOnly {
+  background-color: transparent !important;
+  color: inherit !important;
+  --md-bk-color: transparent;
+}
+/* Tailwind preflight strips bullets: restore them in post content. */
+.md-editor-preview ol, .md-editor-preview ul { padding-inline-start: 1.5em; margin: 0.5em 0; }
+.md-editor-preview ul, .prose ul { list-style: disc; }
+.md-editor-preview ol, .prose ol { list-style: decimal; }
+.md-editor-preview li { display: list-item; }
+/* Wide things scroll inside their own box, never the page. */
+.md-editor-preview pre, pre { overflow-x: auto; max-width: 100%; }
+.md-editor-preview table, table { display: block; overflow-x: auto; max-width: 100%; }
+.md-editor-preview img, img { max-width: 100%; height: auto; }
+/* Comfortable measure on desktop. */
+.md-editor-preview p, .md-editor-preview li, .post-summary { max-width: 70ch; }
+.site-title { overflow-wrap: break-word; }
+/* Phones: full-width column with ~1rem gutters; header never overflows. */
+@media (max-width: 639px) {
+  .content-col { max-width: 100%; padding-left: 1rem; padding-right: 1rem; }
+  nav { flex-wrap: wrap; row-gap: 0.25rem; }
+  nav a, nav button { min-height: 44px; min-width: 44px; }
+}

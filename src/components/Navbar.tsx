@@ -100,19 +100,13 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
         navigate('/login');
     };
 
-    const nameParts = siteName.split(' ');
-    const firstPart = nameParts[0];
-    const restParts = nameParts.slice(1).join(' ');
-
     return (
-        <nav className="p-4 bg-secondary text-text flex justify-between items-center shadow-md relative z-50">
-            <Link to="/" className="text-2xl font-bold flex items-center gap-2">
+        <nav className="px-4 py-3 sm:p-4 gap-2 bg-secondary text-text flex justify-between items-center shadow-md relative z-50">
+            <Link to="/" className="text-xl sm:text-2xl font-bold flex items-center gap-2 min-w-0">
                 {siteLogo ? (
                     <img src={`/api/getimage?fileName=${siteLogo}`} alt={siteName} className="h-10 w-auto" />
                 ) : (
-                    <>
-                        <span style={{ color: 'var(--site-name-color, var(--accent))' }}>{firstPart}</span> {restParts}
-                    </>
+                    <span className="site-title" style={{ color: 'var(--site-name-color, var(--accent))' }}>{siteName}</span>
                 )}
             </Link>
             <div className="flex gap-2 sm:gap-4 items-center">
