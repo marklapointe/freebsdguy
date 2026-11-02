@@ -10,6 +10,7 @@ import {
     toggleThemeMode,
     type ThemeMode
 } from '../lib/api';
+import { applySiteAccent } from '../lib/site-accent';
 import { onThemeChanged, onThemeModeChanged } from '../lib/theme-events';
 import { User } from '../types';
 
@@ -34,6 +35,7 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
             setSiteName(cfg.siteName);
             setSiteLogo(cfg.siteLogo);
             document.title = cfg.siteName;
+            applySiteAccent(cfg.siteName);
         };
         siteConfig.load().then(apply);
         // Admin "Save Settings" → siteConfig.refresh() → live header update (review finding #10)
@@ -101,12 +103,14 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
     };
 
     return (
-        <nav className="px-4 py-3 sm:p-4 gap-2 bg-secondary text-text flex justify-between items-center shadow-md relative z-50">
-            <Link to="/" className="text-xl sm:text-2xl font-bold flex items-center gap-2 min-w-0">
+        <header className="site-header">
+        <a href="#main" className="skip-link">Skip to content</a>
+        <nav aria-label="Site" className="px-4 py-3 sm:p-4 gap-2 bg-secondary text-text flex justify-between items-center shadow-md relative z-50">
+            <Link to="/" className="site-brand text-xl sm:text-2xl font-bold flex items-center gap-2 min-w-0">
                 {siteLogo ? (
                     <img src={`/api/getimage?fileName=${siteLogo}`} alt={siteName} className="h-10 w-auto" />
                 ) : (
-                    <span className="site-title" style={{ color: 'var(--site-name-color, var(--accent))' }}>{siteName}</span>
+                    <><i className="site-mark" aria-hidden="true"></i><span className="site-title" style={{ color: 'var(--site-name-color, var(--accent))' }}>{siteName}</span></>
                 )}
             </Link>
             <div className="flex gap-2 sm:gap-4 items-center">
@@ -139,5 +143,6 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
                 )}
             </div>
         </nav>
+        </header>
     );
 };

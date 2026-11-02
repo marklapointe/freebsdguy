@@ -69,7 +69,7 @@ describe('API Endpoints', () => {
     it('GET /api/theme?name=light should return light theme variables', async () => {
         const res = await request(app).get('/api/theme?name=light');
         expect(res.status).toBe(200);
-        expect(res.body['--bg']).toBe('#ffffff');
+        expect(res.body['--bg']).toBe('#fbfaf7'); // editorial light palette
     });
 
     it('POST /api/login should work for contributor', async () => {

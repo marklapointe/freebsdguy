@@ -263,6 +263,8 @@ function paintTheme(themeData: ThemeColors, packId: string, mode: ThemeMode, crt
     });
     root.setAttribute('data-theme', packId);
     root.setAttribute('data-theme-mode', mode);
+    // The shipped default packs use the editorial layout; retro packs keep theirs.
+    root.classList.toggle('editorial', packId === 'dark' || packId === 'light');
 
     const retro = isRetroThemeId(packId);
     if (crtEffects && retro) {

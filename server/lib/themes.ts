@@ -66,8 +66,16 @@ export function themeSearchDirs(configuredDir: string): string[] {
  * current shipped file (Track #1682: 1.1.0 dark/light failed WCAG AA).
  */
 export const PREVIOUS_SHIPPED_THEME_SHA256: Record<string, string[]> = {
-    dark: ['9c7c806b0cc4a8c58acce3c6aa031a1672e7c9a6c6167ef7ff3951f0f7cc47ad'],
-    light: ['5679729d75f0b8d04537b5c9feb99f45b37304a362c4a952336300adc05f542a']
+    dark: [
+        '9c7c806b0cc4a8c58acce3c6aa031a1672e7c9a6c6167ef7ff3951f0f7cc47ad',
+        // dark.json as shipped in 1.1.0_3 and 1.1.0_4, before the editorial palette
+        '89de43749643ae23e1a9412503e405cc965f4b6151bf2ae5f10dd121702261ae'
+    ],
+    light: [
+        '5679729d75f0b8d04537b5c9feb99f45b37304a362c4a952336300adc05f542a',
+        // light.json as shipped in 1.1.0_3 and 1.1.0_4, before the editorial palette
+        'ecf3327694bdf1865d5d021bc1dafcaebf5deba20914f229f8778a632804f8c8'
+    ]
 };
 
 export function ensureRuntimeThemeCatalog(configuredDir: string): { copied: string[]; refreshed: string[]; total: number } {

@@ -79,3 +79,12 @@ describe('Navbar site title', () => {
         }
     });
 });
+describe('Navbar editorial header', () => {
+    it('has a skip-to-content link and a header landmark', async () => {
+        get.mockResolvedValue({ data: {} });
+        render(<MemoryRouter><Navbar user={null} setUser={() => {}} /></MemoryRouter>);
+        const skip = await screen.findByText(/skip to content/i);
+        expect(skip.getAttribute('href')).toBe('#main');
+        expect(document.querySelector('header.site-header')).toBeTruthy();
+    });
+});
