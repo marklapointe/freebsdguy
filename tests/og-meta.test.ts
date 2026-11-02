@@ -296,6 +296,14 @@ describe('og-meta integration (SPA catch-all)', () => {
         expect(String(res.headers['vary'] || '')).toMatch(/host/i);
     });
 
+    it('uses the forwarded https protocol for og:url without changing the host', async () => {
+        const res = await request(app).get('/').set('Host', 'freebsdguy.ca').set('X-Forwarded-Proto', 'https').set('X-Forwarded-Host', 'evil.example');
+        expect(res.text).toContain('<meta property="og:url" content="https://freebsdguy.ca/">');
+        expect(res.text).not.toContain('evil.example');
+        const plain = await request(app).get('/').set('Host', 'freebsdguy.ca').set('X-Forwarded-Proto', 'javascript');
+        expect(plain.text).toContain('<meta property="og:url" content="http://freebsdguy.ca/">');
+    });
+
     it('GET / serves website meta (og:type website, description = siteTagline)', async () => {
         const res = await request(app).get('/');
         expect(res.status).toBe(200);
@@ -328,5 +336,30 @@ describe('og-meta: review fix — card type follows the image', () => {
         const withImg = buildMetaTags(makeArgs({ path: '/', isPost: false, post: null })).meta.join('\n');
         expect(withImg).toContain('<meta name="twitter:card" content="summary_large_image">');
         expect(withImg).toContain('<meta name="twitter:image" content="http://localhost:3000/img/cover.png">');
+    });
+});
+
+describe('og-meta: published date and description metadata', () => {
+    it('article:published_time is ISO 8601 when front matter yields a Date', () => {
+        const post = { slug: 'p', title: 'T', summary: 's', date: new Date('2026-11-01T05:30:00Z') } as unknown as Post;
+        const joined = buildMetaTags(makeArgs({ path: '/post/p', isPost: true, post })).meta.join('\n');
+        expect(joined).toContain('<meta property="article:published_time" content="2026-11-01T05:30:00.000Z">');
+    });
+    it('omits article:published_time for malformed or invalid dates', () => {
+        for (const date of ['2026-99-99', '2026-02-30', '2026-02-30T10:00:00Z', 'not a date', new Date('nope')]) {
+            const post = { slug: 'p', title: 'T', summary: 's', date } as unknown as Post;
+            const joined = buildMetaTags(makeArgs({ path: '/post/p', isPost: true, post })).meta.join('\n');
+            expect(joined).not.toContain('article:published_time');
+        }
+    });
+    it('keeps a valid date-only value and normalizes date-times to UTC ISO', () => {
+        const one = (date: unknown) => buildMetaTags(makeArgs({ path: '/post/p', isPost: true, post: { slug: 'p', title: 'T', summary: 's', date } as unknown as Post })).meta.join('\n');
+        expect(one('2026-10-01')).toContain('published_time" content="2026-10-01"');
+        expect(one('2026-11-01T00:30:00-05:00')).toContain('published_time" content="2026-11-01T05:30:00.000Z"');
+    });
+    it('home description falls back to the site name when no tagline is set', () => {
+        const joined = buildMetaTags(makeArgs({ path: '/', isPost: false, post: null, config: { siteName: 'REVYNET', siteTagline: '', shareImage: '' } as any })).meta.join('\n');
+        expect(joined).toContain('og:description" content="REVYNET"');
+        expect(joined).toContain('<meta name="description" content="REVYNET">');
     });
 });

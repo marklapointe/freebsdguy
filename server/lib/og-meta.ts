@@ -105,8 +105,28 @@ export function resolveShareUrl(url: string, origin: string): string {
 
 const TWITTER_CARD = 'summary_large_image';
 
+/**
+ * gray-matter turns unquoted YAML dates into Date objects. Returns '' for invalid
+ * or impossible dates; a valid YYYY-MM-DD is kept as written; anything else is
+ * normalized to UTC ISO 8601 (toISOString).
+ */
+function isoDate(d: unknown): string {
+    if (d instanceof Date) return isNaN(d.getTime()) ? '' : d.toISOString();
+    const str = String(d ?? '').trim();
+    const t = new Date(str);
+    if (!str || isNaN(t.getTime())) return '';
+    // JS rolls impossible days over (2026-02-30 -> Mar 2): reject when the calendar part does not round-trip.
+    const ymd = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(str);
+    if (ymd) {
+        const day = new Date(`${ymd[1]}T00:00:00Z`);
+        if (isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== ymd[1]) return '';
+        if (str === ymd[1]) return str;
+    }
+    return t.toISOString();
+}
+
 function descriptionContent(post: Post | null, isPost: boolean, config: MetaConfig): string {
-    const source = (isPost && post && post.summary) || config.siteTagline || '';
+    const source = (isPost && post && post.summary) || config.siteTagline || config.siteName || '';
     return htmlEscape(truncate(stripMarkdownish(source), 200));
 }
 
@@ -146,8 +166,9 @@ export function buildMetaTags(args: MetaArgs): MetaTags {
         tags.push('<meta property="og:type" content="article">');
         tags.push(`<meta property="og:title" content="${postTitle}">`);
         tags.push(`<meta property="og:description" content="${descriptionContent(post, true, config)}">`);
-        if (post?.date) {
-            tags.push(`<meta property="article:published_time" content="${htmlEscape(post.date)}">`);
+        const published = isoDate(post?.date);
+        if (published) {
+            tags.push(`<meta property="article:published_time" content="${htmlEscape(published)}">`);
         }
         if (contentImage) {
             tags.push(`<meta property="og:image" content="${contentImage}">`);

@@ -660,9 +660,11 @@ if (fs.existsSync(distPath)) {
             // Prefer the configured public origin; fall back to the request's
             // scheme + the Host header nginx set for the matched vhost. Never trust
             // X-Forwarded-Host for a published og:url/canonical (link poisoning).
+            // X-Forwarded-Proto may only upgrade the scheme to https (jail nginx
+            // reaches node on the jail IP, so trust proxy 'loopback' never matches).
             const origin =
                 activeConfig.siteUrl ||
-                `${req.protocol}://${String(req.headers.host || 'localhost').replace(/[^A-Za-z0-9.:[\]-]/g, '')}`;
+                `${req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${String(req.headers.host || 'localhost').replace(/[^A-Za-z0-9.:[\]-]/g, '')}`;
 
             const pathMatch = req.path.match(/^\/post\/([A-Za-z0-9_-]{1,120})$/);
             let post = null;
