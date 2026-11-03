@@ -396,6 +396,8 @@ html[data-theme][data-theme-mode="light"] { --brand: var(--brand-light, #4338ca)
 @media (min-width: 1024px) {
   .editorial .article-layout { display: grid; grid-template-columns: minmax(0, 1fr) 15rem; gap: 3rem; }
   .editorial .article-layout .article-body { margin: 0; }
+  /* Header and back link start at the body's left edge, not centred over the grid (Mark 2026-11-03). */
+  .editorial .article-header, .editorial .article-back { margin-left: 0; margin-right: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .editorial .post-card { transition: none; }
