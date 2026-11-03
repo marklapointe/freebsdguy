@@ -20,7 +20,7 @@ beforeAll(() => {
 });
 
 describe('index.css: post text wrapping', () => {
-    it('uses overflow-wrap / word-break normal / hyphens auto for body and preview', () => {
+    it('uses overflow-wrap / word-break normal / hyphens manual for body and preview', () => {
         expect(css).toMatch(/overflow-wrap:\s*break-word/);
         // 'anywhere' lets flex/min-content boxes split ordinary words (D): only for links/code.
         const anywhereSelectors = [...css.matchAll(/([^{}]+)\{[^}]*overflow-wrap:\s*anywhere/g)].map((m) => m[1].trim());
@@ -28,7 +28,7 @@ describe('index.css: post text wrapping', () => {
             for (const part of sel.split(',')) expect(part.trim()).toMatch(/(^|\s)(a|code)$/);
         }
         expect(css).toMatch(/word-break:\s*normal/);
-        expect(css).toMatch(/hyphens:\s*auto/);
+        expect(css).toMatch(/hyphens:\s*manual/);
         // break-all must NOT leak into post / preview rendering
         expect(css).not.toMatch(/word-break:\s*break-all/);
     });

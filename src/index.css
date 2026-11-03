@@ -169,10 +169,13 @@ body.crt-active {
 body, .prose, .md-editor-preview, .post-summary {
   overflow-wrap: break-word;
   word-break: normal;
-  hyphens: auto;
+  hyphens: manual;
 }
+/* break-word wraps a too-long URL only at the edge; unlike `anywhere` it does not
+   shrink min-content, so a table cell is never squeezed into one-letter lines. */
 .md-editor-preview a, .md-editor-preview code {
-  overflow-wrap: anywhere; /* only long URLs/paths may break anywhere */
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
 }
 /* md-editor-rt ships break-all word breaking on the preview, its headings and .md-editor-html,
    and its stylesheet loads after ours: beat it explicitly. */
@@ -181,7 +184,8 @@ body, .prose, .md-editor-preview, .post-summary {
 .md-editor-preview h4, .md-editor-preview h5, .md-editor-preview h6 {
   word-break: normal !important;
   overflow-wrap: break-word;
-  hyphens: auto;
+  hyphens: manual !important;
+  -webkit-hyphens: manual !important;
 }
 /* md-editor-rt paints its own (black) preview surface: let the card show through. */
 .md-editor, .md-editor-preview-wrapper, .md-editor-preview, .md-editor-dark, .md-editor-previewOnly {
@@ -197,6 +201,13 @@ body, .prose, .md-editor-preview, .post-summary {
 /* Wide things scroll inside their own box, never the page. */
 .md-editor-preview pre, pre { overflow-x: auto; max-width: 100%; }
 .md-editor-preview table, table { display: block; overflow-x: auto; max-width: 100%; }
+/* Table cells keep whole words: the table scrolls sideways instead of squeezing them. */
+.md-editor-preview th, .md-editor-preview td, .md-editor-preview th a, .md-editor-preview td a, .md-editor-preview td code {
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  hyphens: manual !important;
+  -webkit-hyphens: manual !important;
+}
 .md-editor-preview img, img { max-width: 100%; height: auto; }
 /* Comfortable measure on desktop. */
 .md-editor-preview p, .md-editor-preview li, .post-summary { max-width: 70ch; }
@@ -409,3 +420,17 @@ html:not(.editorial) .article-back { margin-top: 3rem; padding-top: 2rem; border
 .editorial .site-brand { min-width: 0; flex: 1 1 auto; }
 .editorial .site-header nav a.site-brand { justify-content: flex-start; }
 .editorial .site-header .site-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Track #1682: table stripes follow the site mode. md-editor-rt paints even rows
+   with its own (dark) stripe colour, which showed as black rows in light mode. */
+.md-editor-preview table tr { background-color: transparent !important; }
+html[data-theme-mode="light"] .md-editor-preview table tr:nth-child(2n),
+html[data-theme-mode="light"] .md-editor-preview table tr:nth-child(2n) td {
+  background-color: #f2f2f2 !important;
+  color: #1f2328 !important;
+}
+html[data-theme-mode="dark"] .md-editor-preview table tr:nth-child(2n),
+html[data-theme-mode="dark"] .md-editor-preview table tr:nth-child(2n) td {
+  background-color: #1f242c !important;
+  color: inherit !important;
+}
