@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
 import { api, siteConfig, getMdEditorTheme } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
+import { enhanceCollapsibleLists } from '../lib/collapse-lists';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -11,6 +12,9 @@ export const PostDetail = () => {
     const [error, setError] = useState<string | null>(null);
     const [id] = useState('preview-only');
     const scrollElement = document.documentElement;
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const frame = useRef(0);
+    useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {
@@ -76,12 +80,20 @@ export const PostDetail = () => {
             </header>
 
             <div className="article-layout">
-                <div className="article-body min-w-0">
+                <div className="article-body min-w-0" ref={bodyRef}>
                     <MdPreview
                         id={id}
                         modelValue={post.content}
                         theme={editorTheme}
                         language="en-US"
+                        onHtmlChanged={() => {
+                            // Track #1682: collapse long "Updates" lists once the preview DOM is in place.
+                            if (frame.current) cancelAnimationFrame(frame.current);
+                            frame.current = requestAnimationFrame(() => {
+                                frame.current = 0;
+                                if (bodyRef.current) enhanceCollapsibleLists(bodyRef.current);
+                            });
+                        }}
                     />
                 </div>
                 <aside className="article-toc hidden lg:block" aria-labelledby="toc-label">

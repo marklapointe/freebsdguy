@@ -434,3 +434,32 @@ html[data-theme-mode="dark"] .md-editor-preview table tr:nth-child(2n) td {
   background-color: #1f242c !important;
   color: inherit !important;
 }
+
+/* Track #1682: every post table cell lines up at the top left (Mark 2026-11-03). !important beats
+   md-editor-rt centred headers and markdown column alignment (inline styles), so
+   authored `|---:|` or `|:---:|` columns render left by design. */
+.md-editor-preview th, .md-editor-preview td,
+.md-editor-html th, .md-editor-html td,
+.prose th, .prose td,
+.editorial .article-body th, .editorial .article-body td {
+  vertical-align: top !important;
+  text-align: left !important;
+}
+
+/* Track #1682: collapsible long lists (src/lib/collapse-lists.ts). Hiding is done by the
+   script with a class; without JS the whole list shows. The fade blends into the page. */
+:root { --mdweb-fade-bg: var(--bg); }
+html:not(.editorial) .article-shell { --mdweb-fade-bg: var(--secondary, var(--bg)); }
+.mdweb-collapsible { position: relative; }
+.mdweb-collapsible > li.mdweb-collapse-hidden { display: none !important; }
+.mdweb-collapsible.is-collapsed::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: min(1.75em, 40%); pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--mdweb-fade-bg));
+}
+.mdweb-collapse-toggle {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0.4rem 1rem; margin: 0.25rem 0 1rem;
+  border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--brand, var(--primary));
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.mdweb-collapse-toggle:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.mdweb-collapse-toggle:focus-visible { outline: 2px solid var(--brand, var(--primary)); outline-offset: 2px; }
