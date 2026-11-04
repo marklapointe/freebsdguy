@@ -5,6 +5,7 @@ import { api, siteConfig, getMdEditorTheme } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
 import { enhanceCollapsibleLists } from '../lib/collapse-lists';
 import { enhanceSortableTables, resolveTableSort, wrapTables } from '../lib/table-sort';
+import { addTableTools, closeTablePopup, renderCsvTables } from '../lib/table-tools';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -18,6 +19,8 @@ export const PostDetail = () => {
     const [siteSort, setSiteSort] = useState<boolean | undefined>(undefined);
     const sortOn = useRef(false);
     useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
+    // Track #1682: close an open table popup when the post changes or the page unmounts.
+    useEffect(() => () => closeTablePopup(), [post]);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {
@@ -104,6 +107,15 @@ export const PostDetail = () => {
                                     enhanceCollapsibleLists(bodyRef.current);
                                     wrapTables(bodyRef.current);
                                     enhanceSortableTables(bodyRef.current, sortOn.current);
+                                    addTableTools(bodyRef.current);
+                                    // Track #1682: tables published as CSV render once fetched, then get the same tools.
+                                    const body = bodyRef.current;
+                                    void renderCsvTables(body).then((n) => {
+                                        if (!n) return;
+                                        wrapTables(body);
+                                        enhanceSortableTables(body, sortOn.current);
+                                        addTableTools(body);
+                                    });
                                 }
                             });
                         }}
