@@ -5,9 +5,11 @@
  *    Cells are text; a cell that is exactly "[text](http(s)://... or /path)" becomes a link.
  *    Nothing from the CSV is parsed as HTML.
  *  - Expand: big tables get an "Expand" button that opens a full-screen dialog holding a
- *    copy of the table, scaled so the whole table fits the viewport. Below a legibility
- *    floor (MIN_SCALE) it stops shrinking and the dialog scrolls instead.
- *    Esc or the X closes it and focus returns to the button.
+ *    copy of the table, scaled to fit the viewport. Below a readable floor (MIN_SCALE = 0.5)
+ *    it stops shrinking and the dialog scrolls instead.
+ *    The dialog is modal (page behind it inert), labelled by the table's title, shows an
+ *    "Esc to close" hint and a 48px X; closing returns focus to the button (or the post title).
+ *  The server confines /api/getimage to plain upload files; the URL check here is a hint.
  */
 const CSV_TITLE = 'mdweb-csv-table';
 const DONE = 'mdwebCsv';
@@ -15,24 +17,24 @@ const ENGINE = new Map<string, string>([['vLLM', 'vllm'], ['SGLang', 'sglang'], 
 /** Only CSV files published with posts (same origin, images dir) are fetched. */
 const CSV_HREF = /^\/api\/getimage\?fileName=[A-Za-z0-9._-]+\.csv$/;
 export const LIMITS = { bytes: 1_000_000, rows: 5000, cols: 100, tables: 50 };
-export const MIN_SCALE = 0.3;
+export const MIN_SCALE = 0.5;
 
 /** RFC 4180 CSV: quoted fields, "" escapes, embedded commas and newlines, CRLF. */
 export function parseCsv(text: string): string[][] {
-    const rows: string[][] = []; let row: string[] = []; let f = ''; let q = false;
+    const rows: string[][] = []; let row: string[] = []; let f = ''; let q = false; let started = false;
     for (let i = 0; i < text.length; i++) {
         const c = text[i];
         if (q) {
             if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
             else f += c;
-        } else if (c === '"') q = true;
-        else if (c === ',') { row.push(f); f = ''; }
+        } else if (c === '"') { q = true; started = true; }
+        else if (c === ',') { row.push(f); f = ''; started = true; }
         else if (c === '\n' || c === '\r') {
             if (c === '\r' && text[i + 1] === '\n') i++;
-            row.push(f); rows.push(row); row = []; f = '';
-        } else f += c;
+            row.push(f); rows.push(row); row = []; f = ''; started = false;
+        } else { f += c; started = true; }
     }
-    if (f !== '' || row.length) { row.push(f); rows.push(row); }
+    if (started || f !== '' || row.length) { row.push(f); rows.push(row); }
     return rows;
 }
 
@@ -55,8 +57,13 @@ function cell(tag: 'th' | 'td', v: string): HTMLElement {
     return el;
 }
 
-export function tableFromCsv(rows: string[][]): HTMLTableElement {
+let uid = 0;
+export function tableFromCsv(rows: string[][], label?: string): HTMLTableElement {
     const t = document.createElement('table');
+    if (label) {
+        const c = t.createCaption(); c.id = `mdweb-csv-cap-${++uid}`; c.textContent = label;
+        t.setAttribute('aria-labelledby', c.id);
+    }
     const [head, ...body] = rows;
     const th = t.createTHead().insertRow();
     (head || []).forEach((h) => th.appendChild(cell('th', h)));
@@ -69,8 +76,8 @@ type Fetcher = (url: string) => Promise<string>;
 const defaultFetch: Fetcher = async (url) => {
     // Same origin only: a redirect anywhere else is an error, not a follow.
     const r = await fetch(url, { credentials: 'same-origin', redirect: 'error' });
-    if (!r.ok) throw new Error(String(r.status));
-    if (Number(r.headers.get('content-length') || 0) > LIMITS.bytes) throw new Error('too large');
+    if (!r.ok) { await r.body?.cancel(); throw new Error(String(r.status)); }
+    if (Number(r.headers.get('content-length') || 0) > LIMITS.bytes) { await r.body?.cancel(); throw new Error('too large'); }
     if (!r.body) return r.text();
     // Stop reading as soon as the byte limit is passed, even without a Content-Length.
     const reader = r.body.getReader(); const parts: Uint8Array[] = []; let n = 0;
@@ -108,21 +115,27 @@ export async function renderCsvTables(root: ParentNode, fetcher: Fetcher = defau
             const all = parseCsv(text);
             cut = all.length > LIMITS.rows + 1 || all.some((r) => r.length > LIMITS.cols);
             rows = all.slice(0, LIMITS.rows + 1).map((r) => r.slice(0, LIMITS.cols));
-        } catch {
-            a.dataset[DONE] = 'failed';
-            const msg = document.createElement('span');
-            msg.className = 'mdweb-csv-error'; msg.setAttribute('role', 'status');
-            msg.textContent = `Couldn't load ${label}. `;
-            a.textContent = 'Download the CSV';
-            a.setAttribute('download', href.split('fileName=')[1]);
-            a.before(msg);
+        } catch (e) {
+            // No link back to the file that just failed: say what went wrong instead.
+            const msg = document.createElement('span');   // block via CSS; valid inside or outside a <p>
+            msg.className = 'mdweb-csv-error'; msg.setAttribute('role', 'alert'); msg.dataset[DONE] = 'failed';
+            const why = (e as Error)?.message;
+            msg.textContent = why === '404'
+                ? `The table "${label}" could not be found. Ask the author to publish its CSV again.`
+                : why === '403' || why === '400'
+                    ? `The link for the table "${label}" is not valid. Ask the author to publish it again.`
+                    : why === 'too large'
+                        ? `The table "${label}" is too large to show here (over ${LIMITS.bytes / 1_000_000} MB). Ask the author for a smaller CSV.`
+                        : `The table "${label}" could not be loaded. Reload the page to try again.`;
+            const host = a.parentElement && a.parentElement.tagName === 'P' && a.parentElement.childNodes.length === 1 ? a.parentElement : a;
+            host.replaceWith(msg);
             continue;
         }
         const box = document.createElement('div'); box.className = 'mdweb-csv-table';
         const dl = document.createElement('a');
-        dl.className = 'mdweb-csv-download'; dl.href = href; dl.textContent = 'Download CSV';
+        dl.className = 'mdweb-csv-download'; dl.href = href; dl.textContent = `Download CSV: ${label}`;
         dl.setAttribute('download', href.split('fileName=')[1]);
-        box.appendChild(tableFromCsv(rows));
+        box.appendChild(tableFromCsv(rows, label));
         if (cut) {
             const n = document.createElement('p'); n.className = 'mdweb-csv-note';
             n.textContent = `Showing the first ${LIMITS.rows} rows and ${LIMITS.cols} columns. Download the CSV for all of it.`;
@@ -141,29 +154,52 @@ let openClose: (() => void) | null = null;
 export function closeTablePopup(): void { if (openClose) openClose(); }
 
 export function isBigTable(t: HTMLTableElement): boolean {
-    const cols = t.rows[0]?.cells.length || 0;
+    let cols = 0;
+    for (const r of t.rows) { let n = 0; for (const c of r.cells) n += Math.max(1, c.colSpan || 1); cols = Math.max(cols, n); }
     return cols >= 6 || t.rows.length >= 12;
 }
 
-function openPopup(table: HTMLTableElement, opener: HTMLElement): void {
+/** Title for a table: its caption, else the nearest heading before it, else "Table N". */
+export function tableTitle(t: HTMLTableElement, n: number): string {
+    const cap = t.caption?.textContent?.trim();
+    if (cap) return cap;
+    const scope = t.closest('.article-body, article, main') || document;
+    const hs = [...scope.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')]
+        .filter((h) => h.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const h = hs[hs.length - 1]?.textContent?.trim();
+    return h || `Table ${n}`;
+}
+
+function openPopup(table: HTMLTableElement, opener: HTMLElement, title: string): void {
     closeTablePopup();
     const d = document.createElement('div');
     d.className = 'mdweb-table-popup'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
-    d.setAttribute('aria-label', 'Table, full screen');
+    const head = document.createElement('div'); head.className = 'mdweb-table-popup-head';
+    const h = document.createElement('h2'); h.className = 'mdweb-table-popup-title'; h.id = `mdweb-popup-title-${++uid}`; h.textContent = title;
+    d.setAttribute('aria-labelledby', h.id);
+    const hint = document.createElement('span'); hint.className = 'mdweb-table-hint'; hint.textContent = 'Esc to close';
     const x = document.createElement('button');
     x.type = 'button'; x.className = 'mdweb-table-close'; x.setAttribute('aria-label', 'Close'); x.textContent = '×';
+    head.append(h, hint, x);
     const stage = document.createElement('div'); stage.className = 'mdweb-table-stage';
     const copy = table.cloneNode(true) as HTMLTableElement;
     copy.querySelectorAll('button.mdweb-sort-btn').forEach((b) => b.replaceWith(...b.childNodes));
-    stage.appendChild(copy); d.append(x, stage);
+    copy.querySelector('caption')?.remove(); copy.removeAttribute('aria-labelledby');
+    stage.appendChild(copy); d.append(head, stage);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Modal: everything else on the page leaves the tab order and the accessibility tree.
+    const bg = [...document.body.children].filter((el) => !el.hasAttribute('inert')) as HTMLElement[];
+    bg.forEach((el) => el.setAttribute('inert', ''));
     document.body.appendChild(d);
     const fit = () => {
         copy.style.transform = '';
         const w = copy.scrollWidth, h = copy.scrollHeight;
-        const pad = 48;
-        const aw = Math.max(1, window.innerWidth - pad), ah = Math.max(1, window.innerHeight - pad - 40);
+        // Available area = the popup's own content box below its header (no duplicated CSS numbers).
+        const cs = getComputedStyle(d);
+        const px = (v: string) => parseFloat(v) || 0;
+        const aw = Math.max(1, (d.clientWidth || window.innerWidth) - px(cs.paddingLeft) - px(cs.paddingRight));
+        const ah = Math.max(1, (d.clientHeight || window.innerHeight) - px(cs.paddingTop) - px(cs.paddingBottom) - head.offsetHeight);
         const s = fitScale(w, h, aw, ah);
         copy.style.transformOrigin = 'top left';
         copy.style.transform = `scale(${s})`;
@@ -174,8 +210,13 @@ function openPopup(table: HTMLTableElement, opener: HTMLElement): void {
     const close = () => {
         openClose = null;
         d.remove(); document.body.style.overflow = prevOverflow;
+        bg.forEach((el) => el.removeAttribute('inert'));
         document.removeEventListener('keydown', onKey); window.removeEventListener('resize', fit);
-        opener.focus();
+        if (opener.isConnected) opener.focus();
+        else {
+            const t = document.querySelector<HTMLElement>('.article-title') ?? document.querySelector<HTMLElement>('main h1') ?? document.querySelector<HTMLElement>('h1');
+            if (t) { if (!t.hasAttribute('tabindex')) t.setAttribute('tabindex', '-1'); t.focus(); }
+        }
     };
     const onKey = (e: KeyboardEvent) => {
         if (e.key === 'Escape') { e.preventDefault(); close(); }
@@ -198,6 +239,8 @@ function openPopup(table: HTMLTableElement, opener: HTMLElement): void {
 /** Add an Expand button above every big table (once). */
 export function addTableTools(root: ParentNode): void {
     let n = root.querySelectorAll('button.mdweb-table-expand').length;
+    const seen = new Map<string, number>();
+    root.querySelectorAll<HTMLElement>('button.mdweb-table-expand').forEach((b) => { const k = b.dataset.title || ''; seen.set(k, (seen.get(k) || 0) + 1); });
     root.querySelectorAll<HTMLTableElement>('table').forEach((t) => {
         if (t.closest('.mdweb-table-popup') || t.dataset.mdwebTools || !isBigTable(t)) return;
         t.dataset.mdwebTools = '1';
@@ -209,8 +252,12 @@ export function addTableTools(root: ParentNode): void {
         }
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'mdweb-table-expand'; b.textContent = 'Expand';
-        b.setAttribute('aria-label', `Expand table ${++n} to full screen`);
-        b.addEventListener('click', () => openPopup(t, b));
+        const base = tableTitle(t, ++n);
+        const k = (seen.get(base) || 0) + 1; seen.set(base, k);
+        const title = k > 1 ? `${base} (${k})` : base;   // several tables under one heading stay distinct
+        b.dataset.title = base;
+        b.setAttribute('aria-label', `Expand table: ${title}, full screen`);
+        b.addEventListener('click', () => openPopup(t, b, title));
         bar.prepend(b);
     });
 }

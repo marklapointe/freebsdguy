@@ -2,6 +2,7 @@
  * Route registration factory — attaches all HTTP handlers to the Express app.
  * Keeps server/index.ts as bootstrap only (TAOCP stepwise refinement).
  */
+import { pipeline } from 'stream';
 import type { Express, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -589,51 +590,73 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
     res.json({ message: 'Post saved' });
 });
 
-// Proxy images through a common endpoint
+// Proxy images through a common endpoint.
+// Track #1682 (_12): confined server-side to plain files directly in the uploads dir: no path
+// separators or dot names, only upload types (images, CSV tables), no symlink out of the dir,
+// and never the metadata manifest. The client-side CSV link check is only a rendering hint.
+const UPLOAD_TYPES: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+    '.avif': 'image/avif', '.svg': 'image/svg+xml', '.csv': 'text/csv; charset=utf-8'
+};
 app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
     const config = getActive();
     const imagesDir = imagesDirOf(config);
-    
+    const notFound = () => res.status(404).json({ message: 'Image not found' }); // message kept for API compatibility
+
     // Support both query param (preferred) and route param (legacy)
-    const filenameRaw = (req.query.fileName as string) || (req.params.filename as string) || '';
+    const q = req.query.fileName;
+    const filenameRaw = (typeof q === 'string' ? q : '') || (req.params.filename as string) || '';
     const filename = filenameRaw ? safeDecode(filenameRaw) : '';
-    
+
     if (!filename) {
         return res.status(400).json({ message: 'No filename provided' });
     }
-
-    const filePath = path.join(imagesDir, filename);
-
-    // Security check: ensure the resolved path is still within imagesDir
-    if (!isSafePath(imagesDir, filePath)) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
+    if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(filename) || filename.includes('..')) {
+        console.warn(`[WARN] Blocked upload name ${JSON.stringify(filename.slice(0, 200))}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
+    const type = UPLOAD_TYPES[path.extname(filename).toLowerCase()];
+    if (!type) return notFound();
 
-    if (fs.existsSync(filePath)) {
-        try {
-            const stats = fs.statSync(filePath);
-            if (stats.isFile()) {
-                res.sendFile(filename, { root: imagesDir }, (err) => {
-                    if (err) {
-                        console.error(`[ERROR] Failed to send image ${filename}:`, err);
-                        if (!res.headersSent) {
-                            res.status(404).json({ message: 'Image not found' });
-                        }
-                    }
-                });
-            } else {
-                console.warn(`[WARN] Not a file: ${filePath}`);
-                res.status(404).json({ message: 'Image not found' });
-            }
-        } catch (error: any) {
-            console.error(`[ERROR] File access error for ${filename}:`, error.message);
-            res.status(500).json({ message: 'Error accessing image' });
-        }
-    } else {
-        console.warn(`[WARN] Image not found: ${filePath}`);
-        res.status(404).json({ message: 'Image not found' });
+    // One open, no symlinks: O_NOFOLLOW makes the kernel refuse a symlink at the final
+    // component, and the checks below run on that same descriptor (no check/open race).
+    const filePath = path.join(imagesDir, filename);
+    let fd: number;
+    try {
+        // Fail closed where no-follow opens do not exist; O_NONBLOCK so a FIFO cannot stall the loop.
+        if (typeof fs.constants.O_NOFOLLOW !== 'number') return notFound();
+        fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | (fs.constants.O_NONBLOCK || 0));
+    } catch (e: any) {
+        if (['ENOENT', 'ELOOP', 'EMLINK', 'ENOTDIR', 'EISDIR', 'ENXIO', 'ENAMETOOLONG'].includes(e?.code)) return notFound();
+        console.error(`[ERROR] Upload open failed for ${filename} (${e?.code || 'error'})`);
+        return res.status(500).json({ message: 'Error reading file' });
     }
+    let size = 0;
+    try {
+        const st = fs.fstatSync(fd);
+        // Regular files with one name only: no hard-link alias of the manifest or another file.
+        if (!st.isFile() || st.nlink !== 1) { fs.closeSync(fd); return notFound(); }
+        size = st.size;
+    } catch (e: any) {
+        fs.closeSync(fd);
+        console.error(`[ERROR] Upload stat failed for ${filename} (${e?.code || 'error'})`);
+        return res.status(500).json({ message: 'Error reading file' });
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // SVG can carry script: shown inline as an <img> it is inert, but opened directly it must not
+    // run in this origin, so it gets a sandboxing CSP.
+    if (type.startsWith('image/svg')) res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    res.type(type);
+    res.setHeader('Content-Length', String(size));
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    // Exactly the validated size; pipeline destroys the stream (and closes the fd) on disconnect.
+    const stream = fs.createReadStream('', { fd, autoClose: true, start: 0, end: Math.max(0, size - 1) });
+    if (size === 0) { stream.destroy(); return res.end(); }
+    pipeline(stream, res, (e: any) => {
+        if (!e) return;
+        console.error(`[ERROR] Upload read failed for ${filename} (${e?.code || 'error'})`);
+        if (!res.headersSent) res.status(500).json({ message: 'Error reading file' }); else res.destroy();
+    });
 });
 
 // Serve static frontend files in production

@@ -19,8 +19,9 @@ export const PostDetail = () => {
     const [siteSort, setSiteSort] = useState<boolean | undefined>(undefined);
     const sortOn = useRef(false);
     useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
-    // Track #1682: close an open table popup when the post changes or the page unmounts.
-    useEffect(() => () => closeTablePopup(), [post]);
+    // Track #1682: close an open table popup on navigation to another post (slug) or unmount.
+    // Keyed on the slug, not the post object, so a re-render does not close a popup just opened.
+    useEffect(() => () => closeTablePopup(), [slug]);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {

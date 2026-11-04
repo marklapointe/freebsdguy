@@ -1,7 +1,7 @@
 /**
  * Track #1682 (Mark, 2026-11-04 1:29 PM CT): post tables can render from a CSV published
  * with the post, carry a "Download CSV" link, and big tables get an "Expand" button
- * that opens a full-screen popup scaled so the whole table fits with no scrolling.
+ * that opens a full-screen popup scaled to fit; below the 0.5 floor it scrolls instead.
  * Esc or the X closes it. Works on phones (same code path; fit uses the viewport).
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -39,7 +39,7 @@ describe('renderCsvTables', () => {
         expect(a.textContent).toBe('Ornith');
         expect(a.getAttribute('href')).toBe('https://example.org/o');
         const dl = root.querySelector('a.mdweb-csv-download') as HTMLAnchorElement;
-        expect(dl.textContent).toBe('Download CSV');
+        expect(dl.textContent).toBe('Download CSV: Results');
         expect(dl.getAttribute('href')).toBe('/api/getimage?fileName=t.csv');
         expect(dl.hasAttribute('download')).toBe(true);
         expect(fetcher).toHaveBeenCalledTimes(1);
@@ -58,13 +58,12 @@ describe('renderCsvTables', () => {
         expect(f).toHaveBeenCalledTimes(1);
         expect(root.querySelectorAll('table').length).toBe(1);
     });
-    it('keeps a visible Download link with an error message when the CSV cannot be fetched', async () => {
+    it('shows an error message (no link to the failing file) when the CSV cannot be fetched', async () => {
         root.innerHTML = '<p><a href="/api/getimage?fileName=x.csv" title="mdweb-csv-table">T</a></p>';
-        await renderCsvTables(root, async () => { throw new Error('404'); });
+        await renderCsvTables(root, async () => { throw new Error('500'); });
         expect(root.querySelector('table')).toBeNull();
-        expect(root.querySelector('.mdweb-csv-error')!.textContent).toBe("Couldn't load T. ");
-        expect(root.querySelector('a')!.textContent).toBe('Download the CSV');
-        expect(root.querySelector('a')!.getAttribute('download')).toBe('x.csv');
+        expect(root.querySelector('.mdweb-csv-error')!.textContent).toBe('The table "T" could not be loaded. Reload the page to try again.');
+        expect(root.querySelector('a')).toBeNull();
     });
     it('only fetches CSVs published with the post (same origin, images dir)', async () => {
         root.innerHTML = '<p><a href="https://evil.example/x.csv" title="mdweb-csv-table">T</a></p><p><a href="/api/admin?x.csv" title="mdweb-csv-table">U</a></p>';
@@ -99,7 +98,7 @@ describe('Expand popup', () => {
         addTableTools(root);
         const btns = root.querySelectorAll('button.mdweb-table-expand');
         expect(btns.length).toBe(1);
-        expect(btns[0].getAttribute('aria-label')).toBe('Expand table 1 to full screen');
+        expect(btns[0].getAttribute('aria-label')).toBe('Expand table: Table 1, full screen');
         expect(isBigTable(root.querySelectorAll('table')[0])).toBe(false);
         expect(isBigTable(root.querySelectorAll('table')[1])).toBe(true);
     });

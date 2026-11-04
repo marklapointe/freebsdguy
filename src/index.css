@@ -522,9 +522,16 @@ html:not(.editorial) .article-shell { --mdweb-fade-bg: var(--secondary, var(--bg
 .mdweb-table-expand:focus-visible, .mdweb-table-close:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
 .mdweb-csv-download { color: var(--brand, currentColor); }
 .mdweb-table-popup { position: fixed; inset: 0; z-index: 1000; background: var(--bg, Canvas); color: var(--text, CanvasText); overflow: hidden;
-  display: flex; align-items: flex-start; justify-content: center; padding: 64px 24px 24px; }
-.mdweb-table-close { position: absolute; top: 12px; right: 16px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border);
-  background: var(--secondary, transparent); color: inherit; font-size: 1.6rem; line-height: 1; cursor: pointer; }
+  display: flex; flex-direction: column; align-items: flex-start; padding: 12px 24px 24px; }
+.mdweb-table-popup-head { display: flex; align-items: center; gap: clamp(0.5rem, 2vw, 1rem); width: 100%; min-height: 56px; margin-bottom: 8px; }
+.mdweb-table-popup-title { flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; margin: 0; font-size: 1.1rem; line-height: 1.3; }
+.mdweb-table-hint { font-size: 0.9rem; white-space: nowrap; }
+/* Close: at least 48x48 CSS px (touch target), visible hover/focus affordance. */
+.mdweb-table-close { flex: 0 0 auto; width: 48px; height: 48px; min-width: 48px; min-height: 48px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--secondary, transparent); color: inherit; font-size: 1.75rem; line-height: 1; cursor: pointer; }
+.mdweb-table-close:hover { background: var(--border, rgba(127,127,127,.25)); }
+.mdweb-csv-table > table > caption, .mdweb-table-wrap > table > caption { caption-side: top; text-align: left; font-weight: 600; padding: 0 0 0.4em; }
+.mdweb-csv-error { display: block; margin: 1em 0; padding: 0.75em 1em; border: 1px solid #b45309; border-left-width: 4px; border-radius: 6px; }
 .mdweb-table-stage { position: relative; overflow: visible; }
 .mdweb-table-stage > table { display: table; width: max-content; max-width: none; border-collapse: collapse; font-size: 0.9rem; }
 .mdweb-table-stage th, .mdweb-table-stage td { border: 1px solid var(--border); padding: 0.35rem 0.6rem; white-space: nowrap; text-align: left; vertical-align: top; }
