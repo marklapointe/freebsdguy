@@ -166,3 +166,44 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
         fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), manualContent);
     }
 };
+
+const SLUG_RE = /^[A-Za-z0-9_-]{1,120}$/;
+let aliasCache: { dir: string; sig: string; map: Map<string, string> } | null = null;
+
+function aliasSignature(postsDir: string, files: string[]): string {
+    return files.map((f) => {
+        try {
+            return `${f}:${fs.statSync(path.join(postsDir, f)).mtimeMs}`;
+        } catch {
+            return `${f}:gone`; // renamed or deleted mid-scan: never fail the request
+        }
+    }).join('|');
+}
+
+/**
+ * Track #1682: a renamed post lists its old slugs in front matter `aliases`
+ * (a string or a list). Returns the current slug for an old one, or null.
+ * The alias map is built once and rebuilt only when a post file is added,
+ * removed or changed (a stat per file, no parsing, on a cache hit). Callers
+ * check getPost first, so a real post with that slug always wins.
+ */
+export const findPostByAlias = (postsDir: string, slug: string): string | null => {
+    if (!SLUG_RE.test(slug) || !fs.existsSync(postsDir)) return null;
+    const files = fs.readdirSync(postsDir).filter((f) => f.endsWith('.md')).sort();
+    const sig = aliasSignature(postsDir, files);
+    if (!aliasCache || aliasCache.dir !== postsDir || aliasCache.sig !== sig) {
+        const map = new Map<string, string>();
+        for (const f of files) {
+            try {
+                const { data } = matter(fs.readFileSync(path.join(postsDir, f), 'utf8'));
+                const raw = data.aliases;
+                const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
+                for (const a of list) if (typeof a === 'string' && SLUG_RE.test(a) && !map.has(a)) map.set(a, f.replace(/\.md$/, ''));
+            } catch (error) {
+                console.warn(`[WARN] aliases in ${f} not read: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        aliasCache = { dir: postsDir, sig, map };
+    }
+    return aliasCache.map.get(slug) ?? null;
+};

@@ -7,6 +7,8 @@ export interface Post {
     content: string;
     category?: string;
     pinned?: boolean;
+    /** Front matter override for sortable tables (true/false). */
+    tablesort?: boolean | string | number;
 }
 
 export interface ImageInfo {

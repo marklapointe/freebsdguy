@@ -4,6 +4,7 @@ import { MdPreview, MdCatalog } from 'md-editor-rt';
 import { api, siteConfig, getMdEditorTheme } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
 import { enhanceCollapsibleLists } from '../lib/collapse-lists';
+import { enhanceSortableTables, resolveTableSort, wrapTables } from '../lib/table-sort';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -14,11 +15,13 @@ export const PostDetail = () => {
     const scrollElement = document.documentElement;
     const bodyRef = useRef<HTMLDivElement>(null);
     const frame = useRef(0);
+    const [siteSort, setSiteSort] = useState<boolean | undefined>(undefined);
+    const sortOn = useRef(false);
     useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {
-        siteConfig.load();
+        siteConfig.load().then((cfg) => setSiteSort(cfg.tableSort));
     }, []);
 
     useEffect(() => {
@@ -46,6 +49,12 @@ export const PostDetail = () => {
             cancelled = true;
         };
     }, [slug]);
+
+    // One resolved flag; the preview callback reads it from a ref so it never sees stale state.
+    useEffect(() => {
+        sortOn.current = resolveTableSort(siteSort, post?.tablesort);
+        if (post && bodyRef.current) enhanceSortableTables(bodyRef.current, sortOn.current);
+    }, [siteSort, post]);
 
     useEffect(() => {
         return onThemeChanged(() => setEditorTheme(getMdEditorTheme()));
@@ -91,7 +100,11 @@ export const PostDetail = () => {
                             if (frame.current) cancelAnimationFrame(frame.current);
                             frame.current = requestAnimationFrame(() => {
                                 frame.current = 0;
-                                if (bodyRef.current) enhanceCollapsibleLists(bodyRef.current);
+                                if (bodyRef.current) {
+                                    enhanceCollapsibleLists(bodyRef.current);
+                                    wrapTables(bodyRef.current);
+                                    enhanceSortableTables(bodyRef.current, sortOn.current);
+                                }
                             });
                         }}
                     />

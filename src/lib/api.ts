@@ -75,6 +75,7 @@ export interface PublicSiteConfig {
     appearance?: Partial<PublicAppearance>;
     footer?: { show?: boolean; copyrightText?: string; creditText?: string };
     security?: { authMode?: string; [k: string]: unknown };
+    tableSort?: boolean;
     [k: string]: unknown;
 }
 
@@ -101,7 +102,7 @@ export function getPublicConfig(force = false): Promise<PublicSiteConfig> {
     return publicConfigPromise;
 }
 
-type SiteConfigSummary = { siteName: string; siteLogo?: string; currentTheme: string; appearance?: Partial<PublicAppearance> };
+type SiteConfigSummary = { siteName: string; siteLogo?: string; currentTheme: string; appearance?: Partial<PublicAppearance>; tableSort?: boolean };
 
 // Singleton site config store (name/logo/theme for chrome components)
 class SiteConfig {
@@ -123,7 +124,8 @@ class SiteConfig {
             siteName: data.siteName || 'MDWeb',
             siteLogo: data.siteLogo,
             currentTheme: data.currentTheme || 'dark',
-            appearance: data.appearance
+            appearance: data.appearance,
+            tableSort: data.tableSort === true
         };
     }
 

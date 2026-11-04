@@ -30,7 +30,7 @@ import {
     FileSessionStore,
     safeDecode
 } from './lib/session-store.ts';
-import { getPosts, getPost, savePost } from './lib/posts.ts';
+import { getPosts, getPost, savePost, findPostByAlias } from './lib/posts.ts';
 import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
@@ -547,6 +547,11 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
     const post = getPost(postsDir, slug);
     
     if (!post) {
+        const to = findPostByAlias(postsDir, slug);
+        if (to) {
+            const q = req.originalUrl.indexOf('?');
+            return res.redirect(301, `/api/posts/${encodeURIComponent(to)}${q >= 0 ? req.originalUrl.slice(q) : ''}`);
+        }
         return res.status(404).json({ message: 'Post not found' });
     }
 
@@ -677,6 +682,13 @@ if (fs.existsSync(distPath)) {
                 if (gp) {
                     post = gp;
                     isPost = true;
+                } else {
+                    const to = findPostByAlias(postsDir, slug);
+                    if (to) {
+                        const q = req.originalUrl.indexOf('?');
+                        res.redirect(301, `/post/${encodeURIComponent(to)}${q >= 0 ? req.originalUrl.slice(q) : ''}`);
+                        return;
+                    }
                 }
             }
 

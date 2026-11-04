@@ -135,6 +135,55 @@ Posts in development are ordinary Markdown files under `server/posts/`.
 
 ---
 
+## Sortable tables (optional)
+
+Readers can sort a post's tables by clicking a column header (click again to reverse). Numbers sort as numbers. Without JavaScript, tables show in the order you wrote them. Sorting is **off by default**. Three switches turn it on or off; the most specific one wins:
+
+1. **Whole site**: in `config.json`, set `"tableSort": true` (default `false`).
+2. **One post**: in the post's front matter, add `tablesort: true` or `tablesort: false`. This overrides the site setting.
+3. **One table**: put an empty element with `data-mdweb-sort` right before the table. This overrides the site and post settings:
+
+   ```markdown
+   <p data-mdweb-sort="off"></p>
+
+   | Name | Size |
+   |---|---|
+   | a | 1 |
+   ```
+
+   Use `"on"` to make one table sortable in a post that is otherwise off.
+
+How cells sort: numbers sort as numbers, including token counts like `128K` (x1,024), `262,144` and `1M` (x1,048,576); the first standalone number in a cell is used (`5 at 128K` sorts as 5, `max 128K` as 131072; signs are ignored). In a column with numbers, cells with no number, such as `Queued`, `n/a` or `Not supported`, always go last; an all-text column sorts alphabetically. To control a cell's order yourself, give it (or an element inside it) a `data-sort` value, e.g. `<span data-sort="131072"></span>128K`.
+
+Accepted values, the same at all three levels: `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0`. Anything else is ignored (the next setting down applies); the site config also logs a warning. The empty marker paragraph renders as a small gap above the table.
+
+## Badges
+
+Small coloured labels for posts, readable in light and dark mode (each pair has at least 4.5:1 contrast):
+
+```html
+<span class="mdweb-badge" data-badge="vllm">vLLM</span>
+<span class="mdweb-badge" data-badge="ctx-128k" data-sort="131072">128K</span>
+```
+
+| `data-badge` | Meaning |
+|---|---|
+| `vllm`, `sglang`, `llamacpp` | serving engines |
+| `ctx-32k`, `ctx-64k`, `ctx-128k`, `ctx-256k`, `ctx-512k`, `ctx-1m` | context sizes, graded from cool to warm |
+
+Any other value shows a plain grey badge. Add `data-sort` (a number) so sortable tables order the badge by value.
+
+## Renaming a post (redirects)
+
+To rename a post, rename its file (the file name is the slug) and list the old slug in the new file's front matter:
+
+```yaml
+aliases:
+  - old-slug
+```
+
+Then `/post/old-slug` and `/api/posts/old-slug` answer a permanent redirect (301) to the new slug, keeping any query string. Browsers cache a 301, so only alias a slug you will not reuse. A real post with the old slug always wins over an alias. Aliases must be plain slugs (letters, digits, `-`, `_`).
+
 ## Day-to-day use
 
 | Task | How |

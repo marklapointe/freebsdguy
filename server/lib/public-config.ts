@@ -60,6 +60,8 @@ export interface PublicConfig {
     sortBy: string;
     sortOrder: string;
     searchPlacement: string;
+    /** Sortable post tables site default (posts may override). */
+    tableSort: boolean;
     /** Absolute or configured posts path (for advanced Site UI display). */
     postsDir?: string;
     themeDir?: string;
@@ -164,6 +166,7 @@ export class PublicConfigBuilder {
             sortBy: this.source.sortBy || 'date',
             sortOrder: this.source.sortOrder || 'desc',
             searchPlacement: this.source.searchPlacement || 'top',
+            tableSort: this.source.tableSort === true,
             postsDir: this.source.postsDir,
             themeDir: this.source.themeDir,
             service: this.includeService

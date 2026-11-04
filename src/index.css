@@ -465,3 +465,48 @@ html:not(.editorial) .article-shell { --mdweb-fade-bg: var(--secondary, var(--bg
 }
 .mdweb-collapse-toggle:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .mdweb-collapse-toggle:focus-visible { outline: 2px solid var(--brand, var(--primary)); outline-offset: 2px; }
+
+/* Track #1682: optional sortable post tables (see README "Sortable tables"). */
+.mdweb-sortable th .mdweb-sort-btn {
+  all: unset; cursor: pointer; display: inline-block; min-height: 24px; font: inherit; color: inherit; text-align: left;
+}
+.mdweb-sortable th .mdweb-sort-btn:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
+.mdweb-sortable th .mdweb-sort-btn::after { content: " \2195"; opacity: 0.75; }
+.mdweb-sortable th[aria-sort="ascending"] .mdweb-sort-btn::after { content: " \2191"; opacity: 1; }
+.mdweb-sortable th[aria-sort="descending"] .mdweb-sort-btn::after { content: " \2193"; opacity: 1; }
+
+/* Track #1682: inline badges for posts. Write <span class="mdweb-badge" data-badge="vllm">vLLM</span>.
+   Fixed colour pairs chosen for >= 4.5:1 text contrast on both light and dark pages. */
+.mdweb-badge {
+  display: inline-block; padding: 0.05em 0.5em; border-radius: 999px; font-size: 0.78em; font-weight: 700;
+  line-height: 1.5; letter-spacing: 0.01em; white-space: nowrap; vertical-align: 0.08em;
+  background: #e5e7eb; color: #111827; border: 1px solid rgba(0,0,0,0.12);
+}
+.mdweb-badge[data-badge="vllm"]    { background: #1d4ed8; color: #ffffff; }
+.mdweb-badge[data-badge="sglang"]  { background: #9a3412; color: #ffffff; }
+.mdweb-badge[data-badge="llamacpp"]{ background: #4b5563; color: #ffffff; }
+.mdweb-badge[data-badge="ctx-32k"] { background: #e0f2fe; color: #0c4a6e; }
+.mdweb-badge[data-badge="ctx-64k"] { background: #bae6fd; color: #0c4a6e; }
+.mdweb-badge[data-badge="ctx-128k"]{ background: #a7f3d0; color: #064e3b; }
+.mdweb-badge[data-badge="ctx-256k"]{ background: #fde68a; color: #713f12; }
+.mdweb-badge[data-badge="ctx-512k"]{ background: #fdba74; color: #7c2d12; }
+.mdweb-badge[data-badge="ctx-1m"]  { background: #fca5a5; color: #7f1d1d; }
+/* Track #1682 (Mark 2026-11-03 6:03 PM CT): post tables fill the content width, wrap text at
+   spaces inside cells and stay top-left. PostDetail wraps each table in .mdweb-table-wrap, a
+   focusable scroll box, so a table wider than the column scrolls sideways at any width while the
+   table keeps its table role. Cells keep whole words (see the no-word-breaks rules above). */
+.mdweb-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1.5em 0; }
+.mdweb-table-wrap:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
+.mdweb-table-wrap > table, .editorial .article-body .mdweb-table-wrap > table {
+  display: table; width: 100%; max-width: none; table-layout: auto; font-size: 0.9em; margin: 0; overflow: visible;
+}
+.article-body th, .article-body td, .editorial .article-body th, .editorial .article-body td {
+  padding: 0.35em 0.55em !important; min-width: 6em; white-space: normal;
+}
+.article-body th:first-child, .article-body td:first-child { min-width: 9em; }
+/* md-editor-rt makes links inline-flex, which breaks a cell's line after every link. */
+.article-body td a, .article-body th a { display: inline !important; }
+@media (max-width: 640px) {
+  .mdweb-table-wrap > table { font-size: 0.82em; }
+  .article-body th, .article-body td { min-width: 7.5em; }
+}
