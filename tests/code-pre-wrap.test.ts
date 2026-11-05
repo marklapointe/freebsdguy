@@ -16,8 +16,8 @@ describe('code block pre-wrap (theme)', () => {
     it('sets pre-wrap + overflow-wrap on preview and editorial pre/code', () => {
         // Strip comments so we only match live rules.
         const live = css.replace(/\/\*[\s\S]*?\*\//g, '');
-        expect(live).toMatch(/\.md-editor-preview pre,\s*\.md-editor-preview pre code,\s*\.editorial \.article-body pre,\s*\.editorial \.article-body pre code\s*\{[^}]*white-space:\s*pre-wrap/);
-        expect(live).toMatch(/\.md-editor-preview pre,\s*\.md-editor-preview pre code,\s*\.editorial \.article-body pre,\s*\.editorial \.article-body pre code\s*\{[^}]*overflow-wrap:\s*anywhere/);
+        expect(live).toMatch(/\.md-editor-preview pre,\s*\.md-editor-preview pre code,\s*\.editorial \.article-body pre,\s*\.editorial \.article-body pre code\s*\{[^}]*white-space:\s*pre-wrap(?:\s*!important)?/);
+        expect(live).toMatch(/\.md-editor-preview pre,\s*\.md-editor-preview pre code,\s*\.editorial \.article-body pre,\s*\.editorial \.article-body pre code\s*\{[^}]*overflow-wrap:\s*anywhere(?:\s*!important)?/);
     });
 
     describe('layout at phone and desktop widths', () => {
@@ -36,7 +36,12 @@ describe('code block pre-wrap (theme)', () => {
             await page.setContent(html, { waitUntil: 'load' });
             const long = await page.evaluate(() => {
                 const el = document.getElementById('long')!;
-                return { sw: el.scrollWidth, cw: el.clientWidth, ws: getComputedStyle(el).whiteSpace };
+                const code = el.querySelector('code') || el;
+                return {
+                  sw: el.scrollWidth, cw: el.clientWidth,
+                  ws: getComputedStyle(el).whiteSpace,
+                  codeOw: getComputedStyle(code).overflowWrap,
+                };
             });
             const multi = await page.evaluate(() => {
                 const el = document.getElementById('multi')!;
@@ -51,6 +56,7 @@ describe('code block pre-wrap (theme)', () => {
             it(`a 300-char line fits without horizontal scroll at ${width}px`, async () => {
                 const { long } = await measure(width);
                 expect(long.ws).toMatch(/pre-wrap/);
+                expect(long.codeOw).toMatch(/anywhere/);
                 expect(long.sw, `scrollWidth ${long.sw} > clientWidth ${long.cw}`).toBeLessThanOrEqual(long.cw + 1);
             }, 60_000);
         }

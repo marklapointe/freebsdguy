@@ -202,7 +202,8 @@ body, .prose, .md-editor-preview, .post-summary {
 /* Long code lines wrap instead of forcing a sideways scroll (Mark 2026-11-04). */
 .md-editor-preview pre, .md-editor-preview pre code,
 .editorial .article-body pre, .editorial .article-body pre code {
-  white-space: pre-wrap; overflow-wrap: anywhere;
+  /* !important: beat .md-editor-preview code { overflow-wrap: break-word !important } */
+  white-space: pre-wrap !important; overflow-wrap: anywhere !important;
 }
 .md-editor-preview pre, pre { overflow-x: auto; max-width: 100%; }
 .md-editor-preview table, table { display: block; overflow-x: auto; max-width: 100%; }
