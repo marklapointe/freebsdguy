@@ -1,4 +1,5 @@
-/** Track #1682: post badges exist and every colour pair has >= 4.5:1 contrast. */
+/** Track #1682: post badges exist and every colour pair has >= 4.5:1 contrast.
+ *  Colours are theme-only; the renderer never hardcodes a value list. */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 const css = fs.readFileSync('src/index.css', 'utf8');
@@ -8,13 +9,22 @@ describe('mdweb badges', () => {
     it('links inside table cells stay inline (no line break after a link)', () => {
         expect(css).toMatch(/\.article-body td a, \.article-body th a \{ display: inline !important; \}/);
     });
-    const rules = [...css.matchAll(/\.mdweb-badge\[data-badge="([\w-]+)"\]\s*\{\s*background:\s*(#[0-9a-f]{6});\s*color:\s*(#[0-9a-f]{6});/gi)];
-    it('has engine and context-size variants', () => {
-        const names = rules.map((r) => r[1]);
-        expect(names.sort()).toEqual(['ctx-128k', 'ctx-1m', 'ctx-256k', 'ctx-32k', 'ctx-512k', 'ctx-64k', 'llamacpp', 'sglang', 'vllm']);
+    const expected = [
+        'vllm', 'sglang', 'llamacpp', 'tensorfold', 'tandemllm', 'ollama',
+        '32k', '64k', '128k', '256k', '512k', '1m',
+        'ctx-32k', 'ctx-64k', 'ctx-128k', 'ctx-256k', 'ctx-512k', 'ctx-1m',
+    ];
+    const pairs = [...css.matchAll(/\.mdweb-badge\[data-badge="([\w-]+)"\][^{]*\{\s*background:\s*(#[0-9a-f]{6});\s*color:\s*(#[0-9a-f]{6});/gi)];
+    const named = new Set(pairs.map((r) => r[1]));
+    it('colours every shipped slug via .mdweb-badge[data-badge=…]', () => {
+        for (const n of expected) expect(named.has(n), n).toBe(true);
     });
-    it('every variant has at least 4.5:1 contrast', () => {
-        expect(rules.length).toBe(9);
-        for (const r of rules) expect(ratio(r[2], r[3]), r[1]).toBeGreaterThanOrEqual(4.5);
+    it('every coloured variant has at least 4.5:1 contrast', () => {
+        expect(pairs.length).toBe(expected.length);
+        for (const r of pairs) expect(ratio(r[2], r[3]), r[1]).toBeGreaterThanOrEqual(4.5);
+    });
+    it('notes summary swaps Show notes / Hide notes with details[open] (no JS)', () => {
+        expect(css).toMatch(/\.mdweb-notes > summary\.mdweb-collapse-toggle::before\s*\{\s*content:\s*"Show notes";\s*\}/);
+        expect(css).toMatch(/\.mdweb-notes\[open\] > summary\.mdweb-collapse-toggle::before\s*\{\s*content:\s*"Hide notes";\s*\}/);
     });
 });

@@ -4,6 +4,10 @@
  *    the post is replaced by a table built from that CSV, plus a "Download CSV" link.
  *    Cells are text; a cell that is exactly "[text](http(s)://... or /path)" becomes a link.
  *    Nothing from the CSV is parsed as HTML.
+ *  - Badges: declarative only. Mark columns with data-mdweb-badge="ColA,ColB:sort" on the
+ *    CSV placeholder <a> or on an element immediately before the table/link. The renderer
+ *    wraps each non-plain cell in that column as <span class="mdweb-badge" data-badge="<slug>">;
+ *    theme CSS colours the slug. No hardcoded engine/value lists. NA/empty/— stay plain.
  *  - Expand: big tables get an "Expand" button that opens a full-screen dialog holding a
  *    copy of the table, scaled to fit the viewport. Below a readable floor (MIN_SCALE = 0.5)
  *    it stops shrinking and the dialog scrolls instead.
@@ -13,11 +17,56 @@
  */
 const CSV_TITLE = 'mdweb-csv-table';
 const DONE = 'mdwebCsv';
-const ENGINE = new Map<string, string>([['vLLM', 'vllm'], ['SGLang', 'sglang'], ['llama.cpp', 'llamacpp']]);
 /** Only CSV files published with posts (same origin, images dir) are fetched. */
 const CSV_HREF = /^\/api\/getimage\?fileName=[A-Za-z0-9._-]+\.csv$/;
 export const LIMITS = { bytes: 1_000_000, rows: 5000, cols: 100, tables: 50 };
 export const MIN_SCALE = 0.5;
+
+export type BadgeCol = { name: string; sort?: boolean };
+
+/** Parse "Engine,Limit:sort" into column descriptors. Unknown names are fine (no match = skip). */
+export function parseBadgeSpec(spec: string | null | undefined): BadgeCol[] {
+    if (!spec) return [];
+    return spec.split(',').map((p) => p.trim()).filter(Boolean).map((p) => {
+        const m = /^(.*?):sort$/i.exec(p);
+        return m ? { name: m[1].trim(), sort: true } : { name: p };
+    }).filter((c) => c.name);
+}
+
+/** Slug for data-badge: lowercase, keep only a-z0-9. Same rule for every value. */
+export function badgeSlug(v: string): string {
+    return v.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Sentinels that stay plain text (never a badge). */
+export function isPlainBadgeValue(v: string): boolean {
+    const t = v.trim();
+    return t === '' || t === 'NA' || t === '—' || t === '–' || t === '-';
+}
+
+/** Best-effort number for data-sort: 128K/1M/1,024 or a plain integer. */
+function sortNumber(v: string): string | undefined {
+    const t = v.trim().replace(/,/g, '');
+    const km = /^(\d+(?:\.\d+)?)([KkMm])$/.exec(t);
+    if (km) {
+        const n = parseFloat(km[1]) * (/[Mm]/.test(km[2]) ? 1048576 : 1024);
+        return String(Math.round(n));
+    }
+    if (/^\d+$/.test(t)) return t;
+    return undefined;
+}
+
+function badgeSpan(v: string, sort?: boolean): HTMLSpanElement {
+    const s = document.createElement('span');
+    s.className = 'mdweb-badge';
+    s.dataset.badge = badgeSlug(v);
+    s.textContent = v;
+    if (sort) {
+        const n = sortNumber(v);
+        if (n !== undefined) s.dataset.sort = n;
+    }
+    return s;
+}
 
 /** RFC 4180 CSV: quoted fields, "" escapes, embedded commas and newlines, CRLF. */
 export function parseCsv(text: string): string[][] {
@@ -51,14 +100,101 @@ function cell(tag: 'th' | 'td', v: string): HTMLElement {
     if (tag === 'th') el.setAttribute('scope', 'col');
     const m = LINK.exec(v);
     if (m) { const a = document.createElement('a'); a.href = m[2]; a.textContent = m[1]; el.appendChild(a); }
-    else if (tag === 'td' && ENGINE.has(v)) {
-        const s = document.createElement('span'); s.className = 'mdweb-badge'; s.dataset.badge = ENGINE.get(v)!; s.textContent = v; el.appendChild(s);
-    } else el.textContent = v;
+    else el.textContent = v;
     return el;
 }
 
+/** Wrap cells in the named columns as badges. Idempotent. Returns how many cells were wrapped. */
+export function decorateBadgeColumns(table: HTMLTableElement, cols: BadgeCol[]): number {
+    if (!cols.length) return 0;
+    const headRow = table.tHead?.rows[0] ?? table.rows[0];
+    if (!headRow) return 0;
+    // Match headers case-insensitively; first unused column wins on duplicates.
+    const headers = [...headRow.cells].map((c) => (c.textContent || '').trim());
+    const used = new Set<number>();
+    const idxs: { i: number; sort: boolean }[] = [];
+    for (const c of cols) {
+        const i = headers.findIndex((h, idx) => !used.has(idx) && h.toLowerCase() === c.name.toLowerCase());
+        if (i < 0) continue;
+        used.add(i);
+        idxs.push({ i, sort: !!c.sort });
+    }
+    if (!idxs.length) return 0;
+    let n = 0;
+    const bodies = table.tBodies.length ? [...table.tBodies] : [];
+    let rows = bodies.length ? bodies.flatMap((b) => [...b.rows]) : [...table.rows];
+    rows = rows.filter((r) => r !== headRow);
+    for (const tr of rows) {
+        for (const { i, sort } of idxs) {
+            const td = tr.cells[i];
+            if (!td || td.tagName === 'TH' || td.querySelector('.mdweb-badge')) continue;
+            if (td.childElementCount > 0) continue; // leave links / rich cells alone (documented)
+            const v = (td.textContent || '').trim();
+            if (isPlainBadgeValue(v)) continue;
+            td.textContent = '';
+            td.appendChild(badgeSpan(v, sort));
+            n++;
+        }
+    }
+    return n;
+}
+
+/** Read a badge spec from an element, walking previous siblings (and the parent's). */
+function badgeSpecFrom(el: Element | null): string {
+    if (!el) return '';
+    const own = el.getAttribute('data-mdweb-badge');
+    if (own) return own;
+    const walk = (start: Element | null): string => {
+        let p: Element | null = start;
+        while (p) {
+            if (p.hasAttribute('data-mdweb-badge')) return p.getAttribute('data-mdweb-badge') || '';
+            // Only skip empty wrappers between the marker and the target.
+            if ((p.textContent || '').trim() !== '') break;
+            p = p.previousElementSibling;
+        }
+        return '';
+    };
+    return walk(el.previousElementSibling) || walk(el.parentElement?.previousElementSibling ?? null);
+}
+
+/**
+ * Apply data-mdweb-badge markers to tables already in the DOM (markdown tables).
+ * A marker on an element badges the next table sibling (same pattern as data-mdweb-sort).
+ * Returns how many tables were decorated.
+ */
+export function applyBadgeColumns(root: ParentNode): number {
+    let n = 0;
+    root.querySelectorAll<HTMLElement>('[data-mdweb-badge]').forEach((m) => {
+        const spec = m.getAttribute('data-mdweb-badge') || '';
+        const cols = parseBadgeSpec(spec);
+        if (!cols.length) return;
+        // Only a table that follows this marker (never an earlier/unrelated one).
+        let t: HTMLTableElement | null = null;
+        let sib: Element | null = m.nextElementSibling;
+        while (sib && !t) {
+            if (sib.tagName === 'TABLE') t = sib as HTMLTableElement;
+            else if (sib.classList?.contains('mdweb-csv-table') || sib.classList?.contains('mdweb-table-wrap')
+                || sib.classList?.contains('mdweb-table-tools')) {
+                t = sib.querySelector('table');
+            } else if ((sib.textContent || '').trim() === '') {
+                // empty wrapper — keep looking
+            } else {
+                // Hit real content (heading, paragraph) before a table: stop.
+                // Still allow an immediate tools/csv box that replaced a link.
+                t = sib.querySelector?.('table') ?? null;
+                if (!t) break;
+            }
+            if (!t) sib = sib.nextElementSibling;
+        }
+        if (!t) return;
+        const k = decorateBadgeColumns(t, cols);
+        if (k > 0) { n++; t.dataset.mdwebBadge = '1'; }
+    });
+    return n;
+}
+
 let uid = 0;
-export function tableFromCsv(rows: string[][], label?: string): HTMLTableElement {
+export function tableFromCsv(rows: string[][], label?: string, badgeCols: BadgeCol[] = []): HTMLTableElement {
     const t = document.createElement('table');
     if (label) {
         const c = t.createCaption(); c.id = `mdweb-csv-cap-${++uid}`; c.textContent = label;
@@ -69,6 +205,7 @@ export function tableFromCsv(rows: string[][], label?: string): HTMLTableElement
     (head || []).forEach((h) => th.appendChild(cell('th', h)));
     const tb = t.createTBody();
     body.forEach((r) => { const tr = tb.insertRow(); r.forEach((v) => tr.appendChild(cell('td', v))); });
+    if (badgeCols.length) decorateBadgeColumns(t, badgeCols);
     return t;
 }
 
@@ -135,7 +272,8 @@ export async function renderCsvTables(root: ParentNode, fetcher: Fetcher = defau
         const dl = document.createElement('a');
         dl.className = 'mdweb-csv-download'; dl.href = href; dl.textContent = `Download CSV: ${label}`;
         dl.setAttribute('download', href.split('fileName=')[1]);
-        box.appendChild(tableFromCsv(rows, label));
+        const badgeCols = parseBadgeSpec(badgeSpecFrom(a));
+        box.appendChild(tableFromCsv(rows, label, badgeCols));
         if (cut) {
             const n = document.createElement('p'); n.className = 'mdweb-csv-note';
             n.textContent = `Showing the first ${LIMITS.rows} rows and ${LIMITS.cols} columns. Download the CSV for all of it.`;

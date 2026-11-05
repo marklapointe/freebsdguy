@@ -83,10 +83,10 @@ describe('renderCsvTables', () => {
         expect(root.querySelector('.mdweb-csv-note')!.textContent).toMatch(/first/);
         expect(tables[0].querySelector('th')!.getAttribute('scope')).toBe('col');
     });
-    it('does not badge inherited object keys', async () => {
+    it('does not badge cells unless a column is marked (no hardcoded value list)', async () => {
         root.innerHTML = '<p><a href="/api/getimage?fileName=x.csv" title="mdweb-csv-table">T</a></p>';
         await renderCsvTables(root, async () => 'A\nconstructor\nvLLM\n');
-        expect(root.querySelectorAll('.mdweb-badge').length).toBe(1);
+        expect(root.querySelectorAll('.mdweb-badge').length).toBe(0);
     });
 });
 

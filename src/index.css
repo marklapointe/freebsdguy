@@ -199,6 +199,11 @@ body, .prose, .md-editor-preview, .post-summary {
 .md-editor-preview ol, .prose ol { list-style: decimal; }
 .md-editor-preview li { display: list-item; }
 /* Wide things scroll inside their own box, never the page. */
+/* Long code lines wrap instead of forcing a sideways scroll (Mark 2026-11-04). */
+.md-editor-preview pre, .md-editor-preview pre code,
+.editorial .article-body pre, .editorial .article-body pre code {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .md-editor-preview pre, pre { overflow-x: auto; max-width: 100%; }
 .md-editor-preview table, table { display: block; overflow-x: auto; max-width: 100%; }
 /* Table cells keep whole words: the table scrolls sideways instead of squeezing them. */
@@ -480,22 +485,44 @@ html:not(.editorial) .article-shell { --mdweb-fade-bg: var(--secondary, var(--bg
 .mdweb-sortable th[aria-sort="ascending"] .mdweb-sort-btn::after { content: " \2191"; opacity: 1; }
 .mdweb-sortable th[aria-sort="descending"] .mdweb-sort-btn::after { content: " \2193"; opacity: 1; }
 
-/* Track #1682: inline badges for posts. Write <span class="mdweb-badge" data-badge="vllm">vLLM</span>.
-   Fixed colour pairs chosen for >= 4.5:1 text contrast on both light and dark pages. */
+/* Track #1682: inline badges. Mark a column with data-mdweb-badge="Col" (see README); the
+   renderer sets data-badge to a slug of the cell text. Colours live only here — a new value
+   needs one CSS rule, never a code change. Unknown slugs keep the grey fallback.
+   Text/background pairs are >= 4.5:1. */
 .mdweb-badge {
   display: inline-block; padding: 0.05em 0.5em; border-radius: 999px; font-size: 0.78em; font-weight: 700;
   line-height: 1.5; letter-spacing: 0.01em; white-space: nowrap; vertical-align: 0.08em;
-  background: #e5e7eb; color: #111827; border: 1px solid rgba(0,0,0,0.12);
+  background: #e5e7eb; color: #111827; border: 1px solid rgba(0,0,0,0.35);
 }
-.mdweb-badge[data-badge="vllm"]    { background: #1d4ed8; color: #ffffff; }
-.mdweb-badge[data-badge="sglang"]  { background: #9a3412; color: #ffffff; }
-.mdweb-badge[data-badge="llamacpp"]{ background: #4b5563; color: #ffffff; }
-.mdweb-badge[data-badge="ctx-32k"] { background: #e0f2fe; color: #0c4a6e; }
-.mdweb-badge[data-badge="ctx-64k"] { background: #bae6fd; color: #0c4a6e; }
-.mdweb-badge[data-badge="ctx-128k"]{ background: #a7f3d0; color: #064e3b; }
-.mdweb-badge[data-badge="ctx-256k"]{ background: #fde68a; color: #713f12; }
-.mdweb-badge[data-badge="ctx-512k"]{ background: #fdba74; color: #7c2d12; }
-.mdweb-badge[data-badge="ctx-1m"]  { background: #fca5a5; color: #7f1d1d; }
+.mdweb-badge[data-badge="vllm"]       { background: #1d4ed8; color: #ffffff; }
+.mdweb-badge[data-badge="sglang"]     { background: #9a3412; color: #ffffff; }
+.mdweb-badge[data-badge="llamacpp"]   { background: #4b5563; color: #ffffff; }
+.mdweb-badge[data-badge="tensorfold"] { background: #047857; color: #ffffff; }
+.mdweb-badge[data-badge="tandemllm"]  { background: #7e22ce; color: #ffffff; }
+.mdweb-badge[data-badge="ollama"]     { background: #111827; color: #ffffff; }
+/* Context-size slugs (cell text 32K/128K/1M → 32k/128k/1m) and legacy ctx-* from older posts. */
+.mdweb-badge[data-badge="32k"]      { background: #e0f2fe; color: #0c4a6e; }
+.mdweb-badge[data-badge="ctx-32k"]  { background: #e0f2fe; color: #0c4a6e; }
+.mdweb-badge[data-badge="64k"]      { background: #bae6fd; color: #0c4a6e; }
+.mdweb-badge[data-badge="ctx-64k"]  { background: #bae6fd; color: #0c4a6e; }
+.mdweb-badge[data-badge="128k"]     { background: #a7f3d0; color: #064e3b; }
+.mdweb-badge[data-badge="ctx-128k"] { background: #a7f3d0; color: #064e3b; }
+.mdweb-badge[data-badge="256k"]     { background: #fde68a; color: #713f12; }
+.mdweb-badge[data-badge="ctx-256k"] { background: #fde68a; color: #713f12; }
+.mdweb-badge[data-badge="512k"]     { background: #fdba74; color: #7c2d12; }
+.mdweb-badge[data-badge="ctx-512k"] { background: #fdba74; color: #7c2d12; }
+.mdweb-badge[data-badge="1m"]       { background: #fca5a5; color: #7f1d1d; }
+.mdweb-badge[data-badge="ctx-1m"]   { background: #fca5a5; color: #7f1d1d; }
+
+/* Non-breaking label fragment. Posts/authors emit <span class="mdweb-nb">; theme owns layout. */
+.mdweb-nb { white-space: nowrap; display: inline-block; max-width: 100%; }
+
+/* Notes fold: posts emit <details class="mdweb-notes"><summary class="mdweb-collapse-toggle">.
+   Show notes / Hide notes via details[open], no JS. */
+.mdweb-notes > summary.mdweb-collapse-toggle { list-style: none; }
+.mdweb-notes > summary.mdweb-collapse-toggle::-webkit-details-marker { display: none; }
+.mdweb-notes > summary.mdweb-collapse-toggle::before { content: "Show notes"; }
+.mdweb-notes[open] > summary.mdweb-collapse-toggle::before { content: "Hide notes"; }
 /* Track #1682 (Mark 2026-11-03 6:03 PM CT): post tables fill the content width, wrap text at
    spaces inside cells and stay top-left. PostDetail wraps each table in .mdweb-table-wrap, a
    focusable scroll box, so a table wider than the column scrolls sideways at any width while the

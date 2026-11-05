@@ -159,19 +159,46 @@ Accepted values, the same at all three levels: `true`/`false`, `on`/`off`, `yes`
 
 ## Badges
 
-Small coloured labels for posts, readable in light and dark mode (each pair has at least 4.5:1 contrast):
+Coloured labels on table cells. **The renderer never hardcodes a value list.** Mark which columns should badge; the theme CSS colours each slug.
+
+### Mark a column (declarative)
+
+Put an empty element with `data-mdweb-badge` right before the table (same pattern as sortable tables), or on a CSV placeholder link:
+
+```html
+<p data-mdweb-badge="Engine"></p>
+
+| Model | Engine | Setup |
+| --- | --- | --- |
+| Ornith | vLLM | Single Node |
+```
+
+```html
+<a href="/api/getimage?fileName=results.csv" title="mdweb-csv-table" data-mdweb-badge="Engine">Results</a>
+```
+
+- Comma-separated header names: `data-mdweb-badge="Engine,Status"`.
+- Add `:sort` on a column to set `data-sort` from the cell (so `128K` sorts as 131072): `data-mdweb-badge="Limit:sort"`.
+- Cells that are empty, `NA`, `—`, `–`, or `-` stay plain text.
+- A plain-text cell becomes `<span class="mdweb-badge" data-badge="<slug>">…</span>`, where the slug is the cell text lowercased with non-alphanumerics removed (`vLLM` → `vllm`, `llama.cpp` → `llamacpp`, `128K` → `128k`). Cells that already contain a link or other markup are left alone.
+- **Breaking for older posts:** auto-badging of known engine names without a marker is gone. Add `data-mdweb-badge="Engine"` (or write the span by hand) when you republish.
+
+You can still write a badge by hand (add `data-sort` so sortable tables order by value):
 
 ```html
 <span class="mdweb-badge" data-badge="vllm">vLLM</span>
-<span class="mdweb-badge" data-badge="ctx-128k" data-sort="131072">128K</span>
+<span class="mdweb-badge" data-badge="128k" data-sort="131072">128K</span>
 ```
 
-| `data-badge` | Meaning |
-|---|---|
-| `vllm`, `sglang`, `llamacpp` | serving engines |
-| `ctx-32k`, `ctx-64k`, `ctx-128k`, `ctx-256k`, `ctx-512k`, `ctx-1m` | context sizes, graded from cool to warm |
+### Colours (theme only)
 
-Any other value shows a plain grey badge. Add `data-sort` (a number) so sortable tables order the badge by value.
+Add or change a colour in `src/index.css` with one rule. Unknown slugs keep the grey fallback. Shipped pairs (each ≥ 4.5:1 text contrast):
+
+| `data-badge` | Typical use |
+|---|---|
+| `vllm`, `sglang`, `llamacpp`, `tensorfold`, `tandemllm`, `ollama` | engines |
+| `32k`, `64k`, `128k`, `256k`, `512k`, `1m` (and legacy `ctx-*`) | context sizes |
+
 
 ## Renaming a post (redirects)
 
