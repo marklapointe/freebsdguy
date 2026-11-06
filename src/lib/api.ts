@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { dispatchThemeChanged, dispatchThemeModeChanged } from './theme-events';
+import { clearBootingClass } from './theme-boot';
 
 export const api = axios.create({
     baseURL: '/api',
@@ -75,6 +76,7 @@ export interface PublicSiteConfig {
     appearance?: Partial<PublicAppearance>;
     footer?: { show?: boolean; copyrightText?: string; creditText?: string };
     security?: { authMode?: string; [k: string]: unknown };
+    tableSort?: boolean;
     [k: string]: unknown;
 }
 
@@ -101,7 +103,7 @@ export function getPublicConfig(force = false): Promise<PublicSiteConfig> {
     return publicConfigPromise;
 }
 
-type SiteConfigSummary = { siteName: string; siteLogo?: string; currentTheme: string; appearance?: Partial<PublicAppearance> };
+type SiteConfigSummary = { siteName: string; siteLogo?: string; currentTheme: string; appearance?: Partial<PublicAppearance>; tableSort?: boolean };
 
 // Singleton site config store (name/logo/theme for chrome components)
 class SiteConfig {
@@ -123,7 +125,8 @@ class SiteConfig {
             siteName: data.siteName || 'MDWeb',
             siteLogo: data.siteLogo,
             currentTheme: data.currentTheme || 'dark',
-            appearance: data.appearance
+            appearance: data.appearance,
+            tableSort: data.tableSort === true
         };
     }
 
@@ -263,6 +266,8 @@ function paintTheme(themeData: ThemeColors, packId: string, mode: ThemeMode, crt
     });
     root.setAttribute('data-theme', packId);
     root.setAttribute('data-theme-mode', mode);
+    // The shipped default packs use the editorial layout; retro packs keep theirs.
+    root.classList.toggle('editorial', packId === 'dark' || packId === 'light');
 
     const retro = isRetroThemeId(packId);
     if (crtEffects && retro) {
@@ -335,6 +340,8 @@ export const applyTheme = async (
     } catch (error) {
         console.error('Failed to load theme', error);
         return null;
+    } finally {
+        clearBootingClass();
     }
 };
 

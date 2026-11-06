@@ -120,9 +120,10 @@ describe('WP #1682 read token over /mcp', () => {
             params: {}
         });
         const names = (JSON.parse(toolText(listed)).result?.tools || []).map((t: { name: string }) => t.name) as string[];
-        expect(names).toEqual(expect.arrayContaining([...READ_TOOLS, ...BLOCKED_FOR_READ, 'create_post']));
+        // Track #1701 F9: a read token lists only the read tools; blocked ones are hidden.
+        expect([...names].sort()).toEqual([...READ_TOOLS].sort());
 
-        for (const name of names) {
+        for (const name of [...names, ...BLOCKED_FOR_READ, 'create_post']) {
             const res = await mcpCall(readPat, {
                 jsonrpc: '2.0',
                 id: name,
@@ -133,7 +134,7 @@ describe('WP #1682 read token over /mcp', () => {
             if (READ_TOOLS.includes(name)) {
                 expect(text, name).not.toMatch(/read-only/i);
             } else {
-                expect(text, name).toMatch(/read-only/i);
+                expect(text, name).toMatch(/read-only|not found/i);
             }
         }
     });

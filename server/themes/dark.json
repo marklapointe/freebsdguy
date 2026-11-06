@@ -1,11 +1,11 @@
 {
-  "--primary": "#3b82f6",
-  "--secondary": "#1f2937",
-  "--accent": "#3a297a",
-  "--text": "#f3f4f6",
-  "--bg": "#111827",
-  "--border": "#374151",
-  "--hover": "#1f2937",
-  "--site-name-color": "#3b82f6",
+  "--primary": "#f2f4f7",
+  "--secondary": "#161b22",
+  "--accent": "#a5b4fc",
+  "--text": "#e6e8eb",
+  "--bg": "#0e1116",
+  "--border": "#262c36",
+  "--hover": "#1c222b",
+  "--site-name-color": "#f2f4f7",
   "mdEditorTheme": "dark"
 }

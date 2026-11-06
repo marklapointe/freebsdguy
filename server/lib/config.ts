@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { asFlag } from './flag.ts';
 import {
     DEFAULT_ADMIN_USERNAME,
     DEFAULT_ADMIN_PASSWORD_HASH
@@ -108,10 +109,20 @@ export interface Config {
     currentTheme: string;
     siteName?: string;
     siteLogo?: string;
+    /** Link-preview description for the home page (og:description). */
+    siteTagline?: string;
+    /** Default share image for og:image (absolute http(s) URL or /path). */
+    shareImage?: string;
+    /** Public origin for og:url, e.g. https://freebsdguy.ca (no trailing slash). */
+    siteUrl?: string;
     pagination?: number;
     sortBy?: 'date' | 'title' | 'author';
     sortOrder?: 'asc' | 'desc';
     searchPlacement?: 'top' | 'bottom' | 'left' | 'right' | 'none';
+    /** Sortable tables in posts (default false). Posts override with front matter `tablesort`. */
+    tableSort?: boolean;
+    /** Seed the shipped demo posts on start (default true; MDWEB_DEMO_POSTS overrides). */
+    demoPosts?: boolean;
     appearance?: AppearanceConfig;
     footer?: FooterConfig;
     aiConfig?: AIConfig;
@@ -220,7 +231,6 @@ export function defaultConfig(): Config {
             themeDir: '/var/db/mdweb/themes',
             currentTheme: 'dark',
             siteName: 'MDWeb',
-            siteLogo: 'logo.webp',
             pagination: 10,
             sortBy: 'date',
             sortOrder: 'desc',
@@ -435,6 +445,21 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
 
     if (typeof o.siteLogo === 'string') config.siteLogo = o.siteLogo;
 
+    // Link-preview settings (Track #1682 slice P). Strict: they land in HTML attributes.
+    if (typeof o.siteTagline === 'string' && o.siteTagline.length <= 300) config.siteTagline = o.siteTagline;
+    else if (o.siteTagline !== undefined) warnings.push('siteTagline invalid; using default');
+    if (typeof o.shareImage === 'string' && (o.shareImage === '' || /^(https?:\/\/[^\s"'<>]+|\/[^\s"'<>]*)$/.test(o.shareImage)) && o.shareImage.length <= 2048) config.shareImage = o.shareImage;
+    else if (o.shareImage !== undefined) warnings.push('shareImage invalid; using default');
+    if (typeof o.siteUrl === 'string' && (o.siteUrl === '' || /^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/.test(o.siteUrl))) config.siteUrl = o.siteUrl;
+    else if (o.siteUrl !== undefined) warnings.push('siteUrl invalid; using default');
+
+    const ts = asFlag(o.tableSort);
+    if (ts !== undefined) config.tableSort = ts;
+    else if (o.tableSort !== undefined) warnings.push('tableSort invalid (use true/false, on/off, yes/no or 1/0); using default (off)');
+
+    if (typeof o.demoPosts === 'boolean') config.demoPosts = o.demoPosts;
+    else if (o.demoPosts !== undefined) warnings.push('demoPosts invalid; using default');
+
     if (o.pagination !== undefined) {
         config.pagination = asPagination(o.pagination, base.pagination || 10);
         if (typeof o.pagination !== 'number' && typeof o.pagination !== 'string') {
@@ -602,10 +627,15 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
         'currentTheme',
         'siteName',
         'siteLogo',
+        'siteTagline',
+        'shareImage',
+        'siteUrl',
+        'demoPosts',
         'pagination',
         'sortBy',
         'sortOrder',
         'searchPlacement',
+        'tableSort',
         'appearance',
         'footer',
         'aiConfig',

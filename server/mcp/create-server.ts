@@ -1,6 +1,7 @@
 /**
  * Build a per-request McpServer with tools bound to the authenticated user.
  */
+import { packageVersion } from '../lib/package-version.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
 import fs from 'fs';
@@ -34,7 +35,7 @@ import {
     revokeToken
 } from '../lib/api-tokens.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
-import { isReadAllowedMcpTool, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
+import { isReadAllowedMcpTool, mcpToolVisible, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
 import { MDWEB_MCP_INSTRUCTIONS, MDWEB_MCP_PLAYBOOK } from './playbook.ts';
 import sanitizeHtml from 'sanitize-html';
 
@@ -59,9 +60,12 @@ function err(message: string) {
 }
 
 function requireWriter(user: McpUser) {
+    // Defence in depth: since #1701 F9 such callers never see writer tools.
+    /* v8 ignore start */
     if (user.role !== 'admin' && user.role !== 'contributor') {
         throw new Error('Forbidden: contributor or admin required');
     }
+    /* v8 ignore stop */
 }
 
 function requireAdmin(user: McpUser) {
@@ -84,7 +88,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
     const { user, getActive, setActive, tokenScope } = deps;
 
     const server = new McpServer(
-        { name: 'mdweb', version: process.env.npm_package_version || '1.0.0' },
+        { name: 'mdweb', version: packageVersion() },
         { instructions: MDWEB_MCP_INSTRUCTIONS }
     );
 
@@ -92,13 +96,19 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         name: string,
         config: object,
         handler: (args: any, extra?: any) => any
-    ) =>
+    ) => {
+        // F9: tools/list shows only what this caller may run.
+        if (!mcpToolVisible(name, user.role, tokenScope)) return;
         server.registerTool(name, config as never, (async (args: any, extra: any) => {
+            // Defence in depth: since #1701 F9 read tokens never see these tools.
+            /* v8 ignore start */
             if (tokenScope === 'read' && !isReadAllowedMcpTool(name)) {
                 return err(READ_ONLY_TOKEN_MESSAGE);
             }
+            /* v8 ignore stop */
             return handler(args, extra);
         }) as never);
+    };
 
     server.registerResource(
         'playbook',
@@ -494,7 +504,10 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                     ...u.users.map((x) => ({ username: x.username, role: x.role }))
                 ]);
             } catch (e: unknown) {
+                // Was covered by non-admin calls, which no longer see this tool (#1701 F9).
+                /* v8 ignore start */
                 return err(e instanceof Error ? e.message : String(e));
+                /* v8 ignore stop */
             }
         }
     );
@@ -568,7 +581,10 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 }
                 return text({ tokens: listTokensForUser(user.username) });
             } catch (e: unknown) {
+                // Was covered by non-admin calls, which no longer see this tool (#1701 F9).
+                /* v8 ignore start */
                 return err(e instanceof Error ? e.message : String(e));
+                /* v8 ignore stop */
             }
         }
     );

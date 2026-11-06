@@ -29,9 +29,30 @@ const DEMO_SLUGS = [
     'diagrams-over-coffee.md'
 ];
 
-export function ensureDemoPosts(postsDir: string): { copied: string[]; total: number } {
+/**
+ * Whether to seed the demo posts. MDWEB_DEMO_POSTS (0/false/no/off or 1/true/yes/on)
+ * wins over the config key demoPosts; with neither set, seeding stays on.
+ */
+export function demoPostsEnabled(cfg: { demoPosts?: unknown } | null | undefined): boolean {
+    const env = (process.env.MDWEB_DEMO_POSTS || '').trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(env)) return false;
+    if (['1', 'true', 'yes', 'on'].includes(env)) return true;
+    if (cfg && typeof cfg.demoPosts === 'boolean') return cfg.demoPosts;
+    return true;
+}
+
+export function ensureDemoPosts(
+    postsDir: string,
+    opts: { enabled?: boolean } = {}
+): { copied: string[]; total: number } {
     const srcDir = shippedPostsDir();
     const copied: string[] = [];
+    if (opts.enabled === false) {
+        const total = fs.existsSync(postsDir)
+            ? fs.readdirSync(postsDir).filter((f) => f.endsWith('.md')).length
+            : 0;
+        return { copied, total };
+    }
     if (!fs.existsSync(srcDir)) {
         return { copied, total: 0 };
     }

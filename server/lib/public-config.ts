@@ -60,6 +60,8 @@ export interface PublicConfig {
     sortBy: string;
     sortOrder: string;
     searchPlacement: string;
+    /** Sortable post tables site default (posts may override). */
+    tableSort: boolean;
     /** Absolute or configured posts path (for advanced Site UI display). */
     postsDir?: string;
     themeDir?: string;
@@ -156,7 +158,7 @@ export class PublicConfigBuilder {
     build(): PublicConfig {
         const out: PublicConfig = {
             siteName: this.source.siteName || 'Generic Blog',
-            siteLogo: this.source.siteLogo || 'logo.webp',
+            siteLogo: this.source.siteLogo || '',
             currentTheme: this.source.currentTheme || 'dark',
             appearance: projectAppearance(this.source.appearance),
             footer: projectFooter(this.source.footer),
@@ -164,6 +166,7 @@ export class PublicConfigBuilder {
             sortBy: this.source.sortBy || 'date',
             sortOrder: this.source.sortOrder || 'desc',
             searchPlacement: this.source.searchPlacement || 'top',
+            tableSort: this.source.tableSort === true,
             postsDir: this.source.postsDir,
             themeDir: this.source.themeDir,
             service: this.includeService

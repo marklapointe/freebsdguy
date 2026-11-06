@@ -288,7 +288,7 @@ describe('public-config remaining', () => {
         themeDir: './themes',
         currentTheme: 'dark',
         siteName: 'Site',
-        jwtSecret: 'unique-secret-material-xyz-999',
+        jwtSecret: 'unique-secret-material-xyz-999', // gitleaks:allow -- test fixture, not a real secret
         aiConfig: {
             enabled: true,
             provider: 'openai',
@@ -338,7 +338,7 @@ describe('public-config remaining', () => {
             themeDir: './t',
             currentTheme: 'dark',
             siteName: 'unique-secret-material-xyz-999',
-            jwtSecret: 'unique-secret-material-xyz-999'
+            jwtSecret: 'unique-secret-material-xyz-999' // gitleaks:allow -- test fixture, not a real secret
         };
         expect(() => PublicConfigBuilder.from(leaky).withoutAI().build()).toThrow(/INV-SEC-1/);
     });
@@ -1601,13 +1601,14 @@ describe('register-routes error paths', () => {
         const imagesDir = path.join(postsDir, 'images');
         fs.mkdirSync(imagesDir, { recursive: true });
         fs.writeFileSync(path.join(imagesDir, 'stat-fail.webp'), 'x');
-        const original = fs.statSync;
-        const mock = vi.spyOn(fs, 'statSync').mockImplementation(((p: any, o?: any) => {
-            if (String(p).includes('stat-fail')) throw new Error('EIO stat');
-            return original(p, o);
+        // _12: the handler opens once (O_NOFOLLOW) and stats the descriptor; an I/O error is a 500, not a 404.
+        const original = fs.openSync;
+        const mock = vi.spyOn(fs, 'openSync').mockImplementation(((p: any, ...r: any[]) => {
+            if (String(p).includes('stat-fail')) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+            return (original as any)(p, ...r);
         }) as any);
         const res = await request(app).get('/api/getimage?fileName=stat-fail.webp');
-        expect([500, 404]).toContain(res.status);
+        expect(res.status).toBe(500);
         mock.mockRestore();
         try {
             fs.unlinkSync(path.join(imagesDir, 'stat-fail.webp'));

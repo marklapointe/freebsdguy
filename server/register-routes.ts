@@ -2,6 +2,7 @@
  * Route registration factory — attaches all HTTP handlers to the Express app.
  * Keeps server/index.ts as bootstrap only (TAOCP stepwise refinement).
  */
+import { pipeline } from 'stream';
 import type { Express, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -10,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import sanitizeHtml from 'sanitize-html';
 import express from 'express';
 import { fileURLToPath } from 'url';
+import { packageVersion } from './lib/package-version.ts';
 import {
     loadConfig,
     saveConfig,
@@ -29,7 +31,8 @@ import {
     FileSessionStore,
     safeDecode
 } from './lib/session-store.ts';
-import { getPosts, getPost, savePost } from './lib/posts.ts';
+import { getPosts, getPost, savePost, findPostByAlias } from './lib/posts.ts';
+import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
@@ -78,6 +81,38 @@ const imagesDirOf = (config: { postsDir?: string }) =>
  */
 const themeDirForConfig = (config: { themeDir?: string }) =>
     resolveConfiguredPath(configDirOf(), config.themeDir || './themes');
+
+/**
+ * Express error handler — never leak the originating error message or status
+ * details beyond a generic body. Top-level so it can be unit-tested directly.
+ */
+export function jsonErrorHandler(
+    err: unknown,
+    _req: Request,
+    res: Response,
+    next: NextFunction
+): void {
+    const e = err as { status?: unknown; statusCode?: unknown; message?: unknown } | null;
+    const pick = (v: unknown) =>
+        typeof v === 'number' && v >= 400 && v <= 599 ? v : undefined;
+    const status = pick(e?.status) ?? pick(e?.statusCode) ?? 500;
+    if (res.headersSent) {
+        next(err);
+        return;
+    }
+    if (status === 500) {
+        console.error('[ERROR]', status, e?.message);
+    }
+    let message: string;
+    if (status === 500) {
+        message = 'Internal Server Error';
+    } else if (status === 400) {
+        message = 'Bad Request';
+    } else {
+        message = 'Error';
+    }
+    res.status(status).json({ message });
+}
 
 export function registerRoutes(app: Express, ctx: AppContext): void {
     const { secret: SECRET, authenticate, requireAdmin, requireWriter, upload } = ctx;
@@ -513,6 +548,11 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
     const post = getPost(postsDir, slug);
     
     if (!post) {
+        const to = findPostByAlias(postsDir, slug);
+        if (to) {
+            const q = req.originalUrl.indexOf('?');
+            return res.redirect(301, `/api/posts/${encodeURIComponent(to)}${q >= 0 ? req.originalUrl.slice(q) : ''}`);
+        }
         return res.status(404).json({ message: 'Post not found' });
     }
 
@@ -550,73 +590,165 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
     res.json({ message: 'Post saved' });
 });
 
-// Proxy images through a common endpoint
+// Proxy images through a common endpoint.
+// Track #1682 (_12): confined server-side to plain files directly in the uploads dir: no path
+// separators or dot names, only upload types (images, CSV tables), no symlink out of the dir,
+// and never the metadata manifest. The client-side CSV link check is only a rendering hint.
+const UPLOAD_TYPES: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+    '.avif': 'image/avif', '.svg': 'image/svg+xml', '.csv': 'text/csv; charset=utf-8'
+};
 app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response) => {
     const config = getActive();
     const imagesDir = imagesDirOf(config);
-    
+    const notFound = () => res.status(404).json({ message: 'Image not found' }); // message kept for API compatibility
+
     // Support both query param (preferred) and route param (legacy)
-    const filenameRaw = (req.query.fileName as string) || (req.params.filename as string) || '';
+    const q = req.query.fileName;
+    const filenameRaw = (typeof q === 'string' ? q : '') || (req.params.filename as string) || '';
     const filename = filenameRaw ? safeDecode(filenameRaw) : '';
-    
+
     if (!filename) {
         return res.status(400).json({ message: 'No filename provided' });
     }
-
-    const filePath = path.join(imagesDir, filename);
-
-    // Security check: ensure the resolved path is still within imagesDir
-    if (!isSafePath(imagesDir, filePath)) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
+    if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(filename) || filename.includes('..')) {
+        console.warn(`[WARN] Blocked upload name ${JSON.stringify(filename.slice(0, 200))}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
+    const type = UPLOAD_TYPES[path.extname(filename).toLowerCase()];
+    if (!type) return notFound();
 
-    if (fs.existsSync(filePath)) {
-        try {
-            const stats = fs.statSync(filePath);
-            if (stats.isFile()) {
-                res.sendFile(filename, { root: imagesDir }, (err) => {
-                    if (err) {
-                        console.error(`[ERROR] Failed to send image ${filename}:`, err);
-                        if (!res.headersSent) {
-                            res.status(404).json({ message: 'Image not found' });
-                        }
-                    }
-                });
-            } else {
-                console.warn(`[WARN] Not a file: ${filePath}`);
-                res.status(404).json({ message: 'Image not found' });
-            }
-        } catch (error: any) {
-            console.error(`[ERROR] File access error for ${filename}:`, error.message);
-            res.status(500).json({ message: 'Error accessing image' });
-        }
-    } else {
-        console.warn(`[WARN] Image not found: ${filePath}`);
-        res.status(404).json({ message: 'Image not found' });
+    // One open, no symlinks: O_NOFOLLOW makes the kernel refuse a symlink at the final
+    // component, and the checks below run on that same descriptor (no check/open race).
+    const filePath = path.join(imagesDir, filename);
+    let fd: number;
+    try {
+        // Fail closed where no-follow opens do not exist; O_NONBLOCK so a FIFO cannot stall the loop.
+        if (typeof fs.constants.O_NOFOLLOW !== 'number') return notFound();
+        fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | (fs.constants.O_NONBLOCK || 0));
+    } catch (e: any) {
+        if (['ENOENT', 'ELOOP', 'EMLINK', 'ENOTDIR', 'EISDIR', 'ENXIO', 'ENAMETOOLONG'].includes(e?.code)) return notFound();
+        console.error(`[ERROR] Upload open failed for ${filename} (${e?.code || 'error'})`);
+        return res.status(500).json({ message: 'Error reading file' });
     }
+    let size = 0;
+    try {
+        const st = fs.fstatSync(fd);
+        // Regular files with one name only: no hard-link alias of the manifest or another file.
+        if (!st.isFile() || st.nlink !== 1) { fs.closeSync(fd); return notFound(); }
+        size = st.size;
+    } catch (e: any) {
+        fs.closeSync(fd);
+        console.error(`[ERROR] Upload stat failed for ${filename} (${e?.code || 'error'})`);
+        return res.status(500).json({ message: 'Error reading file' });
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // SVG can carry script: shown inline as an <img> it is inert, but opened directly it must not
+    // run in this origin, so it gets a sandboxing CSP.
+    if (type.startsWith('image/svg')) res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    res.type(type);
+    res.setHeader('Content-Length', String(size));
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    // Exactly the validated size; pipeline destroys the stream (and closes the fd) on disconnect.
+    const stream = fs.createReadStream('', { fd, autoClose: true, start: 0, end: Math.max(0, size - 1) });
+    if (size === 0) { stream.destroy(); return res.end(); }
+    pipeline(stream, res, (e: any) => {
+        if (!e) return;
+        console.error(`[ERROR] Upload read failed for ${filename} (${e?.code || 'error'})`);
+        if (!res.headersSent) res.status(500).json({ message: 'Error reading file' }); else res.destroy();
+    });
 });
 
 // Serve static frontend files in production
 const distPath = path.resolve(__dirname, '../dist');
 console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`);
 if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-    app.get(/^\/(?!api|mcp).*/, (_req: Request, res: Response) => {
+    // index:false — the SPA catch-all below reads index.html itself on every
+    // request (no caching) so post edits are reflected immediately.
+    app.use(express.static(distPath, {
+        index: false,
+        setHeaders(res, filePath) {
+            // Vite content-hashed assets only (name-HASH.ext). HTML shell is no-store below.
+            const base = path.basename(filePath);
+            if (/^.+-[A-Za-z0-9]{8}\.(js|css|woff2?|ttf|otf)$/.test(base)) {
+                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            } else if (/\.(js|css|woff2?|svg|png|jpe?g|webp|gif|ico)$/i.test(base)) {
+                res.setHeader('Cache-Control', 'public, max-age=86400');
+            }
+        }
+    }));
+    app.get(/^\/(?!api|mcp).*/, (req: Request, res: Response) => {
         const indexPath = path.join(distPath, 'index.html');
-        if (fs.existsSync(indexPath)) {
-            res.sendFile('index.html', { root: distPath }, (err) => {
-                /* istanbul ignore next */
-                if (err) {
-                    console.error('[ERROR] Failed to send index.html:', err);
-                    if (!res.headersSent) {
-                        res.status(404).send('Not Found');
+        if (!fs.existsSync(indexPath)) {
+            res.status(404).send('Not Found');
+            return;
+        }
+        let shell: string;
+        try {
+            shell = fs.readFileSync(indexPath, 'utf8');
+        } catch (err) {
+            /* istanbul ignore next */
+            console.error('[ERROR] Failed to read index.html:', err);
+            /* istanbul ignore next */
+            res.status(500).send('');
+            return;
+        }
+
+        try {
+            const activeConfig = getActive();
+            // Prefer the configured public origin; fall back to the request's
+            // scheme + the Host header nginx set for the matched vhost. Never trust
+            // X-Forwarded-Host for a published og:url/canonical (link poisoning).
+            // X-Forwarded-Proto may only upgrade the scheme to https (jail nginx
+            // reaches node on the jail IP, so trust proxy 'loopback' never matches).
+            const origin =
+                activeConfig.siteUrl ||
+                `${req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${String(req.headers.host || 'localhost').replace(/[^A-Za-z0-9.:[\]-]/g, '')}`;
+
+            const pathMatch = req.path.match(/^\/post\/([A-Za-z0-9_-]{1,120})$/);
+            let post = null;
+            let isPost = false;
+
+            if (pathMatch) {
+                const slug = pathMatch[1];
+                const postsDir = postsDirOf(activeConfig);
+                const gp = getPost(postsDir, slug);
+                if (gp) {
+                    post = gp;
+                    isPost = true;
+                } else {
+                    const to = findPostByAlias(postsDir, slug);
+                    if (to) {
+                        const q = req.originalUrl.indexOf('?');
+                        res.redirect(301, `/post/${encodeURIComponent(to)}${q >= 0 ? req.originalUrl.slice(q) : ''}`);
+                        return;
                     }
                 }
-            });
-        /* istanbul ignore next */
-        } else {
-            res.status(404).send('Not Found');
+            }
+
+            const args = {
+                config: {
+                    siteName: activeConfig.siteName || 'MDWeb',
+                    siteTagline: activeConfig.siteTagline,
+                    shareImage: activeConfig.shareImage
+                },
+                origin,
+                path: req.path,
+                post,
+                isPost
+            };
+            const { title, meta } = buildMetaTags(args);
+            // FOUC: first paint uses #mdweb-critical + boot script (data-theme-mode).
+            // Pack colors arrive via applyTheme; do not inject mode-guessed vars here.
+            // og:url/canonical can follow Host when siteUrl is unset: never let a shared cache keep it.
+            res.set('Cache-Control', 'no-store');
+            res.vary('Host');
+            res.send(injectMeta(shell, { title, meta }));
+        } catch (err) {
+            /* istanbul ignore next */
+            console.error('[ERROR] meta injection failed:', err);
+            /* istanbul ignore next */
+            res.send(shell);
         }
     });
 }
@@ -628,7 +760,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
     const postsDir = postsDirOf(config);
     res.json({
         ok: true,
-        version: process.env.npm_package_version || '1.0.0',
+        version: packageVersion(),
         env: process.env.NODE_ENV || 'development',
         auth: {
             mode: resolveAuthMode(config)
@@ -656,7 +788,7 @@ app.get('/api/config', (_req: Request, res: Response) => {
         const { config: safe } = sanitizeConfig(config);
         res.json({
             siteName: safe.siteName || 'MDWeb',
-            siteLogo: safe.siteLogo || 'logo.webp',
+            siteLogo: safe.siteLogo || '',
             currentTheme: safe.currentTheme || 'dark',
             appearance: safe.appearance || { themeMode: 'dark', crtEffects: true, textGlow: true },
             pagination: safe.pagination || 10,
@@ -786,7 +918,7 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
 
         const patch: Record<string, unknown> = {};
         if (b.siteName) patch.siteName = strip(b.siteName);
-        if (b.siteLogo !== undefined) patch.siteLogo = strip(b.siteLogo || 'logo.webp');
+        if (b.siteLogo !== undefined) patch.siteLogo = strip(b.siteLogo) || '';
         if (b.currentTheme) patch.currentTheme = strip(b.currentTheme);
         for (const k of ['pagination', 'sortBy', 'sortOrder', 'searchPlacement'] as const) {
             if (b[k] !== undefined) patch[k] = b[k];
@@ -1124,5 +1256,11 @@ app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, r
     }
 });
 
+    // 404 handler (must be after every route, including the SPA catch-all and /api/health)
+    app.use((_req: Request, res: Response) => {
+        res.status(404).json({ message: 'Not Found' });
+    });
 
+    // Error handler — never leak Express/framework details.
+    app.use(jsonErrorHandler);
 }

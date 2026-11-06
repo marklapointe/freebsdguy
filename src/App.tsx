@@ -112,6 +112,7 @@ function App() {
         <Router>
             <div className="min-h-screen bg-bg text-text">
                 <Navbar user={user} setUser={setUser} />
+                <main id="main" tabIndex={-1}>
                 <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/post/:slug" element={<PostDetail />} />
@@ -126,10 +127,11 @@ function App() {
                         )
                     } />
                 </Routes>
+                </main>
                 {footer.show && (footer.copyrightText || footer.creditText) && (
                     <footer
                         data-testid="site-footer"
-                        className="p-8 text-center opacity-50 text-sm mt-12 border-t border-secondary space-y-1"
+                        className="site-footer p-8 text-center opacity-50 text-sm mt-12 border-t border-secondary space-y-1"
                     >
                         {footer.copyrightText ? (
                             <p data-testid="footer-copyright">

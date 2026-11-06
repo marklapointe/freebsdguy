@@ -45,7 +45,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [config, setConfig] = useState<any>({
         siteName: siteName,
-        siteLogo: siteLogo || 'logo.webp',
+        siteLogo: siteLogo || '',
         currentTheme: 'dark',
         pagination: 10,
         sortBy: 'date',

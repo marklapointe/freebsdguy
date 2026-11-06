@@ -79,19 +79,31 @@ export const Home = () => {
         ) : null;
 
     if (!ready) {
-        return <div className="container mx-auto p-4 max-w-[85%] opacity-50">Loading…</div>;
+        return <div className="content-col mx-auto w-full max-w-3xl px-4 py-4 opacity-50">Loading…</div>;
     }
 
     return (
-        <div className="container mx-auto p-4 max-w-[85%]">
+        <div className="content-col mx-auto w-full max-w-3xl px-4 py-4">
+            <header className="page-intro">
+                <p className="page-kicker">Journal</p>
+                <h1 className="page-heading">Latest writing</h1>
+            </header>
             {searchPlacement !== 'bottom' && searchBox}
             <div className="grid gap-6">
                 {filteredPosts.map(post => (
-                    <div
+                    <article
                         key={post.slug}
-                        className="p-6 bg-secondary rounded-lg shadow-lg hover:shadow-xl transition border-l-4 border-accent"
+                        className="post-card p-4 sm:p-6 bg-secondary rounded-lg shadow-lg hover:shadow-xl transition border-l-4 border-accent"
                     >
-                        <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
+                        <p className="card-date">
+                            {(() => {
+                                const d = post.date ? new Date(post.date) : null;
+                                return d && !isNaN(d.getTime()) ? (
+                                    <time dateTime={d.toISOString()}>{d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</time>
+                                ) : null;
+                            })()}
+                        </p>
+                        <h2 className="card-title text-2xl font-bold mb-2 flex items-center gap-2">
                             {post.pinned && (
                                 <span title="Pinned Post">
                                     <Pin size={18} className="text-accent fill-accent" />
@@ -101,16 +113,13 @@ export const Home = () => {
                                 {post.title}
                             </Link>
                         </h2>
-                        <p className="opacity-70 text-sm mb-4">
-                            {post.date ? new Date(post.date).toLocaleDateString() : ''}
-                        </p>
-                        <div className="mb-4 prose-sm max-w-none">
+                        <div className="post-summary mb-4 prose-sm max-w-none">
                             <MdPreview modelValue={post.summary || ''} theme={editorTheme} language="en-US" />
                         </div>
-                        <Link to={`/post/${post.slug}`} className="text-accent font-semibold hover:underline">
+                        <Link to={`/post/${post.slug}`} className="card-more text-accent font-semibold hover:underline" aria-label={`Read more: ${post.title}`}>
                             Read more →
                         </Link>
-                    </div>
+                    </article>
                 ))}
             </div>
             {!search && posts.length < total && (

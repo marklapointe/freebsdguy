@@ -135,6 +135,82 @@ Posts in development are ordinary Markdown files under `server/posts/`.
 
 ---
 
+## Sortable tables (optional)
+
+Readers can sort a post's tables by clicking a column header (click again to reverse). Numbers sort as numbers. Without JavaScript, tables show in the order you wrote them. Sorting is **off by default**. Three switches turn it on or off; the most specific one wins:
+
+1. **Whole site**: in `config.json`, set `"tableSort": true` (default `false`).
+2. **One post**: in the post's front matter, add `tablesort: true` or `tablesort: false`. This overrides the site setting.
+3. **One table**: put an empty element with `data-mdweb-sort` right before the table. This overrides the site and post settings:
+
+   ```markdown
+   <p data-mdweb-sort="off"></p>
+
+   | Name | Size |
+   |---|---|
+   | a | 1 |
+   ```
+
+   Use `"on"` to make one table sortable in a post that is otherwise off.
+
+How cells sort: numbers sort as numbers, including token counts like `128K` (x1,024), `262,144` and `1M` (x1,048,576); the first standalone number in a cell is used (`5 at 128K` sorts as 5, `max 128K` as 131072; signs are ignored). In a column with numbers, cells with no number, such as `Queued`, `n/a` or `Not supported`, always go last; an all-text column sorts alphabetically. To control a cell's order yourself, give it (or an element inside it) a `data-sort` value, e.g. `<span data-sort="131072"></span>128K`.
+
+Accepted values, the same at all three levels: `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0`. Anything else is ignored (the next setting down applies); the site config also logs a warning. The empty marker paragraph renders as a small gap above the table.
+
+## Badges
+
+Coloured labels on table cells. **The renderer never hardcodes a value list.** Mark which columns should badge; the theme CSS colours each slug.
+
+### Mark a column (declarative)
+
+Put an empty element with `data-mdweb-badge` right before the table (same pattern as sortable tables), or on a CSV placeholder link:
+
+```html
+<p data-mdweb-badge="Engine"></p>
+
+| Model | Engine | Setup |
+| --- | --- | --- |
+| Ornith | vLLM | Single Node |
+```
+
+```html
+<a href="/api/getimage?fileName=results.csv" title="mdweb-csv-table" data-mdweb-badge="Engine">Results</a>
+```
+
+- Comma-separated header names: `data-mdweb-badge="Engine,Status"`.
+- Add `:sort` on a column to set `data-sort` from the cell (so `128K` sorts as 131072): `data-mdweb-badge="Limit:sort"`.
+- Cells that are empty, `NA`, `—`, `–`, or `-` stay plain text.
+- A plain-text cell becomes `<span class="mdweb-badge" data-badge="<slug>">…</span>`, where the slug is the cell text lowercased with non-alphanumerics removed (`vLLM` → `vllm`, `llama.cpp` → `llamacpp`, `128K` → `128k`). Cells that already contain a link or other markup are left alone.
+- **Breaking for older posts:** auto-badging of known engine names without a marker is gone. Add `data-mdweb-badge="Engine"` (or write the span by hand) when you republish.
+
+You can still write a badge by hand (add `data-sort` so sortable tables order by value):
+
+```html
+<span class="mdweb-badge" data-badge="vllm">vLLM</span>
+<span class="mdweb-badge" data-badge="128k" data-sort="131072">128K</span>
+```
+
+### Colours (theme only)
+
+Add or change a colour in `src/index.css` with one rule. Unknown slugs keep the grey fallback. Shipped pairs (each ≥ 4.5:1 text contrast):
+
+| `data-badge` | Typical use |
+|---|---|
+| `vllm`, `sglang`, `llamacpp`, `tensorfold`, `tandemllm`, `ollama` | engines |
+| `32k`, `64k`, `128k`, `256k`, `512k`, `1m` (and legacy `ctx-*`) | context sizes |
+
+
+## Renaming a post (redirects)
+
+To rename a post, rename its file (the file name is the slug) and list the old slug in the new file's front matter:
+
+```yaml
+aliases:
+  - old-slug
+```
+
+Then `/post/old-slug` and `/api/posts/old-slug` answer a permanent redirect (301) to the new slug, keeping any query string. Browsers cache a 301, so only alias a slug you will not reuse. A real post with the old slug always wins over an alias. Aliases must be plain slugs (letters, digits, `-`, `_`).
+
 ## Day-to-day use
 
 | Task | How |

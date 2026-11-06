@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
 import { api, siteConfig, getMdEditorTheme } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
+import { enhanceCollapsibleLists } from '../lib/collapse-lists';
+import { enhanceSortableTables, resolveTableSort, wrapTables } from '../lib/table-sort';
+import { addPinToggles, addTableTools, applyBadgeColumns, applyPinColumns, closeTablePopup, renderCsvTables } from '../lib/table-tools';
 import { Post } from '../types';
 
 export const PostDetail = () => {
@@ -11,10 +14,18 @@ export const PostDetail = () => {
     const [error, setError] = useState<string | null>(null);
     const [id] = useState('preview-only');
     const scrollElement = document.documentElement;
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const frame = useRef(0);
+    const [siteSort, setSiteSort] = useState<boolean | undefined>(undefined);
+    const sortOn = useRef(false);
+    useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
+    // Track #1682: close an open table popup on navigation to another post (slug) or unmount.
+    // Keyed on the slug, not the post object, so a re-render does not close a popup just opened.
+    useEffect(() => () => closeTablePopup(), [slug]);
     const [editorTheme, setEditorTheme] = useState<'light' | 'dark'>(getMdEditorTheme());
 
     useEffect(() => {
-        siteConfig.load();
+        siteConfig.load().then((cfg) => setSiteSort(cfg.tableSort));
     }, []);
 
     useEffect(() => {
@@ -43,6 +54,12 @@ export const PostDetail = () => {
         };
     }, [slug]);
 
+    // One resolved flag; the preview callback reads it from a ref so it never sees stale state.
+    useEffect(() => {
+        sortOn.current = resolveTableSort(siteSort, post?.tablesort);
+        if (post && bodyRef.current) enhanceSortableTables(bodyRef.current, sortOn.current);
+    }, [siteSort, post]);
+
     useEffect(() => {
         return onThemeChanged(() => setEditorTheme(getMdEditorTheme()));
     }, []);
@@ -62,38 +79,68 @@ export const PostDetail = () => {
 
     if (!post) return <div className="p-8 text-center text-primary">Loading...</div>;
 
+    const when = post.date ? new Date(post.date) : null;
+    const valid = when && !isNaN(when.getTime());
     return (
-        <div className="container mx-auto p-4 max-w-[90%] bg-secondary my-8 rounded-lg shadow-2xl overflow-hidden border border-accent border-opacity-10">
-            <div className="p-8">
-                <h1 className="text-4xl font-extrabold mb-4 border-b border-accent border-opacity-30 pb-4 text-primary">{post.title}</h1>
-                <div className="flex gap-4 text-sm opacity-70 mb-8 text-primary">
-                    <span>{new Date(post.date).toLocaleDateString()}</span>
-                    {post.author && <span>by {post.author}</span>}
+        <article className="article-shell content-col mx-auto w-full max-w-3xl my-4 sm:my-8">
+            <header className="article-header">
+                <div className="article-meta">
+                    {valid && <time dateTime={when!.toISOString()}>{when!.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</time>}
+                    {post.author && <><span className="dot" aria-hidden="true">•</span><span>{post.author}</span></>}
                 </div>
+                <h1 className="article-title text-3xl sm:text-4xl font-extrabold text-primary">{post.title}</h1>
+                <div className="article-rule" aria-hidden="true"></div>
+            </header>
 
-                <div className="flex flex-col lg:flex-row gap-8">
-                    <div className="flex-1 min-w-0">
-                        <MdPreview
-                            id={id}
-                            modelValue={post.content}
-                            theme={editorTheme}
-                            language="en-US"
-                        />
-                    </div>
-                    <div className="hidden lg:block w-64 shrink-0 border-l border-accent border-opacity-10 pl-6">
-                        <div className="sticky top-8">
-                            <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-4 text-accent opacity-60">Contents</h3>
-                            <MdCatalog editorId={id} scrollElement={scrollElement} />
-                        </div>
-                    </div>
+            <div className="article-layout">
+                <div className="article-body min-w-0" ref={bodyRef}>
+                    <MdPreview
+                        id={id}
+                        modelValue={post.content}
+                        theme={editorTheme}
+                        language="en-US"
+                        onHtmlChanged={() => {
+                            // Track #1682: collapse long "Updates" lists once the preview DOM is in place.
+                            if (frame.current) cancelAnimationFrame(frame.current);
+                            frame.current = requestAnimationFrame(() => {
+                                frame.current = 0;
+                                if (bodyRef.current) {
+                                    enhanceCollapsibleLists(bodyRef.current);
+                                    wrapTables(bodyRef.current);
+                                    applyBadgeColumns(bodyRef.current);
+                                    applyPinColumns(bodyRef.current);
+                                    enhanceSortableTables(bodyRef.current, sortOn.current);
+                                    addTableTools(bodyRef.current);
+                                    addPinToggles(bodyRef.current);
+                                    // Track #1682: tables published as CSV render once fetched, then get the same tools.
+                                    const body = bodyRef.current;
+                                    void renderCsvTables(body).then((n) => {
+                                        if (!n) return;
+                                        wrapTables(body);
+                                        applyBadgeColumns(body);
+                                        applyPinColumns(body);
+                                        enhanceSortableTables(body, sortOn.current);
+                                        addTableTools(body);
+                                        addPinToggles(body);
+                                    });
+                                }
+                            });
+                        }}
+                    />
                 </div>
-
-                <div className="mt-12 pt-8 border-t border-accent border-opacity-10">
-                    <Link to="/" className="text-accent hover:underline flex items-center gap-2 font-bold transition-all hover:gap-3">
-                        <span>←</span> Back to home
-                    </Link>
-                </div>
+                <aside className="article-toc hidden lg:block" aria-labelledby="toc-label">
+                    <div className="sticky top-24">
+                        <p id="toc-label" className="text-xs font-black uppercase tracking-[0.2em] mb-4">Contents</p>
+                        <MdCatalog editorId={id} scrollElement={scrollElement} />
+                    </div>
+                </aside>
             </div>
-        </div>
+
+            <div className="article-back">
+                <Link to="/" className="flex items-center gap-2">
+                    <span aria-hidden="true">←</span> Back to home
+                </Link>
+            </div>
+        </article>
     );
 };

@@ -2,6 +2,7 @@
  * Theme catalog helpers — list JSON themes from themeDir, path-safe names.
  */
 import fs from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { isSafePath } from './safe-path.ts';
@@ -59,13 +60,32 @@ export function themeSearchDirs(configuredDir: string): string[] {
  * (e.g. /var/db/mdweb/themes). Missing files are copied; existing files are left alone
  * so admin color overrides are preserved.
  */
-export function ensureRuntimeThemeCatalog(configuredDir: string): { copied: string[]; total: number } {
+/**
+ * sha256 of shipped theme files from earlier releases. A runtime copy that still matches
+ * one of these was never edited by the admin, so an upgrade may replace it with the
+ * current shipped file (Track #1682: 1.1.0 dark/light failed WCAG AA).
+ */
+export const PREVIOUS_SHIPPED_THEME_SHA256: Record<string, string[]> = {
+    dark: [
+        '9c7c806b0cc4a8c58acce3c6aa031a1672e7c9a6c6167ef7ff3951f0f7cc47ad',
+        // dark.json as shipped in 1.1.0_3 and 1.1.0_4, before the editorial palette
+        '89de43749643ae23e1a9412503e405cc965f4b6151bf2ae5f10dd121702261ae'
+    ],
+    light: [
+        '5679729d75f0b8d04537b5c9feb99f45b37304a362c4a952336300adc05f542a',
+        // light.json as shipped in 1.1.0_3 and 1.1.0_4, before the editorial palette
+        'ecf3327694bdf1865d5d021bc1dafcaebf5deba20914f229f8778a632804f8c8'
+    ]
+};
+
+export function ensureRuntimeThemeCatalog(configuredDir: string): { copied: string[]; refreshed: string[]; total: number } {
     const dest = resolveThemeDir(configuredDir);
     const shipped = shippedThemesDir();
     const copied: string[] = [];
+    const refreshed: string[] = [];
     /* v8 ignore start */
     if (!fs.existsSync(shipped)) {
-        return { copied, total: listThemeIds(dest).length };
+        return { copied, refreshed, total: listThemeIds(dest).length };
     }
     /* v8 ignore stop */
     if (!fs.existsSync(dest)) {
@@ -85,9 +105,19 @@ export function ensureRuntimeThemeCatalog(configuredDir: string): { copied: stri
             } catch {
                 /* non-fatal */
             }
+        } else if (PREVIOUS_SHIPPED_THEME_SHA256[id]) {
+            try {
+                const cur = crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');
+                if (PREVIOUS_SHIPPED_THEME_SHA256[id].includes(cur)) {
+                    fs.copyFileSync(src, target);
+                    refreshed.push(id);
+                }
+            } catch {
+                /* non-fatal */
+            }
         }
     }
-    return { copied, total: listThemeIds(dest).length };
+    return { copied, refreshed, total: listThemeIds(dest).length };
 }
 
 /** Prefer configured dir for writes; fall back to shipped for reads via search. */

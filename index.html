@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Blog</title>
+  <style id="mdweb-critical">html{color-scheme:dark;background:#0e1116;color:#e6e8eb;--bg:#0e1116;--text:#e6e8eb;--primary:#f2f4f7;--accent:#a5b4fc}
+html[data-theme-mode="light"]{color-scheme:light;background:#fbfaf7;color:#1f2328;--bg:#fbfaf7;--text:#1f2328;--primary:#111418;--accent:#4338ca}
+html.mdweb-booting,html.mdweb-booting *{transition:none!important;animation:none!important}
+body{background:var(--bg,#0e1116);color:var(--text,#e6e8eb);margin:0}</style>
+  <script>(function(){try{var m=localStorage.getItem('themeMode');if(m!=='light'&&m!=='dark')m='dark';var el=document.documentElement;el.setAttribute('data-theme-mode',m);el.classList.add('mdweb-booting')}catch(e){}})();</script>
 </head>
 <body class="bg-[var(--bg)] text-[var(--text)]">
 <div id="root"></div>
