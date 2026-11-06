@@ -13,6 +13,10 @@
  *    it stops shrinking and the dialog scrolls instead.
  *    The dialog is modal (page behind it inert), labelled by the table's title, shows an
  *    "Esc to close" hint and a 48px X; closing returns focus to the button (or the post title).
+ *  - Pin columns: data-mdweb-pin="Model,Engine,Setup" (same marker pattern as badges) marks
+ *    those header/body cells. A "Pin columns" toggle (off by default, localStorage) makes
+ *    them position:sticky while scrolling sideways, including in the Expand popup. Generic:
+ *    any table with the marker gets the same treatment; no per-table special cases.
  *  The server confines /api/getimage to plain upload files; the URL check here is a hint.
  */
 const CSV_TITLE = 'mdweb-csv-table';
@@ -273,7 +277,10 @@ export async function renderCsvTables(root: ParentNode, fetcher: Fetcher = defau
         dl.className = 'mdweb-csv-download'; dl.href = href; dl.textContent = `Download CSV: ${label}`;
         dl.setAttribute('download', href.split('fileName=')[1]);
         const badgeCols = parseBadgeSpec(badgeSpecFrom(a));
-        box.appendChild(tableFromCsv(rows, label, badgeCols));
+        const table = tableFromCsv(rows, label, badgeCols);
+        const pinNames = parsePinSpec(pinSpecFrom(a));
+        if (pinNames.length) decoratePinColumns(table, pinNames);
+        box.appendChild(table);
         if (cut) {
             const n = document.createElement('p'); n.className = 'mdweb-csv-note';
             n.textContent = `Showing the first ${LIMITS.rows} rows and ${LIMITS.cols} columns. Download the CSV for all of it.`;
@@ -323,6 +330,8 @@ function openPopup(table: HTMLTableElement, opener: HTMLElement, title: string):
     const copy = table.cloneNode(true) as HTMLTableElement;
     copy.querySelectorAll('button.mdweb-sort-btn').forEach((b) => b.replaceWith(...b.childNodes));
     copy.querySelector('caption')?.remove(); copy.removeAttribute('aria-labelledby');
+    const pinsOn = pinWrap(table).classList.contains('mdweb-pins-on');
+    if (pinsOn) stage.classList.add('mdweb-pins-on');
     stage.appendChild(copy); d.append(head, stage);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -371,7 +380,12 @@ function openPopup(table: HTMLTableElement, opener: HTMLElement, title: string):
     document.addEventListener('keydown', onKey);
     window.addEventListener('resize', fit);
     openClose = close;
-    fit(); x.focus();
+    fit();
+    if (pinsOn) {
+        // Measure after the dialog is in the document and fit() has run.
+        requestAnimationFrame(() => syncPinLeftOffsets(copy));
+    }
+    x.focus();
 }
 
 /** Add an Expand button above every big table (once). */
@@ -397,5 +411,233 @@ export function addTableTools(root: ParentNode): void {
         b.setAttribute('aria-label', `Expand table: ${title}, full screen`);
         b.addEventListener('click', () => openPopup(t, b, title));
         bar.prepend(b);
+    });
+}
+
+
+/* ---- Optional pin columns (Track #1682) ---- */
+
+const PIN_LS = 'mdweb-pin:';
+
+/** Parse "Model,Engine,Setup" into column names. */
+export function parsePinSpec(spec: string | null | undefined): string[] {
+    if (!spec) return [];
+    return spec.split(',').map((p) => p.trim()).filter(Boolean);
+}
+
+function pinSpecFrom(el: Element | null): string {
+    if (!el) return '';
+    const own = el.getAttribute('data-mdweb-pin');
+    if (own) return own;
+    const walk = (start: Element | null): string => {
+        let p: Element | null = start;
+        while (p) {
+            if (p.hasAttribute('data-mdweb-pin')) return p.getAttribute('data-mdweb-pin') || '';
+            if ((p.textContent || '').trim() !== '') break;
+            p = p.previousElementSibling;
+        }
+        return '';
+    };
+    return walk(el.previousElementSibling) || walk(el.parentElement?.previousElementSibling ?? null);
+}
+
+/** Stable localStorage key for a table's pin preference. */
+export function pinStorageKey(table: HTMLTableElement): string {
+    const head = table.tHead?.rows[0] ?? table.rows[0];
+    const headers = head ? [...head.cells].map((c) => (c.textContent || '').trim()).join('|') : '';
+    const title = tableTitle(table, 0);
+    return PIN_LS + title + '::' + headers;
+}
+
+export function isPinEnabled(key: string): boolean {
+    try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+
+export function setPinEnabled(key: string, on: boolean): void {
+    try {
+        if (on) localStorage.setItem(key, '1');
+        else localStorage.removeItem(key);
+    } catch { /* ignore quota / private mode */ }
+}
+
+/** Mark matching th/td with data-mdweb-pin. Idempotent. Returns cells newly marked. */
+export function decoratePinColumns(table: HTMLTableElement, names: string[]): number {
+    if (!names.length) return 0;
+    const headRow = table.tHead?.rows[0] ?? table.rows[0];
+    if (!headRow) return 0;
+    if (table.dataset.mdwebPinReady === '1' && headRow.querySelector('th[data-mdweb-pin],td[data-mdweb-pin]')) return 0;
+    const headers = [...headRow.cells].map((c) => (c.textContent || '').trim());
+    const used = new Set<number>();
+    const idxs: number[] = [];
+    for (const name of names) {
+        const i = headers.findIndex((h, idx) => !used.has(idx) && h.toLowerCase() === name.toLowerCase());
+        if (i < 0) continue;
+        used.add(i);
+        idxs.push(i);
+    }
+    if (!idxs.length) return 0;
+    let n = 0;
+    const mark = (cell: HTMLTableCellElement | undefined, i: number) => {
+        if (!cell || cell.hasAttribute('data-mdweb-pin')) return;
+        cell.setAttribute('data-mdweb-pin', '');
+        cell.dataset.mdwebPinI = String(i);
+        n++;
+    };
+    for (const i of idxs) mark(headRow.cells[i], i);
+    const bodies = table.tBodies.length ? [...table.tBodies] : [];
+    let rows = bodies.length ? bodies.flatMap((b) => [...b.rows]) : [...table.rows];
+    rows = rows.filter((r) => r !== headRow);
+    for (const tr of rows) for (const i of idxs) mark(tr.cells[i], i);
+    table.dataset.mdwebPinReady = '1';
+    return n;
+}
+
+/** Apply data-mdweb-pin markers to the next table sibling. Returns tables decorated. */
+export function applyPinColumns(root: ParentNode): number {
+    let n = 0;
+    root.querySelectorAll<HTMLElement>('[data-mdweb-pin]').forEach((m) => {
+        // Skip cells already marked as pin targets
+        if (m.tagName === 'TH' || m.tagName === 'TD') return;
+        m.setAttribute('hidden', '');
+        const names = parsePinSpec(m.getAttribute('data-mdweb-pin'));
+        if (!names.length) return;
+        let t: HTMLTableElement | null = null;
+        let sib: Element | null = m.nextElementSibling;
+        while (sib && !t) {
+            if (sib.tagName === 'TABLE') t = sib as HTMLTableElement;
+            else if (sib.classList?.contains('mdweb-csv-table') || sib.classList?.contains('mdweb-table-wrap')
+                || sib.classList?.contains('mdweb-table-tools')) {
+                t = sib.querySelector('table');
+            } else if ((sib.textContent || '').trim() === '') {
+                // keep looking
+            } else {
+                t = sib.querySelector?.('table') ?? null;
+                if (!t) break;
+            }
+            if (!t) sib = sib.nextElementSibling;
+        }
+        if (!t) return;
+        if (decoratePinColumns(t, names) > 0) n++;
+    });
+    return n;
+}
+
+/** Set --mdweb-pin-left on pinned cells from preceding pinned column widths. */
+export function syncPinLeftOffsets(table: HTMLTableElement): void {
+    const headRow = table.tHead?.rows[0] ?? table.rows[0];
+    if (!headRow) return;
+    const n = headRow.cells.length;
+    // Column width = max across header + body (table column sizing).
+    const widths: number[] = Array.from({ length: n }, () => 0);
+    for (const tr of table.rows) {
+        for (let i = 0; i < n; i++) {
+            const c = tr.cells[i];
+            if (!c) continue;
+            widths[i] = Math.max(widths[i], c.getBoundingClientRect().width || c.offsetWidth || 0);
+        }
+    }
+    const pinnedIdx: number[] = [];
+    [...headRow.cells].forEach((c, i) => { if (c.hasAttribute('data-mdweb-pin')) pinnedIdx.push(i); });
+    // Sticky left = sum of widths of pinned columns to the left (leading contiguous pins).
+    const lefts = new Map<number, number>();
+    let left = 0;
+    for (const i of pinnedIdx) {
+        lefts.set(i, left);
+        left += widths[i];
+    }
+    const apply = (cell: HTMLTableCellElement | undefined, i: number) => {
+        if (!cell) return;
+        const L = lefts.get(i);
+        if (L === undefined) return;
+        cell.style.setProperty('--mdweb-pin-left', `${L}px`);
+    };
+    for (const i of pinnedIdx) apply(headRow.cells[i], i);
+    const bodies = table.tBodies.length ? [...table.tBodies] : [];
+    let rows = bodies.length ? bodies.flatMap((b) => [...b.rows]) : [...table.rows];
+    rows = rows.filter((r) => r !== headRow);
+    for (const tr of rows) for (const i of pinnedIdx) apply(tr.cells[i], i);
+}
+
+function pinHost(table: HTMLTableElement): HTMLElement {
+    const box = (table.parentElement?.classList.contains('mdweb-table-wrap') ? table.parentElement : table) as HTMLElement;
+    return (box.parentElement?.classList.contains('mdweb-csv-table') ? box.parentElement : box) as HTMLElement;
+}
+
+function pinWrap(table: HTMLTableElement): HTMLElement {
+    return (table.parentElement?.classList.contains('mdweb-table-wrap')
+        ? table.parentElement
+        : table) as HTMLElement;
+}
+
+function ensureToolsBar(host: HTMLElement): HTMLElement {
+    let bar = host.previousElementSibling as HTMLElement | null;
+    if (!bar || !bar.classList.contains('mdweb-table-tools')) {
+        bar = document.createElement('div');
+        bar.className = 'mdweb-table-tools';
+        host.before(bar);
+    }
+    return bar;
+}
+
+const pinObservers = new WeakMap<HTMLTableElement, ResizeObserver>();
+function applyPinState(table: HTMLTableElement, on: boolean): void {
+    const wrap = pinWrap(table);
+    wrap.classList.toggle('mdweb-pins-on', on);
+    const prev = pinObservers.get(table);
+    if (prev) { prev.disconnect(); pinObservers.delete(table); }
+    if (on) {
+        syncPinLeftOffsets(table);
+        if (typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver(() => syncPinLeftOffsets(table));
+            ro.observe(wrap);
+            pinObservers.set(table, ro);
+        }
+    }
+}
+
+/** Add a Pin columns toggle above every table that has pin columns (once). */
+export function addPinToggles(root: ParentNode): void {
+    root.querySelectorAll<HTMLTableElement>('table').forEach((t) => {
+        if (t.closest('.mdweb-table-popup') || t.dataset.mdwebPinToggle) return;
+        if (t.dataset.mdwebPinReady !== '1' && !t.querySelector('th[data-mdweb-pin],td[data-mdweb-pin]')) return;
+        t.dataset.mdwebPinToggle = '1';
+        const host = pinHost(t);
+        const bar = ensureToolsBar(host);
+        if (bar.querySelector('button.mdweb-table-pin')) return;
+        const key = pinStorageKey(t);
+        const on = isPinEnabled(key);
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'mdweb-table-pin';
+        b.textContent = 'Pin columns';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const pinNames = [...(t.tHead?.rows[0]?.cells || [])]
+            .filter((c) => c.hasAttribute('data-mdweb-pin'))
+            .map((c) => (c.textContent || '').trim())
+            .filter(Boolean);
+        const title = tableTitle(t, 0) || 'this table';
+        const id = `mdweb-pin-table-${++uid}`;
+        if (!t.id) t.id = id;
+        b.setAttribute('aria-controls', t.id);
+        b.setAttribute('aria-label', `Pin columns for ${title}`);
+        applyPinState(t, on);
+        b.addEventListener('click', () => {
+            const next = b.getAttribute('aria-pressed') !== 'true';
+            b.setAttribute('aria-pressed', next ? 'true' : 'false');
+            setPinEnabled(key, next);
+            applyPinState(t, next);
+        });
+        // Prefer pin next to Expand: after Expand if present, else prepend.
+        const expand = bar.querySelector('button.mdweb-table-expand');
+        if (expand) expand.after(b);
+        else bar.prepend(b);
+        if (pinNames.length) {
+            const desc = document.createElement('span');
+            desc.id = `${id}-desc`;
+            desc.className = 'sr-only';
+            desc.textContent = `Keeps ${pinNames.join(', ')} visible while scrolling sideways.`;
+            b.after(desc);
+            b.setAttribute('aria-describedby', desc.id);
+        }
     });
 }

@@ -561,6 +561,68 @@ html:not(.editorial) .article-shell { --mdweb-fade-bg: var(--secondary, var(--bg
 .mdweb-csv-table > table > caption, .mdweb-table-wrap > table > caption { caption-side: top; text-align: left; font-weight: 600; padding: 0 0 0.4em; }
 .mdweb-csv-error { display: block; margin: 1em 0; padding: 0.75em 1em; border: 1px solid #b45309; border-left-width: 4px; border-radius: 6px; }
 .mdweb-table-stage { position: relative; overflow: visible; }
-.mdweb-table-stage > table { display: table; width: max-content; max-width: none; border-collapse: collapse; font-size: 0.9rem; }
+.mdweb-table-stage > table, .mdweb-table-stage .mdweb-table-wrap > table { display: table; width: max-content; max-width: none; border-collapse: collapse; font-size: 0.9rem; }
 .mdweb-table-stage th, .mdweb-table-stage td { border: 1px solid var(--border); padding: 0.35rem 0.6rem; white-space: nowrap; text-align: left; vertical-align: top; }
 .mdweb-table-popup--scroll { overflow: auto; justify-content: flex-start; }
+
+
+/* Declarative markers before tables are not content (not th/td/table). */
+p[data-mdweb-pin], p[data-mdweb-badge],
+[data-mdweb-pin][hidden], [data-mdweb-badge][hidden] { display: none !important; }
+
+/* Track #1682 (Mark 2026-11-05): optional pin columns — sticky while scrolling sideways. */
+.mdweb-table-pin { border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.7rem; background: transparent; color: var(--brand, currentColor); cursor: pointer; font: inherit; }
+.mdweb-table-pin[aria-pressed="true"] { background: var(--secondary, rgba(127,127,127,.15)); }
+.mdweb-table-pin:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
+.mdweb-pins-on th[data-mdweb-pin],
+.mdweb-pins-on td[data-mdweb-pin],
+.mdweb-table-stage.mdweb-pins-on th[data-mdweb-pin],
+.mdweb-table-stage.mdweb-pins-on td[data-mdweb-pin] {
+  position: sticky;
+  left: var(--mdweb-pin-left, 0);
+  z-index: 2;
+  background: var(--secondary, var(--bg, Canvas));
+  box-shadow: 1px 0 0 var(--border, rgba(127,127,127,.35));
+}
+.mdweb-pins-on thead th[data-mdweb-pin],
+.mdweb-table-stage.mdweb-pins-on thead th[data-mdweb-pin] { z-index: 3; }
+.mdweb-table-popup .mdweb-pins-on th[data-mdweb-pin],
+.mdweb-table-popup .mdweb-pins-on td[data-mdweb-pin],
+.mdweb-table-popup .mdweb-table-stage.mdweb-pins-on th[data-mdweb-pin],
+.mdweb-table-popup .mdweb-table-stage.mdweb-pins-on td[data-mdweb-pin] {
+  background: var(--secondary, var(--bg, Canvas));
+}
+
+/* Track #1682 (Mark 2026-11-05): generic test / content cards (data-driven markup). */
+.mdweb-card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+  margin: 1.25em 0 1.75em;
+}
+.mdweb-card-group { margin: 1.75em 0 0.5em; }
+.mdweb-card-group > .mdweb-card-group-title {
+  font-size: 1.05rem; font-weight: 700; margin: 0 0 0.75rem; color: var(--primary, inherit);
+}
+.mdweb-card {
+  border: 1px solid var(--border, rgba(127,127,127,.35));
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--secondary, transparent);
+  min-width: 0;
+}
+.mdweb-card-name { font-weight: 700; font-size: 1.05rem; margin: 0 0 0.55rem; color: var(--primary, inherit); }
+.mdweb-card-label {
+  display: block; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted, var(--text, currentColor)); margin: 0.55rem 0 0.15rem;
+}
+.mdweb-card-checks, .mdweb-card-example, .mdweb-card-score {
+  margin: 0; font-size: 0.92em; line-height: 1.45; overflow-wrap: anywhere;
+}
+.mdweb-card-example { font-style: italic; }
+@media (max-width: 640px) {
+  .mdweb-card-grid { grid-template-columns: 1fr; gap: 0.85rem; }
+  .mdweb-card { padding: 0.85rem 0.95rem; }
+}
+
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

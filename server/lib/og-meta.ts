@@ -40,6 +40,8 @@ export interface MetaArgs {
 export interface MetaTags {
     title: string;
     meta: string[];
+    /** Optional CSS custom properties merged into #mdweb-critical (FOUC). */
+    criticalVars?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +207,7 @@ export function buildMetaTags(args: MetaArgs): MetaTags {
  * be HTML-escaped, so we only need to swap the text content of <title>.
  */
 export function injectMeta(html: string, tags: MetaTags): string {
-    const { title, meta } = tags;
+    const { title, meta, criticalVars } = tags;
     const body = typeof html === 'string' ? html : '';
     const metaHtml = meta.join('\n');
 
@@ -231,6 +233,28 @@ export function injectMeta(html: string, tags: MetaTags): string {
         );
         if (!/<body[\s>]/i.test(out)) {
             out = `<head>\n${metaHtml}\n</head>\n${out}`;
+        }
+    }
+
+    // 4) FOUC: merge pack-critical CSS vars into #mdweb-critical when provided.
+    if (criticalVars && Object.keys(criticalVars).length) {
+        const decls = Object.entries(criticalVars)
+            .filter(([k, v]) =>
+                /^--[a-z0-9-]+$/i.test(k)
+                && typeof v === 'string'
+                && /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v))
+            .map(([k, v]) => `${k}:${v}`)
+            .join(';');
+        if (decls) {
+            const block = `html{${decls}}`;
+            if (/id=["']mdweb-critical["'][^>]*>[\s\S]*?<\/style>/i.test(out)) {
+                out = out.replace(
+                    /(id=["']mdweb-critical["'][^>]*>)([\s\S]*?)(<\/style>)/i,
+                    (_m, open, body, close) => `${open}${body}${block}${close}`
+                );
+            } else if (/<head[\s>]/i.test(out)) {
+                out = out.replace(/<head([\s>])/i, (_m, c) => `<head${c}\n<style id="mdweb-critical">${block}</style>`);
+            }
         }
     }
 

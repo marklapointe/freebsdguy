@@ -665,7 +665,18 @@ console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`
 if (fs.existsSync(distPath)) {
     // index:false — the SPA catch-all below reads index.html itself on every
     // request (no caching) so post edits are reflected immediately.
-    app.use(express.static(distPath, { index: false }));
+    app.use(express.static(distPath, {
+        index: false,
+        setHeaders(res, filePath) {
+            // Vite content-hashed assets only (name-HASH.ext). HTML shell is no-store below.
+            const base = path.basename(filePath);
+            if (/^.+-[A-Za-z0-9]{8}\.(js|css|woff2?|ttf|otf)$/.test(base)) {
+                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            } else if (/\.(js|css|woff2?|svg|png|jpe?g|webp|gif|ico)$/i.test(base)) {
+                res.setHeader('Cache-Control', 'public, max-age=86400');
+            }
+        }
+    }));
     app.get(/^\/(?!api|mcp).*/, (req: Request, res: Response) => {
         const indexPath = path.join(distPath, 'index.html');
         if (!fs.existsSync(indexPath)) {
@@ -727,6 +738,8 @@ if (fs.existsSync(distPath)) {
                 isPost
             };
             const { title, meta } = buildMetaTags(args);
+            // FOUC: first paint uses #mdweb-critical + boot script (data-theme-mode).
+            // Pack colors arrive via applyTheme; do not inject mode-guessed vars here.
             // og:url/canonical can follow Host when siteUrl is unset: never let a shared cache keep it.
             res.set('Cache-Control', 'no-store');
             res.vary('Host');

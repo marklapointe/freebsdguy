@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { dispatchThemeChanged, dispatchThemeModeChanged } from './theme-events';
+import { clearBootingClass } from './theme-boot';
 
 export const api = axios.create({
     baseURL: '/api',
@@ -339,6 +340,8 @@ export const applyTheme = async (
     } catch (error) {
         console.error('Failed to load theme', error);
         return null;
+    } finally {
+        clearBootingClass();
     }
 };
 
