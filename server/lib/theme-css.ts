@@ -14,8 +14,8 @@
 import crypto from 'crypto';
 import { isValidThemeId, loadThemeColorsForMode } from './themes.ts';
 import { htmlEscape } from './og-meta.ts';
-import { siteAccent } from '../../src/lib/site-accent.ts';
-import { validSiteLogoName } from '../../src/lib/site-meta.ts';
+import { siteAccent } from './site-accent.ts';
+import { validSiteLogoName } from './site-meta.ts';
 
 /** Custom-property names we will ever write into a stylesheet. */
 const VAR_NAME_RE = /^--[A-Za-z0-9_-]+$/;
@@ -29,7 +29,7 @@ const HOSTILE_VALUE_RE = /[;{}<>]/;
 export interface ThemeCssOptions {
     /** Same pack rendered for light mode (via loadThemeColorsForMode); optional. */
     lightPack?: Record<string, string> | null;
-    /** Per-site brand accent (src/lib/site-accent); optional. */
+    /** Per-site brand accent (server/lib/site-accent); optional. */
     accent?: { dark: string; light: string } | null;
 }
 
