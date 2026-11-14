@@ -15,6 +15,7 @@ import crypto from 'crypto';
 import { isValidThemeId, loadThemeColorsForMode } from './themes.ts';
 import { htmlEscape } from './og-meta.ts';
 import { siteAccent } from '../../src/lib/site-accent.ts';
+import { validSiteLogoName } from '../../src/lib/site-meta.ts';
 
 /** Custom-property names we will ever write into a stylesheet. */
 const VAR_NAME_RE = /^--[A-Za-z0-9_-]+$/;
@@ -98,6 +99,8 @@ export interface ShellThemeConfig {
     siteName?: string;
     currentTheme?: string;
     appearance?: { themeMode?: string | null } | null;
+    /** Logo file name (served through /api/getimage); meta injected only if valid. */
+    siteLogo?: string;
 }
 
 /** Replace or add attributes on the <html> start tag, preserving the rest. */
@@ -126,13 +129,16 @@ function setHtmlTagAttrs(html: string, dataAttrs: Record<string, string>, addCla
  * Make a built Vite shell theme-aware for the first paint:
  *  - <meta name="mdweb-site-name"> so the Navbar renders the real name
  *    synchronously (no "MDWeb" flash until /api/config lands);
+ *  - <meta name="mdweb-site-logo"> (escaped) when config.siteLogo is a plain
+ *    file name /api/getimage would actually serve — the Navbar paints the
+ *    logo too, not the text brand first; a hostile name gets NO meta;
  *  - <link rel="stylesheet" href="/theme.css?v=HASH"> IMMEDIATELY after the
  *    default bundle's <link rel="stylesheet" href="/assets/index-*.css"> —
  *    default first, theme second, both render-blocking, nothing reordered;
  *  - data-theme / data-theme-mode / data-site-accent and class="editorial"
  *    (same rule as paintTheme: dark|light packs are editorial) on <html>.
  * Falls back to just before </head> when no bundle css link exists (e.g. a
- * shell without CSS), and never duplicates the theme link.
+ * shell without CSS), and never duplicates the theme link or either meta.
  */
 export function applyThemeToShell(html: string, themeDir: string, cfg: ShellThemeConfig): string {
     let out = typeof html === 'string' ? html : '';
@@ -150,10 +156,16 @@ export function applyThemeToShell(html: string, themeDir: string, cfg: ShellThem
         pack === 'dark' || pack === 'light' ? ['editorial'] : []
     );
 
-    const metaName = '<meta name="mdweb-site-name"';
-    if (!out.includes(metaName)) {
-        const meta = `<meta name="mdweb-site-name" content="${htmlEscape(siteName)}">`;
-        out = out.replace(/<head\b[^>]*>/i, (t) => `${t}\n${meta}`);
+    const metas: string[] = [];
+    if (!out.includes('<meta name="mdweb-site-name"')) {
+        metas.push(`<meta name="mdweb-site-name" content="${htmlEscape(siteName)}">`);
+    }
+    const logo = validSiteLogoName(cfg.siteLogo);
+    if (logo && !out.includes('<meta name="mdweb-site-logo"')) {
+        metas.push(`<meta name="mdweb-site-logo" content="${htmlEscape(logo)}">`);
+    }
+    if (metas.length) {
+        out = out.replace(/<head\b[^>]*>/i, (t) => `${t}\n${metas.join('\n')}`);
     }
 
     if (!/href=["']\/theme\.css/.test(out)) {

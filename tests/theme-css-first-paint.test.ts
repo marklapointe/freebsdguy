@@ -198,6 +198,40 @@ describe('applyThemeToShell()', () => {
         expect(out).toContain('<meta name="mdweb-site-name" content="Escape &amp; Co &lt;b&gt;">');
     });
 
+    // Track #1682 A2: the logo must paint on the first render too. The server
+    // injects an escaped <meta name="mdweb-site-logo"> ONLY for a name the
+    // /api/getimage path itself would serve: plain file name, no separators.
+    it('adds an escaped <meta name="mdweb-site-logo"> for a valid plain file name', () => {
+        const out = applyThemeToShell(VITE_SHELL, '', { ...cfg, siteLogo: 'my_logo-2.webp' });
+        expect(out).toContain('<meta name="mdweb-site-logo" content="my_logo-2.webp">');
+    });
+
+    it('hostile or empty siteLogo -> no logo meta at all', () => {
+        for (const bad of [
+            '../secret.png',
+            'a/b.png',
+            'a\\b.png',
+            'x.png"><script>alert(1)</script>',
+            '..',
+            '...png',
+            '.hidden.png',
+            '/etc/passwd',
+            '',
+            '   '
+        ]) {
+            const out = applyThemeToShell(VITE_SHELL, '', { ...cfg, siteLogo: bad });
+            expect(out).not.toContain('mdweb-site-logo');
+        }
+        expect(applyThemeToShell(VITE_SHELL, '', cfg)).not.toContain('mdweb-site-logo');
+    });
+
+    it('is idempotent for both metas (never two logo metas)', () => {
+        const once = applyThemeToShell(VITE_SHELL, '', { ...cfg, siteLogo: 'logo.webp' });
+        const twice = applyThemeToShell(once, '', { ...cfg, siteLogo: 'logo.webp' });
+        expect((twice.match(/name="mdweb-site-logo"/g) || []).length).toBe(1);
+        expect((twice.match(/name="mdweb-site-name"/g) || []).length).toBe(1);
+    });
+
     it('is idempotent (never two theme links)', () => {
         const once = applyThemeToShell(VITE_SHELL, '', cfg);
         const twice = applyThemeToShell(once, '', cfg);
@@ -216,21 +250,24 @@ describe('applyThemeToShell()', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Navbar: synchronous site name from the server meta (no "MDWeb" flash)
+// Navbar: synchronous site name/logo from the server meta (no flash)
 // ---------------------------------------------------------------------------
-describe('Navbar initial site name (no flash)', () => {
+describe('Navbar initial site identity (no flash)', () => {
+    const addMeta = (name: string, content: string) => {
+        const meta = document.createElement('meta');
+        meta.setAttribute('name', name);
+        meta.setAttribute('content', content);
+        document.head.appendChild(meta);
+    };
     afterEach(() => {
         cleanup();
         document
-            .querySelectorAll('meta[name="mdweb-site-name"]')
+            .querySelectorAll('meta[name="mdweb-site-name"], meta[name="mdweb-site-logo"]')
             .forEach((m) => m.remove());
     });
 
     it('renders the server-injected site name on the first render', () => {
-        const meta = document.createElement('meta');
-        meta.setAttribute('name', 'mdweb-site-name');
-        meta.setAttribute('content', 'Real Site Name');
-        document.head.appendChild(meta);
+        addMeta('mdweb-site-name', 'Real Site Name');
         const { container } = render(
             React.createElement(MemoryRouter, null, React.createElement(Navbar, { user: null, setUser: () => {} }))
         );
@@ -244,6 +281,30 @@ describe('Navbar initial site name (no flash)', () => {
             React.createElement(MemoryRouter, null, React.createElement(Navbar, { user: null, setUser: () => {} }))
         );
         expect(container.textContent).toContain('MDWeb');
+    });
+
+    it('renders the logo image on the first render from a valid logo meta', () => {
+        addMeta('mdweb-site-name', 'Real Site Name');
+        addMeta('mdweb-site-logo', 'logo.webp');
+        const { container } = render(
+            React.createElement(MemoryRouter, null, React.createElement(Navbar, { user: null, setUser: () => {} }))
+        );
+        const img = container.querySelector('img');
+        expect(img).not.toBeNull();
+        expect(img!.getAttribute('src')).toBe('/api/getimage?fileName=logo.webp');
+        expect(img!.getAttribute('alt')).toBe('Real Site Name');
+        // No text-name flash alongside the logo.
+        expect(container.textContent).not.toContain('MDWeb');
+    });
+
+    it('ignores a hostile logo meta: renders the name text, no img', () => {
+        addMeta('mdweb-site-name', 'Real Site Name');
+        addMeta('mdweb-site-logo', '../evil.png');
+        const { container } = render(
+            React.createElement(MemoryRouter, null, React.createElement(Navbar, { user: null, setUser: () => {} }))
+        );
+        expect(container.querySelector('img')).toBeNull();
+        expect(container.textContent).toContain('Real Site Name');
     });
 });
 
@@ -290,6 +351,7 @@ describe('server integration', () => {
                 themeDir: './themes',
                 currentTheme: 'dark',
                 siteName: SITE,
+                siteLogo: 'logo.webp',
                 appearance: { themeMode: 'light', crtEffects: false, textGlow: false }
             })
         );
@@ -334,6 +396,7 @@ describe('server integration', () => {
         expect(tag).toContain(`data-site-accent="${siteAccent(SITE).name}"`);
         expect(tag).toMatch(/class="[^"]*\beditorial\b[^"]*"/);
         expect(html).toContain('<meta name="mdweb-site-name" content="Escape &amp; Co &lt;b&gt;">');
+        expect(html).toContain('<meta name="mdweb-site-logo" content="logo.webp">');
     });
 
     it('GET /theme.css: text/css, no-cache + ETag without v; immutable with a matching v', async () => {

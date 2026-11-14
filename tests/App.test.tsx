@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 vi.mock('axios', () => {
@@ -214,5 +214,35 @@ describe('App Component', () => {
         const closeBtns = screen.queryAllByRole('button');
         const xBtn = closeBtns.find(b => b.querySelector('svg') && b.closest('.fixed'));
         if (xBtn) fireEvent.click(xBtn);
+    });
+});
+
+describe('App footer first paint (Track #1682 A2)', () => {
+    afterEach(() => {
+        document.querySelectorAll('meta[name="mdweb-site-name"]').forEach((m) => m.remove());
+    });
+
+    it('renders the meta-injected site name in the copyright (no "MDWeb" flash)', () => {
+        window.history.pushState({}, 'Home', '/');
+        vi.clearAllMocks();
+        localStorage.clear();
+        (api.get as any).mockImplementation((url: string) => {
+            // Hold /config and /me in flight: this proves the FIRST render, not the settled one.
+            if (url === '/config' || url === '/me') return new Promise(() => {});
+            const mock = commonMocks(url);
+            if (mock) return mock;
+            return Promise.reject(new Error(`not found: ${url}`));
+        });
+        const meta = document.createElement('meta');
+        meta.setAttribute('name', 'mdweb-site-name');
+        meta.setAttribute('content', 'Meta Footer Site');
+        document.head.appendChild(meta);
+
+        render(<App />);
+        // Synchronous, before the /config promise can resolve: the footer must
+        // already carry the real name instead of the packaged "MDWeb" default.
+        const copyright = screen.getByTestId('footer-copyright');
+        expect(copyright.textContent).toContain('Meta Footer Site');
+        expect(copyright.textContent).not.toContain('MDWeb');
     });
 });

@@ -48,6 +48,56 @@ describe('theme boot (FOUC)', () => {
         expect(js).toBe(bootThemeSnippet().trim());
     });
 
+    // Track #1682 A2: the server already wrote data-theme-mode from the site's
+    // configured appearance. The boot script must only OVERRIDE it when this
+    // browser stored a choice — never force dark on a light site.
+    describe('boot script mode handling (real DOM)', () => {
+        const runBoot = () => new Function(bootThemeSnippet())();
+
+        afterEach(() => {
+            localStorage.clear();
+            document.documentElement.removeAttribute('data-theme-mode');
+            document.documentElement.classList.remove('mdweb-booting');
+        });
+
+        it('leaves the server-set attribute alone when localStorage has no choice', () => {
+            localStorage.removeItem('themeMode');
+            document.documentElement.setAttribute('data-theme-mode', 'light');
+            runBoot();
+            expect(document.documentElement.getAttribute('data-theme-mode')).toBe('light');
+            expect(document.documentElement.classList.contains('mdweb-booting')).toBe(true);
+        });
+
+        it('applies the stored light choice over the server value', () => {
+            localStorage.setItem('themeMode', 'light');
+            document.documentElement.setAttribute('data-theme-mode', 'dark');
+            runBoot();
+            expect(document.documentElement.getAttribute('data-theme-mode')).toBe('light');
+            expect(document.documentElement.classList.contains('mdweb-booting')).toBe(true);
+        });
+
+        it('applies the stored dark choice', () => {
+            localStorage.setItem('themeMode', 'dark');
+            document.documentElement.setAttribute('data-theme-mode', 'light');
+            runBoot();
+            expect(document.documentElement.getAttribute('data-theme-mode')).toBe('dark');
+        });
+
+        it('a garbage stored value keeps the server attribute', () => {
+            localStorage.setItem('themeMode', 'neon');
+            document.documentElement.setAttribute('data-theme-mode', 'light');
+            runBoot();
+            expect(document.documentElement.getAttribute('data-theme-mode')).toBe('light');
+        });
+
+        it('no server attribute and no stored choice: attribute stays unset', () => {
+            localStorage.removeItem('themeMode');
+            runBoot();
+            expect(document.documentElement.hasAttribute('data-theme-mode')).toBe(false);
+            expect(document.documentElement.classList.contains('mdweb-booting')).toBe(true);
+        });
+    });
+
     it('headBootHtml stays in sync with index.html', () => {
         const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
         expect(headBootHtml()).toContain(CRITICAL_CSS);

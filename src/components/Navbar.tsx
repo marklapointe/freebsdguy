@@ -11,6 +11,7 @@ import {
     type ThemeMode
 } from '../lib/api';
 import { applySiteAccent } from '../lib/site-accent';
+import { initialSiteMeta } from '../lib/site-meta';
 import { onThemeChanged, onThemeModeChanged } from '../lib/theme-events';
 import { User } from '../types';
 
@@ -23,24 +24,12 @@ interface NavbarProps {
  * Theme pack is site-wide (admin Appearance). Light/dark mode of that pack is
  * per-browser and switchable here for every visitor.
  */
-/**
- * Site name at first render: the server injects <meta name="mdweb-site-name">
- * into the HTML, so the real name paints immediately instead of flashing the
- * "MDWeb" default until /api/config lands. Falls back to current behaviour.
- */
-function initialSiteName(): string {
-    try {
-        const c = document.querySelector('meta[name="mdweb-site-name"]')?.getAttribute('content');
-        if (c) return c;
-    } catch {
-        /* no DOM (tests/SSR): keep the packaged default */
-    }
-    return 'MDWeb';
-}
-
 export const Navbar = ({ user, setUser }: NavbarProps) => {
-    const [siteName, setSiteName] = useState<string>(initialSiteName);
-    const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
+    // Site identity at first render comes from the server-injected metas
+    // (src/lib/site-meta): neither the "MDWeb" text nor a missing logo ever
+    // flashes while /api/config is still in flight.
+    const [siteName, setSiteName] = useState<string>(() => initialSiteMeta().siteName);
+    const [siteLogo, setSiteLogo] = useState<string | undefined>(() => initialSiteMeta().siteLogo);
     const [themeMode, setThemeMode] = useState<ThemeMode>(() => getEffectiveThemeMode());
     const navigate = useNavigate();
 

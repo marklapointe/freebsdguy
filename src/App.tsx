@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { api, applyTheme, getEffectiveThemeMode, getPublicConfig, setAuthModeCache, siteConfig } from './lib/api';
+import { initialSiteMeta } from './lib/site-meta';
 import { Navbar } from './components/Navbar';
 import { Home } from './components/Home';
 import { PostDetail } from './components/PostDetail';
@@ -35,7 +36,9 @@ function expandFooterPlaceholders(template: string, siteName: string): string {
 function App() {
     // Synchronous hydrate so refresh on /admin does not flash-redirect to login
     const [user, setUser] = useState<User | null>(() => readStoredUser());
-    const [siteName, setSiteName] = useState('MDWeb');
+    // Site name for the Footer's copyright is seeded from the server meta
+    // (Track #1682 A2), so the real brand paints before /api/config lands.
+    const [siteName, setSiteName] = useState<string>(() => initialSiteMeta().siteName);
     const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
     const [footer, setFooter] = useState({
         show: true,
