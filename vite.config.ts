@@ -27,7 +27,8 @@ export default defineConfig({
       name: 'express-middleware',
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
-          if (req.url?.startsWith('/api')) {
+          // /theme.css is same-origin CSS for the first-paint <link> (Track #1682).
+          if (req.url?.startsWith('/api') || req.url === '/theme.css') {
             const { app } = await server.ssrLoadModule('./server/index.ts');
             app(req, res, next);
           } else {

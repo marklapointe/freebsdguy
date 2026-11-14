@@ -4,9 +4,13 @@
  * unstyled browser default (or the wrong light/dark) before the theme pack
  * arrives. Transitions stay off while html.mdweb-booting.
  *
- * The boot script only sets data-theme-mode + mdweb-booting. Background and
- * text colors come from #mdweb-critical (attribute selectors and optional
- * server-injected pack vars) — not from inline styles that would override them.
+ * The boot script only adds mdweb-booting, and OVERRIDES data-theme-mode when
+ * — and only when — this browser stored a 'light'/'dark' choice. With no
+ * stored choice the server-set attribute (the site's configured appearance)
+ * stands; forcing dark here used to break light sites on first paint
+ * (Track #1682 A2). Background and text colors come from #mdweb-critical
+ * (attribute selectors and optional server-injected pack vars) — not from
+ * inline styles that would override them.
  */
 
 /** Defaults match server/themes/dark.json and light.json editorial packs. */
@@ -15,14 +19,19 @@ html[data-theme-mode="light"]{color-scheme:light;background:#fbfaf7;color:#1f232
 html.mdweb-booting,html.mdweb-booting *{transition:none!important;animation:none!important}
 body{background:var(--bg,#0e1116);color:var(--text,#e6e8eb);margin:0}`;
 
-/** Inline <script> body (no module): runs before first paint when in <head>. */
+/** Inline <script> body (classic, non-module): the head runs it before first paint. */
 export function bootThemeSnippet(): string {
-    return `(function(){try{var m=localStorage.getItem('themeMode');if(m!=='light'&&m!=='dark')m='dark';var el=document.documentElement;el.setAttribute('data-theme-mode',m);el.classList.add('mdweb-booting')}catch(e){}})();`;
+    return `(function(){try{var m=localStorage.getItem('themeMode');var el=document.documentElement;if(m==='light'||m==='dark')el.setAttribute('data-theme-mode',m);el.classList.add('mdweb-booting')}catch(e){}})();`;
 }
 
-/** HTML fragment for <head> — keep index.html identical to this. */
+/**
+ * HTML fragment for <head> — keep index.html identical to this.
+ * The boot script is a same-origin CLASSIC script (public/theme-boot.js holds
+ * exactly bootThemeSnippet()): CSP script-src 'self' blocks inline scripts,
+ * and no async/defer keeps it parser-blocking ahead of the stylesheets.
+ */
 export function headBootHtml(): string {
-    return `<style id="mdweb-critical">${CRITICAL_CSS}</style>\n  <script>${bootThemeSnippet()}</script>`;
+    return `<script src="/theme-boot.js"></script>\n  <style id="mdweb-critical">${CRITICAL_CSS}</style>`;
 }
 
 /** Drop the booting class after the real theme pack has painted (next frames). */

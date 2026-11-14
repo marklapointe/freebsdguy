@@ -11,6 +11,7 @@ import {
     type ThemeMode
 } from '../lib/api';
 import { applySiteAccent } from '../lib/site-accent';
+import { initialSiteMeta } from '../lib/site-meta';
 import { onThemeChanged, onThemeModeChanged } from '../lib/theme-events';
 import { User } from '../types';
 
@@ -24,8 +25,11 @@ interface NavbarProps {
  * per-browser and switchable here for every visitor.
  */
 export const Navbar = ({ user, setUser }: NavbarProps) => {
-    const [siteName, setSiteName] = useState('MDWeb');
-    const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
+    // Site identity at first render comes from the server-injected metas
+    // (src/lib/site-meta): neither the "MDWeb" text nor a missing logo ever
+    // flashes while /api/config is still in flight.
+    const [siteName, setSiteName] = useState<string>(() => initialSiteMeta().siteName);
+    const [siteLogo, setSiteLogo] = useState<string | undefined>(() => initialSiteMeta().siteLogo);
     const [themeMode, setThemeMode] = useState<ThemeMode>(() => getEffectiveThemeMode());
     const navigate = useNavigate();
 
