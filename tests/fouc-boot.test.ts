@@ -1,8 +1,9 @@
 /**
- * FOUC fix (Track #1682, Mark 2026-11-05): theme must not flash the unstyled
- * original on first paint. Critical CSS + a blocking boot script in <head>
- * set color-scheme / --bg / --text before body content; transitions stay off
- * until the full theme pack paints; hashed static assets get a long cache.
+ * FOUC fix (Track #1682, Mark 2026-11-05) + follow-up: theme must not flash the
+ * unstyled original on first paint. Critical CSS stays, but the boot script is
+ * a same-origin CLASSIC script (public/theme-boot.js) — the inline <script> was
+ * dead under CSP script-src 'self'. Transitions stay off until the full theme
+ * pack paints; hashed static assets get a long cache.
  */
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
@@ -20,20 +21,39 @@ describe('theme boot (FOUC)', () => {
         expect(CRITICAL_CSS).toMatch(/transition:\s*none/);
     });
 
-    it('boot snippet reads localStorage themeMode and sets data-theme-mode before paint', () => {
+    it('boot script body reads localStorage themeMode and sets data-theme-mode before paint', () => {
         expect(bootThemeSnippet()).toMatch(/localStorage\.getItem\(['"]themeMode['"]\)/);
         expect(bootThemeSnippet()).toMatch(/data-theme-mode/);
         expect(bootThemeSnippet()).toMatch(/mdweb-booting/);
         expect(bootThemeSnippet()).not.toMatch(/setProperty\(['"]--bg['"]/);
     });
 
-    it('index.html ships exactly CRITICAL_CSS + bootThemeSnippet from theme-boot', () => {
+    it('index.html ships the critical style + a same-origin classic boot script (no inline script)', () => {
         const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
         expect(html).toContain(`<style id="mdweb-critical">${CRITICAL_CSS}</style>`);
-        expect(html).toContain(`<script>${bootThemeSnippet()}</script>`);
-        expect(html.indexOf('id="mdweb-critical"')).toBeLessThan(html.indexOf('<body'));
+        // CSP is script-src 'self': an inline <script> NEVER runs, so the boot
+        // script must be external and classic (no async/defer).
+        expect(html).toContain('<script src="/theme-boot.js"></script>');
+        expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+        // Head order: boot script first, then the critical style; both before <body>.
+        const scriptIdx = html.indexOf('<script src="/theme-boot.js">');
+        const styleIdx = html.indexOf('id="mdweb-critical"');
+        expect(scriptIdx).toBeGreaterThan(-1);
+        expect(scriptIdx).toBeLessThan(styleIdx);
+        expect(styleIdx).toBeLessThan(html.indexOf('<body'));
+    });
+
+    it('public/theme-boot.js is exactly bootThemeSnippet() (single source of truth)', () => {
+        const js = fs.readFileSync(path.join(process.cwd(), 'public', 'theme-boot.js'), 'utf8').trim();
+        expect(js).toBe(bootThemeSnippet().trim());
+    });
+
+    it('headBootHtml stays in sync with index.html', () => {
+        const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
         expect(headBootHtml()).toContain(CRITICAL_CSS);
-        expect(headBootHtml()).toContain(bootThemeSnippet());
+        expect(headBootHtml()).toContain('<script src="/theme-boot.js"></script>');
+        expect(headBootHtml()).not.toMatch(/<script>/);
+        expect(html).toContain(headBootHtml());
     });
 
     it('injectMeta keeps critical style and can inject pack-critical vars', () => {

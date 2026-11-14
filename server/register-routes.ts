@@ -59,6 +59,7 @@ import {
     loadThemeColorsForMode,
     themeFilePath
 } from './lib/themes.ts';
+import { applyThemeToShell, themeCssForSite, themeCssHash } from './lib/theme-css.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -661,6 +662,30 @@ app.get(['/api/getimage', '/api/images/:filename'], (req: Request, res: Response
 
 // Serve static frontend files in production
 const distPath = path.resolve(__dirname, '../dist');
+
+// Theme CSS as a render-blocking stylesheet (Track #1682 FOUC follow-up).
+// Same origin, so the CSP ('self') allows the <link> the shell injects right
+// after the default bundle CSS. Content-hashed via ?v= for a year-long cache;
+// a missing pack yields an EMPTY stylesheet so the default shows unchanged.
+app.get('/theme.css', (req: Request, res: Response) => {
+    const config = getActive();
+    const css = themeCssForSite(
+        themeDirOf(),
+        config.currentTheme || 'dark',
+        config.siteName || 'MDWeb'
+    );
+    const hash = themeCssHash(css);
+    const v = typeof req.query.v === 'string' ? req.query.v : '';
+    res.setHeader('Content-Type', 'text/css; charset=utf-8');
+    if (v === hash) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('ETag', `"${hash}"`);
+    }
+    res.send(css);
+});
+
 console.log(`[INFO] Dist path: ${distPath} (exists: ${fs.existsSync(distPath)})`);
 if (fs.existsSync(distPath)) {
     // index:false — the SPA catch-all below reads index.html itself on every
@@ -738,12 +763,21 @@ if (fs.existsSync(distPath)) {
                 isPost
             };
             const { title, meta } = buildMetaTags(args);
-            // FOUC: first paint uses #mdweb-critical + boot script (data-theme-mode).
-            // Pack colors arrive via applyTheme; do not inject mode-guessed vars here.
+            // FOUC (Track #1682): the default bundle CSS loads first and in full;
+            // applyThemeToShell adds the theme as a SECOND render-blocking <link>
+            // (never @import, never JS-injected CSS), plus the server-side
+            // data-theme/-mode/-accent attrs, class="editorial", and the
+            // site-name meta the Navbar reads synchronously.
             // og:url/canonical can follow Host when siteUrl is unset: never let a shared cache keep it.
             res.set('Cache-Control', 'no-store');
             res.vary('Host');
-            res.send(injectMeta(shell, { title, meta }));
+            res.send(
+                applyThemeToShell(
+                    injectMeta(shell, { title, meta }),
+                    themeDirOf(),
+                    activeConfig
+                )
+            );
         } catch (err) {
             /* istanbul ignore next */
             console.error('[ERROR] meta injection failed:', err);

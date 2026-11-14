@@ -1,0 +1,1 @@
+(function(){try{var m=localStorage.getItem('themeMode');if(m!=='light'&&m!=='dark')m='dark';var el=document.documentElement;el.setAttribute('data-theme-mode',m);el.classList.add('mdweb-booting')}catch(e){}})();
