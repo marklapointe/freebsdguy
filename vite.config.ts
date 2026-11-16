@@ -41,6 +41,26 @@ export default defineConfig({
   server: {
     port: getPort(),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // Keep React in its own chunk so route/editor splits do not
+          // swallow it (and so the entry does not import a 1+ MB chunk
+          // just to get React). Do not manualChunk mermaid/katex/hljs/
+          // echarts/md-editor-rt: Rollup would place Vite's preload helper
+          // in that named chunk and the entry would modulepreload it.
+          if (
+            id.includes('node_modules/react-dom') ||
+            id.includes('node_modules/react-router') ||
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/scheduler')
+          ) return 'react'
+        }
+      }
+    }
+  },
+
   test: {
     globals: true,
     environment: 'jsdom',

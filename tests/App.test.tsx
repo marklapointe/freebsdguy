@@ -98,8 +98,8 @@ describe('App Component', () => {
         render(<App />);
         const loginLink = await screen.findByTestId('login-link');
         fireEvent.click(loginLink);
-        // Look for the heading in the login form
-        expect(screen.getByRole('heading', { name: /Login/i })).toBeTruthy();
+        // Look for the heading in the login form (route is lazy-loaded, Track #2063)
+        expect(await screen.findByRole('heading', { name: /Login/i })).toBeTruthy();
     });
 
     it('handles login successfully', async () => {
@@ -111,8 +111,8 @@ describe('App Component', () => {
         const loginLink = await screen.findByTestId('login-link');
         fireEvent.click(loginLink);
         
-        fireEvent.change(screen.getByTestId('username-input'), { target: { value: 'admin' } });
-        fireEvent.change(screen.getByTestId('password-input'), { target: { value: 'admin' } });
+        fireEvent.change(await screen.findByTestId('username-input'), { target: { value: 'admin' } });
+        fireEvent.change(await screen.findByTestId('password-input'), { target: { value: 'admin' } });
         fireEvent.click(screen.getByTestId('login-submit'));
 
         await waitFor(() => {
