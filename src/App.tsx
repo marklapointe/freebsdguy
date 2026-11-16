@@ -1,14 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { api, applyTheme, getEffectiveThemeMode, getPublicConfig, setAuthModeCache, siteConfig } from './lib/api';
 import { initialSiteMeta } from './lib/site-meta';
 import { Navbar } from './components/Navbar';
-import { Home } from './components/Home';
-import { PostDetail } from './components/PostDetail';
-import { Login } from './components/Login';
 import { Modal, Notification } from './components/Modal';
 import { User, AlertType } from './types';
-import { Admin } from './components/admin/Admin';
+
+const Home = lazy(() => import('./lib/md-home').then((m) => ({ default: m.Home })));
+const PostDetail = lazy(() => import('./lib/md-post-detail').then((m) => ({ default: m.PostDetail })));
+// Login has no MdEditor/MdPreview, so it does not load md-editor-setup or its CSS.
+const Login = lazy(() => import('./components/Login').then((m) => ({ default: m.Login })));
+const Admin = lazy(() => import('./lib/md-admin').then((m) => ({ default: m.Admin })));
+
+function RouteFallback() {
+    return (
+        <div data-testid="route-fallback" className="p-8 text-center" role="status">
+            Loading…
+        </div>
+    );
+}
 
 /** Restore session on first paint — JWT needs token; session mode may only have role/username. */
 function readStoredUser(): User | null {
@@ -116,6 +126,7 @@ function App() {
             <div className="min-h-screen bg-bg text-text">
                 <Navbar user={user} setUser={setUser} />
                 <main id="main" tabIndex={-1}>
+                <Suspense fallback={<RouteFallback />}>
                 <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/post/:slug" element={<PostDetail />} />
@@ -130,6 +141,7 @@ function App() {
                         )
                     } />
                 </Routes>
+                </Suspense>
                 </main>
                 {footer.show && (footer.copyrightText || footer.creditText) && (
                     <footer

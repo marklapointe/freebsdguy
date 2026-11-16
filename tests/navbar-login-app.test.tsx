@@ -36,7 +36,8 @@ vi.mock('../src/lib/api', () => ({
 
 vi.mock('md-editor-rt', () => ({
     MdEditor: () => null,
-    MdPreview: ({ modelValue }: any) => <div>{modelValue}</div>
+    MdPreview: ({ modelValue }: any) => <div>{modelValue}</div>,
+    config: vi.fn()
 }));
 
 // Avoid deep Admin
@@ -50,6 +51,17 @@ vi.mock('../src/components/Home', () => ({
 
 vi.mock('../src/components/PostDetail', () => ({
     PostDetail: () => <div>Post</div>
+}));
+
+// App lazy-loads these wrappers (Track #2063); stub them like the page components.
+vi.mock('../src/lib/md-home', () => ({
+    Home: () => <div data-testid="home-page">Home</div>
+}));
+vi.mock('../src/lib/md-post-detail', () => ({
+    PostDetail: () => <div>Post</div>
+}));
+vi.mock('../src/lib/md-admin', () => ({
+    Admin: () => <div data-testid="admin-page">Admin</div>
 }));
 
 import { Navbar } from '../src/components/Navbar';
