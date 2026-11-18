@@ -175,6 +175,9 @@ Paragraph.
         expect(posts.length).toBe(1);
         expect(posts[0].title).toContain('Error');
         expect(posts[0].author).toBe('system');
+        // A post that does not parse is not published (Track #2119).
+        expect(posts[0].status).toBe('draft');
+        expect(posts[0].status).not.toBe('published');
         // ensure subsequent calls still work via default mock (actual)
         mockMatter.mockImplementation((input: any, opts?: any) => actual.default(input, opts));
         Object.assign(mockMatter, actual);
@@ -191,6 +194,11 @@ Paragraph.
         expect(post?.title).toContain('Error');
         expect(post?.author).toBe('system');
         expect(post?.content).toMatch(/parsing error/i);
+        // A post that does not parse is not published (Track #2119).
+        expect(post?.status).toBe('draft');
+        expect(post?.status).not.toBe('published');
+        // The parser error itself never reaches a reader.
+        expect(post?.content).not.toContain('Mock parse error');
         mockMatter.mockImplementation((input: any, opts?: any) => actual.default(input, opts));
         Object.assign(mockMatter, actual);
     });

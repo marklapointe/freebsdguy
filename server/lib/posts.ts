@@ -26,6 +26,21 @@ export function postStatus(post: { status?: unknown } | null | undefined): PostS
     return post && post.status === 'draft' ? 'draft' : 'published';
 }
 
+/**
+ * Parse the front matter of a post.
+ *
+ * gray-matter caches a file *before* it parses it: when the YAML is broken
+ * the first call throws, but every later call for the same content hands out
+ * the half-parsed file instead — the whole file comes back as the body, with
+ * no front matter at all, so the post looks published and the draft body is
+ * served to every reader. Passing options bypasses that cache, so a front
+ * matter that does not parse fails every time and the caller always sees the
+ * parse-error stub (a draft, never published).
+ */
+function parseFrontMatter(content: string): matter.GrayMatterFile<string> {
+    return matter(content, {});
+}
+
 export interface Post extends PostMetadata {
     content: string;
 }
@@ -57,7 +72,7 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
                 return null;
             }
             const content = fs.readFileSync(filePath, 'utf8');
-            const { data, content: mdContent } = matter(content);
+            const { data, content: mdContent } = parseFrontMatter(content);
             const pinned = data.pinned === true || data.pinned === 'true';
             return {
                 slug: filename.replace(/\.md$/, ''),
@@ -71,13 +86,16 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
             } as PostMetadata;
         } catch (error) {
             console.error(`Error parsing post ${filename}:`, error);
+            // A post that does not parse is not published: fail closed. The
+            // stub is a draft, so the public reads never show it, and it
+            // carries nothing of the file that failed to parse.
             return {
                 slug: filename.replace('.md', ''),
                 title: `Error: ${filename}`,
                 summary: 'This post could not be loaded due to a parsing error.',
                 date: '',
                 author: 'system',
-                status: 'published'
+                status: 'draft'
             } as PostMetadata;
         }
     }).filter((p): p is PostMetadata => p !== null);
@@ -121,7 +139,7 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
 
     const content = fs.readFileSync(filePath, 'utf8');
     try {
-        const parsed = matter(content);
+        const parsed = parseFrontMatter(content);
         const pinned = parsed.data.pinned === true || parsed.data.pinned === 'true';
         // Body must come from gray-matter `content` (after frontmatter), never from
         // list metadata or frontmatter keys — spread data first, then set body fields.
@@ -143,14 +161,17 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
         };
     } catch (error) {
         console.error(`Error parsing post ${slug}:`, error);
+        // A post that does not parse is not published: fail closed. The stub
+        // is a draft, and it quotes no parser error and no line of the file —
+        // the real error goes to the server log, not to a reader.
         return {
             title: `Error: ${slug}`,
             slug,
-            content: `This post could not be loaded due to a parsing error: ${error instanceof Error ? error.message : String(error)}`,
-            summary: 'Parsing error',
+            content: 'This post could not be loaded due to a parsing error.',
+            summary: 'This post could not be loaded due to a parsing error.',
             date: '',
             author: 'system',
-            status: 'published'
+            status: 'draft'
         };
     }
 };
@@ -172,7 +193,7 @@ export function readFrontMatter(postsDir: string, slug: string): Record<string, 
         return {};
     }
     try {
-        const parsed = matter(fs.readFileSync(filePath, 'utf8'));
+        const parsed = parseFrontMatter(fs.readFileSync(filePath, 'utf8'));
         return { ...(parsed.data as Record<string, unknown>) };
     } catch (error) {
         console.error(`Error reading front matter of ${slug}:`, error);
@@ -280,7 +301,7 @@ export const findPostByAlias = (postsDir: string, slug: string): string | null =
         const map = new Map<string, string>();
         for (const f of files) {
             try {
-                const { data } = matter(fs.readFileSync(path.join(postsDir, f), 'utf8'));
+                const { data } = parseFrontMatter(fs.readFileSync(path.join(postsDir, f), 'utf8'));
                 // A draft is private: an old link must not lead to it.
                 if (postStatus(data) === 'draft') continue;
                 const raw = data.aliases;
