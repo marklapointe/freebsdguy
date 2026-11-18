@@ -32,6 +32,22 @@ function expandFooterPlaceholders(template: string, siteName: string): string {
     return template.replace(/\{year\}/g, year).replace(/\{siteName\}/g, siteName || 'MDWeb');
 }
 
+/**
+ * Web-login entry point state. 'unknown' until the public config says whether
+ * the login page exists, so nothing that leads to a login page is rendered
+ * before that answer is known.
+ */
+type WebLoginState = 'unknown' | 'on' | 'off';
+
+/** Shown where the login page would be, but the web login is disabled. */
+function NotFound() {
+    return (
+        <div data-testid="not-found" className="p-8 text-center">
+            Page not found
+        </div>
+    );
+}
+
 function App() {
     // Synchronous hydrate so refresh on /admin does not flash-redirect to login
     const [user, setUser] = useState<User | null>(() => readStoredUser());
@@ -43,10 +59,15 @@ function App() {
         creditText: ''
     });
     const [notifications, setNotifications] = useState<AlertType[]>([]);
+    // Whether the web login exists at all (config kill switch); unknown until /config arrives
+    const [webLogin, setWebLogin] = useState<WebLoginState>('unknown');
 
     useEffect(() => {
         // Theme pack is site-wide; light/dark mode is per-browser (localStorage)
         const applyPublic = (data: Record<string, any>) => {
+            // Decided first: the login entry point gates whole pages, so it must not
+            // depend on the cosmetic calls below succeeding.
+            setWebLogin(data.security?.disableWebLogin === true ? 'off' : 'on');
             setSiteName(data.siteName || 'MDWeb');
             setSiteLogo(data.siteLogo);
             setAuthModeCache(data.security?.authMode);
@@ -70,8 +91,16 @@ function App() {
                 crtEffects: appearance.crtEffects !== false,
                 textGlow: appearance.textGlow !== false
             });
+        }, () => {
+            // The public config is optional at boot, but a failed fetch is not an
+            // answer about the login entry point: the web login is on unless the
+            // config explicitly says otherwise, so fall back to on instead of
+            // leaving /login (and the Login link) blank forever. Never undo a
+            // decision that was already taken (a later refresh must not re-enable
+            // a login the config has switched off).
+            setWebLogin(prev => (prev === 'unknown' ? 'on' : prev));
         }).catch(() => {
-            /* public config optional at boot */
+            // Cosmetic failures after the login decision must not touch webLogin.
         });
         // Admin saves (siteConfig.refresh) push name/logo/footer here without a reload
         const offSite = siteConfig.subscribe(() => {
@@ -111,20 +140,30 @@ function App() {
     return (
         <Router>
             <div className="min-h-screen bg-bg text-text">
-                <Navbar user={user} setUser={setUser} />
+                <Navbar user={user} setUser={setUser} loginEnabled={webLogin === 'on'} />
                 <main id="main" tabIndex={-1}>
                 <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/post/:slug" element={<PostDetail />} />
+                    {/* The kill switch removes the login page itself; 'unknown' waits
+                        for the config so no login form is flashed before that answer. */}
                     <Route path="/login" element={
-                        user ? <Navigate to="/admin" replace /> : <Login setUser={setUser} />
+                        user ? (
+                            <Navigate to="/admin" replace />
+                        ) : webLogin === 'off' ? (
+                            <NotFound />
+                        ) : webLogin === 'on' ? (
+                            <Login setUser={setUser} />
+                        ) : null
                     } />
                     <Route path="/admin" element={
                         user ? (
                             <Admin user={user} siteName={siteName} setSiteName={setSiteName} siteLogo={siteLogo} setSiteLogo={setSiteLogo} showAlert={showAlert} showConfirm={showConfirm} />
-                        ) : (
+                        ) : webLogin === 'off' ? (
+                            <NotFound />
+                        ) : webLogin === 'on' ? (
                             <Navigate to="/login" replace />
-                        )
+                        ) : null
                     } />
                 </Routes>
                 </main>
