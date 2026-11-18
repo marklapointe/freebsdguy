@@ -10,7 +10,7 @@
  *     front-matter key the input does not name;
  *   - a draft is private: only its author and the admins may see it.
  */
-import { getPost, postStatus, savePost } from './posts.ts';
+import { getPost, postStatus, readFrontMatter, savePost, FrontMatterParseError } from './posts.ts';
 import { writeAudit } from './audit-log.ts';
 import { scopeDeniedMessage, type TokenScopes } from './token-scope.ts';
 
@@ -60,6 +60,24 @@ export interface SavePostInput {
     pinned?: boolean;
 }
 
+/**
+ * The refusal for a post file that cannot be read or whose front matter does
+ * not parse, or null when the file is fine. A post that does not exist yet is
+ * fine: it has no front matter yet and it may be created.
+ *
+ * The message names no parser error, no line of the file and nothing of the
+ * body: the real error goes to the server log.
+ */
+function frontMatterRefusal(postsDir: string, slug: string): string | null {
+    try {
+        readFrontMatter(postsDir, slug);
+        return null;
+    } catch (error) {
+        if (error instanceof FrontMatterParseError) return error.message;
+        throw error;
+    }
+}
+
 export type PostWriteResult =
     | { ok: true; slug: string; created: boolean }
     | { ok: false; error: string };
@@ -74,6 +92,13 @@ export function savePostAsCaller(
     input: SavePostInput,
     caller: PostCaller
 ): PostWriteResult {
+    // A file whose front matter does not parse is never written over: the
+    // bytes stay for an operator to inspect and nothing is published from
+    // them. The check comes first: the owner of a file that does not parse is
+    // unknown, so the own-post rule cannot be applied to it.
+    const refusal = frontMatterRefusal(postsDir, input.slug);
+    if (refusal) return { ok: false, error: refusal };
+
     const existing = getPost(postsDir, input.slug);
     if (existing && !mayWritePost(existing.author, caller)) {
         return { ok: false, error: NOT_YOUR_POST };
@@ -110,6 +135,12 @@ export function publishPostAsCaller(
     slug: string,
     caller: PostCaller
 ): PostWriteResult {
+    // A file whose front matter does not parse is never published and never
+    // written over: publishing it would write the parse-error stub body and
+    // a published status over the broken bytes.
+    const refusal = frontMatterRefusal(postsDir, slug);
+    if (refusal) return { ok: false, error: refusal };
+
     const existing = getPost(postsDir, slug);
     if (!existing) return { ok: false, error: POST_NOT_FOUND };
     if (!mayWritePost(existing.author, caller)) return { ok: false, error: NOT_YOUR_POST };
@@ -138,6 +169,11 @@ export function unpublishPostAsCaller(
     if (caller.scopes && !caller.scopes.includes('moderate')) {
         return { ok: false, error: scopeDeniedMessage('moderate') };
     }
+    // A file whose front matter does not parse is never written over, not
+    // even to turn it into a draft.
+    const refusal = frontMatterRefusal(postsDir, slug);
+    if (refusal) return { ok: false, error: refusal };
+
     const existing = getPost(postsDir, slug);
     if (!existing) return { ok: false, error: POST_NOT_FOUND };
     savePost(postsDir, {

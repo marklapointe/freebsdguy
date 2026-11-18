@@ -9,7 +9,12 @@
  *   - the public REST reads and the meta page hide such a post: the list does
  *     not name it, GET /api/posts/:slug answers 404 'Post not found', and the
  *     meta page leaks neither its title, its summary nor its body;
- *   - a well-formed published post in the same directory still shows.
+ *   - the write path refuses such a post: readFrontMatter does not turn a
+ *     parse error into an empty front matter, savePost throws and leaves the
+ *     bytes alone, and publish, unpublish and save (MCP and REST) are refused
+ *     with a message that quotes no parser error and no line of the body;
+ *   - a well-formed published post in the same directory still shows and can
+ *     still be saved, and a new slug is still saved as a draft.
  *
  * The malformed post is a real file with broken YAML, not a mock: the parser
  * really throws, so the stub really is the one a visitor would meet.
@@ -28,7 +33,13 @@ import { registerRoutes } from '../server/register-routes.ts';
 import { createActiveConfigHolder } from '../server/lib/app-context.ts';
 import { RoleGuardFactory } from '../server/middleware/auth.ts';
 import { defaultConfig, type Config } from '../server/lib/config.ts';
-import { getPost, getPosts } from '../server/lib/posts.ts';
+import { getPost, getPosts, postStatus, readFrontMatter, savePost } from '../server/lib/posts.ts';
+import {
+    publishPostAsCaller,
+    savePostAsCaller,
+    unpublishPostAsCaller
+} from '../server/lib/post-policy.ts';
+import { mintToken } from '../server/lib/api-tokens.ts';
 import type { TokenScopes } from '../server/lib/token-scope.ts';
 
 const SECRET = 'parse-error-2119-secret-at-least-16-chars';
@@ -241,6 +252,133 @@ describe('a post whose front matter does not parse is not published (Track 2119)
 
             const listed = await callTool(reader, 'list_posts', {});
             expect(listed.text).not.toContain(BROKEN);
+        });
+    });
+
+    describe('the write path', () => {
+        /** The bytes of the malformed post, as they are on disk right now. */
+        const brokenBytes = () => fs.readFileSync(path.join(postsDir, `${BROKEN}.md`), 'utf8');
+
+        /** The scopes a writer needs to save and to publish. */
+        const WRITE_SCOPES: TokenScopes = ['read', 'content:write', 'publish'];
+
+        it('does not read a parse error as an empty front matter', () => {
+            // {} is what a missing file looks like, and postStatus({}) is
+            // 'published': a parse error must never look like that.
+            expect(postStatus({})).toBe('published');
+            expect(() => readFrontMatter(postsDir, BROKEN)).toThrow();
+        });
+
+        it('refuses to save a post whose front matter does not parse', () => {
+            const before = brokenBytes();
+            expect(() =>
+                savePost(postsDir, { slug: BROKEN, title: 'Hijacked', content: 'new body' })
+            ).toThrow();
+
+            const after = brokenBytes();
+            expect(after).toBe(before);
+            expect(after).toContain(SECRET_BODY);
+            expect(after).not.toContain('status: published');
+        });
+
+        it('refuses to save a broken post even when the input asks for published', () => {
+            const before = brokenBytes();
+            expect(() =>
+                savePost(postsDir, {
+                    slug: BROKEN,
+                    title: 'Hijacked',
+                    content: 'new body',
+                    status: 'published'
+                })
+            ).toThrow();
+
+            const after = brokenBytes();
+            expect(after).toBe(before);
+            expect(after).not.toMatch(/status:\s*published/);
+            expect(getPost(postsDir, BROKEN)?.status).not.toBe('published');
+        });
+
+        it('refuses to publish a post whose front matter does not parse', () => {
+            const before = brokenBytes();
+            const result = publishPostAsCaller(postsDir, BROKEN, { username: 'admin', role: 'admin' });
+            expect(result.ok).toBe(false);
+            expect(result.ok ? '' : result.error).toMatch(/front matter/i);
+            expect(result.ok ? '' : result.error).not.toContain(SECRET_BODY);
+            expect(brokenBytes()).toBe(before);
+        });
+
+        it('refuses to unpublish a post whose front matter does not parse', () => {
+            const before = brokenBytes();
+            const result = unpublishPostAsCaller(postsDir, BROKEN, { username: 'admin', role: 'admin' });
+            expect(result.ok).toBe(false);
+            expect(brokenBytes()).toBe(before);
+        });
+
+        it('refuses to save a broken post over MCP', async () => {
+            const before = brokenBytes();
+            const c = await connectMcp('writer', 'contributor', WRITE_SCOPES);
+            const res = await callTool(c, 'update_post', {
+                slug: BROKEN,
+                title: 'Hijacked',
+                content: 'new body'
+            });
+            expect(res.isError).toBe(true);
+            expect(res.text).toMatch(/front matter/i);
+            // The refusal quotes no parser error, no snippet of the file and no
+            // line of the draft body.
+            expect(res.text).not.toContain(SECRET_BODY);
+            expect(res.text).not.toMatch(/unexpected end of the stream/i);
+            expect(brokenBytes()).toBe(before);
+        });
+
+        it('refuses to publish a broken post over MCP', async () => {
+            const before = brokenBytes();
+            const c = await connectMcp('writer', 'contributor', WRITE_SCOPES);
+            const res = await callTool(c, 'publish_post', { slug: BROKEN });
+            expect(res.isError).toBe(true);
+            expect(res.text).toMatch(/front matter/i);
+            expect(res.text).not.toContain(SECRET_BODY);
+            expect(res.text).not.toMatch(/unexpected end of the stream/i);
+            expect(brokenBytes()).toBe(before);
+
+            // The public read of the broken post is still a 404 and still says
+            // nothing of the file.
+            const one = await request(buildRestApp()).get(`/api/posts/${BROKEN}`);
+            expect(one.status).toBe(404);
+            expect(JSON.stringify(one.body)).not.toContain(SECRET_BODY);
+        });
+
+        it('refuses a REST save of a broken post', async () => {
+            const before = brokenBytes();
+            const pat = mintToken('admin', 'admin-pat', [
+                'read',
+                'content:write',
+                'publish',
+                'moderate'
+            ]).plaintext;
+            const res = await request(buildRestApp())
+                .post('/api/posts')
+                .set('Authorization', `Bearer ${pat}`)
+                .send({ slug: BROKEN, title: 'Hijacked', content: 'new body' });
+            expect(res.status).toBe(400);
+            expect(String(res.body?.message ?? '')).toMatch(/front matter/i);
+            expect(String(res.body?.message ?? '')).not.toContain(SECRET_BODY);
+            expect(brokenBytes()).toBe(before);
+        });
+
+        it('still saves a well-formed published post and a new draft', () => {
+            savePost(postsDir, { slug: 'good', title: 'Public title v2', content: 'body v2' });
+            const good = getPost(postsDir, 'good');
+            expect(good?.status).toBe('published');
+            expect(good?.title).toBe('Public title v2');
+
+            const created = savePostAsCaller(
+                postsDir,
+                { slug: 'brand-new', title: 'T', content: 'C' },
+                { username: 'writer', role: 'contributor' }
+            );
+            expect(created.ok).toBe(true);
+            expect(getPost(postsDir, 'brand-new')?.status).toBe('draft');
         });
     });
 });

@@ -183,21 +183,65 @@ const SAVE_OWNED_KEYS = new Set(['slug', 'content', 'title', 'summary', 'date', 
 const CORE_FRONTMATTER_KEYS = ['title', 'summary', 'date', 'author', 'pinned', 'status'];
 
 /**
+ * The public refusal for a post file whose front matter cannot be parsed. It
+ * names no parser error, no line of the file and nothing of the body: the real
+ * error goes to the server log.
+ */
+export function frontMatterBrokenMessage(slug: string): string {
+    return `The front matter of post "${slug}" could not be parsed`;
+}
+
+/**
+ * Thrown when the front matter of a post file cannot be read or parsed.
+ *
+ * A parse error is not "no front matter": {} is what a missing file looks
+ * like, and a post without a status is published. A file that does not parse
+ * may therefore never be read as an empty front matter and may never be
+ * written over: the caller refuses the save and leaves the bytes on disk for
+ * an operator to inspect.
+ */
+export class FrontMatterParseError extends Error {
+    /** The post whose front matter does not parse. */
+    readonly slug: string;
+
+    constructor(slug: string) {
+        super(frontMatterBrokenMessage(slug));
+        this.name = 'FrontMatterParseError';
+        this.slug = slug;
+    }
+}
+
+/**
  * The front matter of a post file, exactly as it is on disk ({} when the post
  * does not exist). A save merges over this, so keys the save does not know
  * (aliases, publishedAt, ...) survive a save.
+ *
+ * A file whose front matter cannot be parsed throws FrontMatterParseError:
+ * it is not a post without front matter, and a post without front matter is
+ * published. A post that does not exist yet still returns {}, so a new slug
+ * stays a draft as the policy specifies.
  */
 export function readFrontMatter(postsDir: string, slug: string): Record<string, unknown> {
     const filePath = path.join(postsDir, `${slug}.md`);
     if (!fs.existsSync(filePath)) {
+        // A post that does not exist yet has no front matter.
         return {};
     }
+    let content: string;
     try {
-        const parsed = parseFrontMatter(fs.readFileSync(filePath, 'utf8'));
+        content = fs.readFileSync(filePath, 'utf8');
+    } catch (error) {
+        console.error(`Error reading the file of ${slug}:`, error);
+        throw new FrontMatterParseError(slug);
+    }
+    try {
+        const parsed = parseFrontMatter(content);
         return { ...(parsed.data as Record<string, unknown>) };
     } catch (error) {
+        // The real error (js-yaml quotes the line it choked on) goes to the
+        // log; the caller only learns that the front matter does not parse.
         console.error(`Error reading front matter of ${slug}:`, error);
-        return {};
+        throw new FrontMatterParseError(slug);
     }
 }
 
@@ -230,7 +274,19 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
 
     // Existing front matter first: a save must not drop keys it does not know
     // (aliases, publishedAt, ...), only the keys the input names may change.
-    const merged: Record<string, unknown> = { ...readFrontMatter(postsDir, post.slug) };
+    // A file whose front matter does not parse is refused: the save ends
+    // before anything is written, so the broken bytes stay on disk for an
+    // operator to inspect, the stub body never replaces them and nothing is
+    // published from them.
+    let merged: Record<string, unknown>;
+    try {
+        merged = { ...readFrontMatter(postsDir, post.slug) };
+    } catch (error) {
+        console.error(`Refusing to save post ${post.slug}:`, error);
+        throw error instanceof FrontMatterParseError
+            ? error
+            : new FrontMatterParseError(post.slug);
+    }
     for (const [key, value] of Object.entries(post)) {
         if (SAVE_OWNED_KEYS.has(key)) continue;
         if (value === undefined) continue;
