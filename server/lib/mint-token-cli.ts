@@ -2,11 +2,14 @@
  * Argument parser for the token minting CLI. Scope is an explicit option.
  */
 import { parseTokenScope, type TokenScope } from './token-scope.ts';
+import { parseTtlDays } from './api-tokens.ts';
 
 export interface MintTokenCliArgs {
     username: string;
     label: string;
     scope: TokenScope;
+    /** Lifetime in days. Undefined = the token never expires. */
+    ttlDays?: number;
 }
 
 export function parseMintTokenArgs(argv: string[]): MintTokenCliArgs {
@@ -14,6 +17,7 @@ export function parseMintTokenArgs(argv: string[]): MintTokenCliArgs {
     let username = '';
     let label = '';
     let scopeRaw: string | undefined;
+    let ttlRaw: string | undefined;
     const positionals: string[] = [];
     for (let i = 0; i < args.length; i++) {
         const a = args[i];
@@ -41,8 +45,20 @@ export function parseMintTokenArgs(argv: string[]): MintTokenCliArgs {
             scopeRaw = a.slice('--scope='.length);
             continue;
         }
+        if (a === '--ttl-days') {
+            const value = args[++i];
+            if (value === undefined) throw new Error('ttl-days is required (--ttl-days N)');
+            ttlRaw = value;
+            continue;
+        }
+        if (a.startsWith('--ttl-days=')) {
+            ttlRaw = a.slice('--ttl-days='.length);
+            continue;
+        }
         if (a === '--help' || a === '-h') {
-            throw new Error('Usage: mint-token --username USER --scope read|write [--label TEXT]');
+            throw new Error(
+                'Usage: mint-token --username USER --scope read|write [--label TEXT] [--ttl-days N]'
+            );
         }
         if (a.startsWith('-')) throw new Error(`Unknown option ${a}`);
         positionals.push(a);
@@ -53,5 +69,6 @@ export function parseMintTokenArgs(argv: string[]): MintTokenCliArgs {
     if (!username) throw new Error('username is required (--username)');
     if (scopeRaw === undefined) throw new Error('Token scope is required (--scope read|write)');
     const scope = parseTokenScope(scopeRaw);
-    return { username, label, scope };
+    const ttlDays = parseTtlDays(ttlRaw);
+    return { username, label, scope, ttlDays };
 }

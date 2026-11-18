@@ -55,6 +55,21 @@ export interface AuthGuardOptions {
     getSessionCookieName: () => string;
 }
 
+/** The body a caller gets when its personal access token cannot be trusted. */
+export const INVALID_TOKEN_MESSAGE = 'Invalid or expired token';
+
+/**
+ * A token the server cannot trust means "not authenticated", so the answer is 401
+ * with a WWW-Authenticate header — not the 403 that a scope denial gets. The body
+ * is the same for an unknown, revoked, expired or orphaned token, so it does not
+ * tell the caller which one it was. The audit row keeps the reason.
+ */
+function denyPat(res: Response, reason: 'invalid' | 'user'): Response {
+    writeAudit({ event: 'token', action: 'denied', reason });
+    res.set('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ message: INVALID_TOKEN_MESSAGE });
+}
+
 export class RoleGuardFactory {
     private secret: string;
     private opts: AuthGuardOptions;
@@ -96,11 +111,11 @@ export class RoleGuardFactory {
     ) {
         const tok = verifyToken(plaintext);
         if (!tok) {
-            return res.status(403).json({ message: 'Failed to authenticate token' });
+            return denyPat(res, 'invalid');
         }
         const identity = liveIdentity(tok.username);
         if (!identity) {
-            return res.status(403).json({ message: 'Failed to authenticate token' });
+            return denyPat(res, 'user');
         }
         req.user = identity;
         req.authVia = 'pat';

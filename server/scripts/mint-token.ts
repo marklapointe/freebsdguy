@@ -3,7 +3,7 @@ import { parseMintTokenArgs } from '../lib/mint-token-cli.ts';
 
 const main = () => {
     const args = parseMintTokenArgs(process.argv);
-    const { plaintext, record } = mintToken(args.username, args.label, args.scope);
+    const { plaintext, record } = mintToken(args.username, args.label, args.scope, { ttlDays: args.ttlDays });
     process.stdout.write(`${plaintext}\n`);
     console.error(`id=${record.id} scope=${record.scope} prefix=${record.prefix}`);
 };
