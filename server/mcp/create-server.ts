@@ -37,7 +37,16 @@ import {
     revokeToken
 } from '../lib/api-tokens.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
-import { isReadAllowedMcpTool, mcpToolVisible, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
+import {
+    mcpToolVisible,
+    parseTokenScopes,
+    requiredScopeForTool,
+    roleAllowsMcpTool,
+    scopeDeniedMessage,
+    tokenAllowsTool,
+    type TokenScopes
+} from '../lib/token-scope.ts';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { MDWEB_MCP_INSTRUCTIONS, MDWEB_MCP_PLAYBOOK } from './playbook.ts';
 import sanitizeHtml from 'sanitize-html';
 
@@ -48,7 +57,7 @@ export interface McpServerDeps {
     getActive: () => Config;
     setActive: (c: Config) => void;
     /** Omitted for JWT/session callers, who are not scope-limited. */
-    tokenScope?: TokenScope;
+    tokenScopes?: TokenScopes;
 }
 
 function text(data: unknown) {
@@ -74,6 +83,35 @@ function requireAdmin(user: McpUser) {
     if (user.role !== 'admin') throw new Error('Forbidden: admin required');
 }
 
+/**
+ * The MCP SDK answers tools/list with every tool it has registered, so a tool
+ * this caller may not run would still be advertised. We keep the SDK's own tool
+ * definitions and drop the ones the caller may not see. The tools stay
+ * registered, so calling one answers with the scope it is missing instead of
+ * "unknown tool".
+ */
+function scopeToolList(server: McpServer, isVisible: (name: string) => boolean): void {
+    const low = server.server as unknown as {
+        _requestHandlers: Map<
+            string,
+            (request: unknown, extra: unknown) => Promise<{ tools: { name: string }[] }>
+        >;
+        removeRequestHandler: (method: string) => void;
+    };
+    const sdkList = low._requestHandlers.get('tools/list');
+    if (!sdkList) {
+        throw new Error('MCP SDK: tools/list handler missing; the tool list cannot be scoped');
+    }
+    low.removeRequestHandler('tools/list');
+    server.server.setRequestHandler(
+        ListToolsRequestSchema,
+        (async (request: unknown, extra: unknown) => {
+            const result = await sdkList(request, extra);
+            return { ...result, tools: result.tools.filter((tool) => isVisible(tool.name)) };
+        }) as never
+    );
+}
+
 function configDir() {
     return path.dirname(configPath());
 }
@@ -94,7 +132,7 @@ function imagesDir(cfg: Config) {
 }
 
 export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
-    const { user, getActive, setActive, tokenScope } = deps;
+    const { user, getActive, setActive, tokenScopes } = deps;
 
     const server = new McpServer(
         { name: 'mdweb', version: packageVersion() },
@@ -106,15 +144,15 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         config: object,
         handler: (args: any, extra?: any) => any
     ) => {
-        // F9: tools/list shows only what this caller may run.
-        if (!mcpToolVisible(name, user.role, tokenScope)) return;
+        // A tool the role may not run is not registered at all, so calling it
+        // fails as an unknown tool. A tool the scope does not cover stays
+        // registered but is hidden from the tool list, so calling it names the
+        // scope it is missing.
+        if (!roleAllowsMcpTool(name, user.role)) return;
         server.registerTool(name, config as never, (async (args: any, extra: any) => {
-            // Defence in depth: since #1701 F9 read tokens never see these tools.
-            /* v8 ignore start */
-            if (tokenScope === 'read' && !isReadAllowedMcpTool(name)) {
-                return err(READ_ONLY_TOKEN_MESSAGE);
+            if (tokenScopes && !tokenAllowsTool(tokenScopes, name)) {
+                return err(scopeDeniedMessage(requiredScopeForTool(name)));
             }
-            /* v8 ignore stop */
             return handler(args, extra);
         }) as never);
     };
@@ -619,14 +657,20 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             inputSchema: {
                 label: z.string().optional(),
                 username: z.string().optional(),
-                scope: z.enum(['read', 'write']).optional()
+                scope: z.union([z.string(), z.array(z.string())]).optional()
             }
         },
         async ({ label, username, scope }) => {
             try {
+                const scopes = parseTokenScopes(scope);
+                // A token may never mint a token that is stronger than itself.
+                if (tokenScopes) {
+                    const missing = scopes.find((s) => !tokenScopes.includes(s));
+                    if (missing) return err(scopeDeniedMessage(missing));
+                }
                 const target = user.role === 'admin' && username ? username : user.username;
                 if (!findUserByUsername(target)) return err('User not found');
-                const { plaintext, record } = mintToken(target, label || '', parseTokenScope(scope));
+                const { plaintext, record } = mintToken(target, label || '', scopes);
                 return text({
                     token: plaintext,
                     id: record.id,
@@ -634,6 +678,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                     username: record.username,
                     label: record.label,
                     scope: record.scope,
+                    scopes: record.scopes,
                     createdAt: record.createdAt,
                     note: 'Store this token securely; it will not be shown again.'
                 });
@@ -733,6 +778,9 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             }
         }
     );
+
+    // F9: tools/list shows only what this caller may run.
+    scopeToolList(server, (name) => mcpToolVisible(name, user.role, tokenScopes));
 
     return server;
 }

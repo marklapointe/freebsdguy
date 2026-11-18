@@ -420,7 +420,7 @@ describe('mint-token CLI parser', () => {
     it('reads equals-form options and rejects extras', () => {
         expect(
             parseMintTokenArgs(['node', 'm', '--username=ada', '--label=laptop', '--scope=read'])
-        ).toEqual({ username: 'ada', label: 'laptop', scope: 'read' });
+        ).toEqual({ username: 'ada', label: 'laptop', scope: ['read'] });
         expect(() => parseMintTokenArgs(['node', 'm', '--help'])).toThrow(/Usage/);
         expect(() => parseMintTokenArgs(['node', 'm', '--bogus'])).toThrow(/Unknown/);
         expect(() => parseMintTokenArgs(['node', 'm', 'extra', '--username', 'a', '--scope', 'read'])).toThrow(
@@ -431,7 +431,7 @@ describe('mint-token CLI parser', () => {
         expect(() => parseMintTokenArgs(['node', 'm', '--username'])).toThrow(/username/i);
         expect(
             parseMintTokenArgs(['node', 'm', '--username', 'ada', '--scope', 'write', '--label'])
-        ).toMatchObject({ username: 'ada', label: '', scope: 'write' });
+        ).toMatchObject({ username: 'ada', label: '', scope: ['read', 'content:write', 'publish', 'moderate', 'admin'] });
     });
 });
 

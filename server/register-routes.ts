@@ -49,7 +49,7 @@ import {
     revokeToken,
     revokeTokensForUser
 } from './lib/api-tokens.ts';
-import { parseTokenScope } from './lib/token-scope.ts';
+import { parseTokenScopes, scopeDeniedMessage, type TokenScopes } from './lib/token-scope.ts';
 import { writeAudit } from './lib/audit-log.ts';
 import { DEFAULT_ADMIN_PASSWORD } from './lib/default-credentials.ts';
 import { isDefaultAdminCredential } from './lib/setup-admin.ts';
@@ -320,15 +320,23 @@ app.get('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) 
 app.post('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) => {
     const username = req.user?.username as string;
     const label = typeof req.body?.label === 'string' ? req.body.label : '';
-    let scope: ReturnType<typeof parseTokenScope>;
+    let scopes: TokenScopes;
     try {
-        scope = parseTokenScope(req.body?.scope);
+        scopes = parseTokenScopes(req.body?.scope);
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Invalid token scope';
         return res.status(400).json({ message: msg });
     }
+    // A token may never mint a token that is stronger than itself.
+    if (req.tokenScopes) {
+        const callerScopes = req.tokenScopes;
+        const missing = scopes.find((s) => !callerScopes.includes(s));
+        if (missing) {
+            return res.status(403).json({ message: scopeDeniedMessage(missing) });
+        }
+    }
     try {
-        const { plaintext, record } = mintToken(username, label, scope);
+        const { plaintext, record } = mintToken(username, label, scopes);
         writeAudit({ event: 'token', action: 'mint', username, tokenId: record.id, scope: record.scope });
         res.status(201).json({
             token: plaintext,
@@ -337,6 +345,7 @@ app.post('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response)
             label: record.label,
             username: record.username,
             scope: record.scope,
+            scopes: record.scopes,
             createdAt: record.createdAt
         });
     } catch (e: unknown) {
@@ -370,15 +379,23 @@ app.post('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedReq
     if (!findUserByUsername(username)) {
         return res.status(404).json({ message: 'User not found' });
     }
-    let scope: ReturnType<typeof parseTokenScope>;
+    let scopes: TokenScopes;
     try {
-        scope = parseTokenScope(req.body?.scope);
+        scopes = parseTokenScopes(req.body?.scope);
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Invalid token scope';
         return res.status(400).json({ message: msg });
     }
+    // A token may never mint a token that is stronger than itself.
+    if (req.tokenScopes) {
+        const callerScopes = req.tokenScopes;
+        const missing = scopes.find((s) => !callerScopes.includes(s));
+        if (missing) {
+            return res.status(403).json({ message: scopeDeniedMessage(missing) });
+        }
+    }
     try {
-        const { plaintext, record } = mintToken(username, label, scope);
+        const { plaintext, record } = mintToken(username, label, scopes);
         writeAudit({ event: 'token', action: 'mint', username, tokenId: record.id, scope: record.scope });
         res.status(201).json({
             token: plaintext,
@@ -387,6 +404,7 @@ app.post('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedReq
             label: record.label,
             username: record.username,
             scope: record.scope,
+            scopes: record.scopes,
             createdAt: record.createdAt
         });
     } catch (e: unknown) {

@@ -33,6 +33,7 @@ import {
 import { projectSecurity } from '../server/lib/public-config.ts';
 import { mintToken } from '../server/lib/api-tokens.ts';
 import { createMdwebMcpServer } from '../server/mcp/create-server.ts';
+import { LEGACY_WRITE_SCOPES } from '../server/lib/token-scope.ts';
 
 /** Per-run secret: a fixed key would let a token minted by another run validate here. */
 const SECRET = crypto.randomBytes(32).toString('hex');
@@ -87,7 +88,7 @@ async function runMcpUpdate(active: Config, patch: Record<string, unknown>) {
         setActive: (c: Config) => {
             state.saved = c;
         },
-        tokenScope: 'write'
+        tokenScopes: LEGACY_WRITE_SCOPES
     });
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await server.connect(serverT);
@@ -113,7 +114,7 @@ async function runMcpSetTheme(active: Config, themeId: string) {
         setActive: (c: Config) => {
             state.saved = c;
         },
-        tokenScope: 'write'
+        tokenScopes: LEGACY_WRITE_SCOPES
     });
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await server.connect(serverT);
@@ -406,7 +407,7 @@ describe('security.disableWebLogin (Track 2120)', () => {
             user: { username: 'admin', role: 'admin' },
             getActive: () => configWith(false),
             setActive: () => {},
-            tokenScope: 'write'
+            tokenScopes: LEGACY_WRITE_SCOPES
         });
         const [clientT, serverT] = InMemoryTransport.createLinkedPair();
         await server.connect(serverT);

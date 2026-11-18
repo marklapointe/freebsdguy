@@ -65,7 +65,7 @@ describe('WP #1682 token scope', () => {
             .set('Authorization', `Bearer ${read}`)
             .send({ slug: 'scope-post', title: 'T', content: 'C' });
         expect(readPost.status).toBe(403);
-        expect(JSON.stringify(readPost.body)).toMatch(/read-only/i);
+        expect(JSON.stringify(readPost.body)).toMatch(/Token lacks scope/i);
 
         const readDelete = await request(app)
             .delete('/api/posts/does-not-exist')
@@ -100,7 +100,7 @@ describe('WP #1682 token scope', () => {
             }
         });
         expect(denied.status).toBe(200);
-        expect(JSON.stringify(denied.body)).toMatch(/read-only|not found/i);
+        expect(JSON.stringify(denied.body)).toMatch(/Token lacks scope|not found/i);
 
         const allowed = await mcpCall(read, {
             jsonrpc: '2.0',
@@ -109,7 +109,7 @@ describe('WP #1682 token scope', () => {
             params: { name: 'list_posts', arguments: {} }
         });
         expect(allowed.status).toBe(200);
-        expect(JSON.stringify(allowed.body)).not.toMatch(/read-only/i);
+        expect(JSON.stringify(allowed.body)).not.toMatch(/Token lacks scope/i);
     });
 
     it('mint-token CLI reads --scope and rejects a password on argv', async () => {
@@ -123,7 +123,7 @@ describe('WP #1682 token scope', () => {
             '--scope',
             'read'
         ]);
-        expect(parsed).toMatchObject({ username: 'admin', label: 'cursor', scope: 'read' });
+        expect(parsed).toMatchObject({ username: 'admin', label: 'cursor', scope: ['read'] });
         expect(() =>
             parseMintTokenArgs(['node', 'mint-token', '--username', 'admin', '--scope', 'root'])
         ).toThrow(/scope/i);

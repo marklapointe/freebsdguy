@@ -6,7 +6,13 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { usersPath, writeJsonAtomic, findUserByUsername } from './config.ts';
-import { parseTokenScope, storedTokenScope, type TokenScope } from './token-scope.ts';
+import {
+    legacyScopeLabel,
+    parseTokenScopes,
+    storedTokenScopes,
+    type Scope,
+    type TokenScope
+} from './token-scope.ts';
 
 export const PAT_PREFIX = 'mdw_';
 export const MAX_TOKENS_PER_USER = 20;
@@ -20,7 +26,10 @@ export interface TokenRecord {
     label: string;
     hash: string;
     prefix: string;
+    /** The legacy single scope, kept for display and for records written before scopes. */
     scope: TokenScope;
+    /** The scopes this token holds. */
+    scopes: Scope[];
     createdAt: number;
     lastUsedAt?: number;
     revokedAt?: number;
@@ -34,7 +43,10 @@ export interface TokenPublic {
     username: string;
     label: string;
     prefix: string;
+    /** The legacy single scope, kept for display. */
     scope: TokenScope;
+    /** The scopes this token holds. */
+    scopes: Scope[];
     createdAt: number;
     lastUsedAt?: number;
     revokedAt?: number;
@@ -86,12 +98,14 @@ function saveRaw(records: TokenRecord[]): void {
 }
 
 function toPublic(r: TokenRecord): TokenPublic {
+    const scopes = storedTokenScopes(r);
     return {
         id: r.id,
         username: r.username,
         label: r.label,
         prefix: r.prefix,
-        scope: storedTokenScope(r.scope),
+        scope: legacyScopeLabel(scopes),
+        scopes: [...scopes],
         createdAt: r.createdAt,
         lastUsedAt: r.lastUsedAt,
         revokedAt: r.revokedAt,
@@ -146,7 +160,7 @@ export function mintToken(
     scope?: unknown,
     opts?: { ttlDays?: number }
 ): { plaintext: string; record: TokenRecord } {
-    const parsedScope = parseTokenScope(scope);
+    const parsedScopes = parseTokenScopes(scope);
     const ttlDays = validateTtlDays(opts?.ttlDays);
     if (!username || !findUserByUsername(username)) {
         throw new Error('User not found or locked');
@@ -167,7 +181,8 @@ export function mintToken(
         label: String(label || '').slice(0, 120),
         hash: hashToken(plaintext),
         prefix,
-        scope: parsedScope,
+        scope: legacyScopeLabel(parsedScopes),
+        scopes: [...parsedScopes],
         createdAt
     };
     if (ttlDays !== undefined) record.expiresAt = createdAt + ttlDays * DAY_MS;

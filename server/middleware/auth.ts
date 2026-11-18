@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import type { AuthMode } from '../lib/config.ts';
 import { findUserByUsername } from '../lib/config.ts';
 import { isPatToken, verifyToken } from '../lib/api-tokens.ts';
-import { readTokenDenied, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
+import { httpScopeDenied, scopeDeniedMessage, storedTokenScopes, type TokenScopes } from '../lib/token-scope.ts';
 import { writeAudit } from '../lib/audit-log.ts';
 import {
     FileSessionStore,
@@ -46,7 +46,7 @@ export interface AuthenticatedRequest extends Request {
     /** Set when auth came from a personal access token. */
     authVia?: 'pat' | 'jwt' | 'session';
     /** Present for personal access tokens. JWT and session logins are not scoped. */
-    tokenScope?: TokenScope;
+    tokenScopes?: TokenScopes;
 }
 
 export interface AuthGuardOptions {
@@ -119,7 +119,10 @@ export class RoleGuardFactory {
         }
         req.user = identity;
         req.authVia = 'pat';
-        req.tokenScope = tok.scope;
+        // storedTokenScopes, not tok.scopes: a token that somehow skipped
+        // toPublic then fails closed to read-only instead of to no scope.
+        const scopes = storedTokenScopes(tok);
+        req.tokenScopes = scopes;
         writeAudit({
             event: 'token',
             action: 'use',
@@ -127,8 +130,9 @@ export class RoleGuardFactory {
             tokenId: tok.id,
             scope: tok.scope
         });
-        if (readTokenDenied(tok.scope, req.method, req.originalUrl || req.path)) {
-            return res.status(403).json({ message: READ_ONLY_TOKEN_MESSAGE });
+        const missing = httpScopeDenied(scopes, req.method, req.originalUrl || req.path);
+        if (missing) {
+            return res.status(403).json({ message: scopeDeniedMessage(missing) });
         }
         next();
     }

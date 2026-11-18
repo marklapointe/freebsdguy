@@ -13,6 +13,7 @@ import { app } from '../server/index.ts';
 import { mintToken } from '../server/lib/api-tokens.ts';
 import { loadConfig, loadUsers, saveUsers, configPath } from '../server/lib/config.ts';
 import { registerMcpRoutes } from '../server/mcp/register-mcp.ts';
+import { LEGACY_WRITE_SCOPES } from '../server/lib/token-scope.ts';
 
 const PNG =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -220,7 +221,7 @@ describe('MCP tool bodies and route edges', () => {
                 throw new Error('config boom');
             },
             setActive: () => undefined,
-            tokenScope: 'write'
+            tokenScopes: LEGACY_WRITE_SCOPES
         });
         const [clientT, serverT] = InMemoryTransport.createLinkedPair();
         await boom.connect(serverT);
@@ -256,7 +257,7 @@ describe('MCP tool bodies and route edges', () => {
             user: { username: 'ghost', role: 'ghost' as 'admin' },
             getActive: () => before,
             setActive: () => undefined,
-            tokenScope: 'write'
+            tokenScopes: LEGACY_WRITE_SCOPES
         });
         const [ct2, st2] = InMemoryTransport.createLinkedPair();
         await ghost.connect(st2);

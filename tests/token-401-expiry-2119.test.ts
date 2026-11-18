@@ -170,7 +170,7 @@ describe('a token that cannot be trusted answers 401', () => {
             .set('Authorization', `Bearer ${plaintext}`)
             .send({ slug: '2119-scope', title: 'T', content: 'C' });
         expect(denied.status).toBe(403);
-        expect(denied.body.message).toMatch(/read-only/i);
+        expect(denied.body.message).toMatch(/Token lacks scope/i);
     });
 
     it('h. every denial writes a token/denied audit row and no token text', async () => {
@@ -240,7 +240,7 @@ describe('a token can carry an expiry', () => {
     it('g. the CLI parses --ttl-days and refuses a bad value', () => {
         expect(
             parseMintTokenArgs(['node', 'mint-token', '--username', 'admin', '--scope', 'read', '--ttl-days', '90'])
-        ).toMatchObject({ username: 'admin', scope: 'read', ttlDays: 90 });
+        ).toMatchObject({ username: 'admin', scope: ['read'], ttlDays: 90 });
         expect(
             parseMintTokenArgs(['node', 'mint-token', '--username=admin', '--scope=read', '--ttl-days=30'])
         ).toMatchObject({ ttlDays: 30 });

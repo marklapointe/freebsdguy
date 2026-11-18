@@ -23,7 +23,7 @@ export function registerMcpRoutes(app: Express, ctx: AppContext): void {
             user: { username, role: role as Role },
             getActive: getActiveConfig,
             setActive: setActiveConfig,
-            tokenScope: req.tokenScope
+            tokenScopes: req.tokenScopes
         });
         const rpc = req.body as { method?: string; params?: { name?: string } } | undefined;
         if (rpc?.method === 'tools/call') {
