@@ -18,7 +18,14 @@ import {
     preserveWebLoginFlag,
     WEB_LOGIN_FLAG_IGNORED
 } from '../lib/config.ts';
-import { getPosts, getPost, savePost } from '../lib/posts.ts';
+import { getPosts, getPost } from '../lib/posts.ts';
+import {
+    maySeePost,
+    publishPostAsCaller,
+    savePostAsCaller,
+    unpublishPostAsCaller,
+    type PostCaller
+} from '../lib/post-policy.ts';
 import {
     calculateMD5,
     loadManifest,
@@ -133,6 +140,8 @@ function imagesDir(cfg: Config) {
 
 export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
     const { user, getActive, setActive, tokenScopes } = deps;
+    /** The caller of every tool: who it is and what its token may do. */
+    const caller: PostCaller = { username: user.username, role: user.role, scopes: tokenScopes };
 
     const server = new McpServer(
         { name: 'mdweb', version: packageVersion() },
@@ -193,16 +202,25 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             inputSchema: {
                 q: z.string().optional().describe('Optional search query'),
                 limit: z.number().optional(),
-                offset: z.number().optional()
+                offset: z.number().optional(),
+                status: z
+                    .enum(['draft', 'published', 'all'])
+                    .optional()
+                    .describe('Only drafts, only published posts, or all (default)')
             }
         },
-        async ({ q, limit, offset }) => {
+        async ({ q, limit, offset, status }) => {
             try {
                 const cfg = getActive();
                 let posts = getPosts(postsDir(cfg), {
                     sortBy: (cfg.sortBy as 'date') || 'date',
                     sortOrder: (cfg.sortOrder as 'desc') || 'desc'
                 });
+                // A draft is private: only its author and the admins see it.
+                posts = posts.filter((p) => maySeePost(p, caller));
+                if (status && status !== 'all') {
+                    posts = posts.filter((p) => p.status === status);
+                }
                 if (q) {
                     const qq = q.toLowerCase();
                     posts = posts.filter(
@@ -231,12 +249,47 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             try {
                 const post = getPost(postsDir(getActive()), slug);
                 if (!post) return err('Post not found');
+                // A draft the caller may not see does not exist for them.
+                if (!maySeePost(post, caller)) return err('Post not found');
                 return text(post);
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));
             }
         }
     );
+
+    /**
+     * create_post and update_post are the same save: a slug that does not exist
+     * yet becomes a draft stamped with the caller's name, an existing post may
+     * only be saved by its author (or by an admin with the moderate scope) and
+     * keeps its author, its status and its other front-matter keys.
+     */
+    const savePostAs = async (args: any) => {
+        try {
+            requireWriter(user);
+            const slug = args.slug.trim();
+            if (!slug) return err('slug is required');
+            const dir = postsDir(getActive());
+            const postPath = path.join(dir, `${slug}.md`);
+            if (!isSafePath(dir, postPath)) return err('Forbidden slug');
+            const result = savePostAsCaller(
+                dir,
+                {
+                    slug,
+                    title: args.title,
+                    content: args.content,
+                    summary: args.summary,
+                    date: args.date,
+                    pinned: args.pinned
+                },
+                caller
+            );
+            if (!result.ok) return err(result.error);
+            return text({ message: 'Post saved', slug });
+        } catch (e: unknown) {
+            return err(e instanceof Error ? e.message : String(e));
+        }
+    };
 
     registerGuarded(
         'create_post',
@@ -251,28 +304,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 pinned: z.boolean().optional()
             }
         },
-        async (args) => {
-            try {
-                requireWriter(user);
-                const slug = args.slug.trim();
-                if (!slug) return err('slug is required');
-                const dir = postsDir(getActive());
-                const postPath = path.join(dir, `${slug}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden slug');
-                savePost(dir, {
-                    slug,
-                    title: args.title,
-                    content: args.content,
-                    summary: args.summary || '',
-                    date: args.date,
-                    pinned: args.pinned,
-                    author: user.username
-                });
-                return text({ message: 'Post saved', slug });
-            } catch (e: unknown) {
-                return err(e instanceof Error ? e.message : String(e));
-            }
-        }
+        async (args) => savePostAs(args)
     );
 
     registerGuarded(
@@ -288,25 +320,49 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 pinned: z.boolean().optional()
             }
         },
-        async (args) => {
-            // Same implementation as create_post
+        async (args) => savePostAs(args)
+    );
+
+    registerGuarded(
+        'publish_post',
+        {
+            description: 'Publish a post (draft becomes published)',
+            inputSchema: { slug: z.string() }
+        },
+        async ({ slug }) => {
             try {
                 requireWriter(user);
-                const slug = args.slug.trim();
-                if (!slug) return err('slug is required');
+                const clean = slug.trim();
+                if (!clean) return err('slug is required');
                 const dir = postsDir(getActive());
-                const postPath = path.join(dir, `${slug}.md`);
+                const postPath = path.join(dir, `${clean}.md`);
                 if (!isSafePath(dir, postPath)) return err('Forbidden slug');
-                savePost(dir, {
-                    slug,
-                    title: args.title,
-                    content: args.content,
-                    summary: args.summary || '',
-                    date: args.date,
-                    pinned: args.pinned,
-                    author: user.username
-                });
-                return text({ message: 'Post saved', slug });
+                const result = publishPostAsCaller(dir, clean, caller);
+                if (!result.ok) return err(result.error);
+                return text({ message: 'Post published', slug: clean });
+            } catch (e: unknown) {
+                return err(e instanceof Error ? e.message : String(e));
+            }
+        }
+    );
+
+    registerGuarded(
+        'unpublish_post',
+        {
+            description: 'Unpublish a post (published becomes draft). Admin only.',
+            inputSchema: { slug: z.string() }
+        },
+        async ({ slug }) => {
+            try {
+                requireAdmin(user);
+                const clean = slug.trim();
+                if (!clean) return err('slug is required');
+                const dir = postsDir(getActive());
+                const postPath = path.join(dir, `${clean}.md`);
+                if (!isSafePath(dir, postPath)) return err('Forbidden slug');
+                const result = unpublishPostAsCaller(dir, clean, caller);
+                if (!result.ok) return err(result.error);
+                return text({ message: 'Post unpublished', slug: clean });
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));
             }

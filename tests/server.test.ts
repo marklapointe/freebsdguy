@@ -132,17 +132,17 @@ describe('API Endpoints', () => {
         expect(res.body.message).toBe('Post saved');
     });
 
-    it('GET /api/posts/:slug should return a post', async () => {
-        // First ensure it exists (we just saved it above, assuming tests run in sequence or share state)
-        // Better to save it explicitly here
+    it('GET /api/posts/:slug hides a newly saved draft from a public reader', async () => {
+        // POST /api/posts now saves a draft. Public REST reads hide drafts, so
+        // the slug is 404 until it is published over MCP.
         await request(app)
             .post('/api/posts')
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ slug: 'test-slug', title: 'T', content: 'C', summary: 'S', date: 'D' });
 
         const res = await request(app).get('/api/posts/test-slug');
-        expect(res.status).toBe(200);
-        expect(res.body.slug).toBe('test-slug');
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('Post not found');
     });
 
     it('DELETE /api/posts/:slug should delete a post for admin', async () => {

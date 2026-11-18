@@ -80,9 +80,19 @@ describe('token scope sets', () => {
     });
 
     it('treats a tool without a mapping as admin-only', () => {
-        expect(requiredScopeForTool('publish_post')).toBe('admin');
+        expect(requiredScopeForTool('not_a_mapped_tool')).toBe('admin');
+        expect(tokenAllowsTool(['read', 'content:write'], 'not_a_mapped_tool')).toBe(false);
+        expect(tokenAllowsTool(['read', 'admin'], 'not_a_mapped_tool')).toBe(true);
+    });
+
+    it('maps the publish tools to their scopes', () => {
+        // publish_post publishes a draft, unpublish_post moderates one.
+        expect(requiredScopeForTool('publish_post')).toBe('publish');
+        expect(requiredScopeForTool('unpublish_post')).toBe('moderate');
         expect(tokenAllowsTool(['read', 'content:write'], 'publish_post')).toBe(false);
-        expect(tokenAllowsTool(['read', 'admin'], 'publish_post')).toBe(true);
+        expect(tokenAllowsTool(['read', 'publish'], 'publish_post')).toBe(true);
+        expect(tokenAllowsTool(['read', 'publish'], 'unpublish_post')).toBe(false);
+        expect(tokenAllowsTool(['read', 'moderate'], 'unpublish_post')).toBe(true);
     });
 });
 

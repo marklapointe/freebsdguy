@@ -35,9 +35,8 @@ export function scopeDeniedMessage(scope: Scope): string {
 }
 
 /**
- * The scope each MCP tool needs. "publish" has no tool yet — the constant is
- * kept so the coming publish tool has a home. A tool that is not listed here
- * needs "admin", so a tool added later without a mapping is admin-only.
+ * The scope each MCP tool needs. A tool that is not listed here needs "admin",
+ * so a tool added later without a mapping is admin-only.
  */
 const TOOL_SCOPES: Record<string, Scope> = {
     get_playbook: 'read',
@@ -48,10 +47,12 @@ const TOOL_SCOPES: Record<string, Scope> = {
     list_themes: 'read',
     create_post: 'content:write',
     update_post: 'content:write',
+    publish_post: 'publish',
     upload_image: 'content:write',
     ai_summarize: 'content:write',
     ai_enhance: 'content:write',
     ai_list_models: 'content:write',
+    unpublish_post: 'moderate',
     delete_post: 'moderate',
     delete_image: 'moderate',
     get_config: 'admin',
@@ -70,6 +71,8 @@ const TOOL_SCOPES: Record<string, Scope> = {
 const MUTATING_MCP_TOOLS = new Set([
     'create_post',
     'update_post',
+    'publish_post',
+    'unpublish_post',
     'delete_post',
     'upload_image',
     'delete_image',
@@ -87,13 +90,13 @@ const MUTATING_MCP_TOOLS = new Set([
 /** MCP tools only an admin may run (their handlers call requireAdmin). */
 export const ADMIN_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
     'get_config', 'update_config', 'list_themes', 'set_theme', 'save_theme',
-    'list_users', 'create_user', 'delete_user'
+    'list_users', 'create_user', 'delete_user', 'unpublish_post'
 ]);
 
 /** MCP tools that need contributor or admin (their handlers call requireWriter). */
 export const WRITER_MCP_TOOLS: ReadonlySet<string> = new Set([
-    'create_post', 'update_post', 'delete_post', 'list_images', 'upload_image',
-    'delete_image', 'ai_summarize', 'ai_enhance', 'ai_list_models'
+    'create_post', 'update_post', 'publish_post', 'delete_post', 'list_images',
+    'upload_image', 'delete_image', 'ai_summarize', 'ai_enhance', 'ai_list_models'
 ]);
 
 function isScopeName(value: string): value is Scope {

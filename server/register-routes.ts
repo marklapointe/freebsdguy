@@ -34,7 +34,12 @@ import {
     FileSessionStore,
     safeDecode
 } from './lib/session-store.ts';
-import { getPosts, getPost, savePost, findPostByAlias } from './lib/posts.ts';
+import { getPosts, getPost, findPostByAlias } from './lib/posts.ts';
+import {
+    NOT_YOUR_POST,
+    savePostAsCaller,
+    type PostCaller
+} from './lib/post-policy.ts';
 import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
@@ -424,7 +429,7 @@ app.get('/api/posts', (req: Request, res: Response) => {
     const posts = getPosts(postsDir, {
         sortBy: (config.sortBy as 'title' | 'date' | 'author') || 'date',
         sortOrder: (config.sortOrder as 'asc' | 'desc') || 'desc'
-    });
+    }).filter((p) => p.status !== 'draft'); // a draft is private, never public
 
     // Always return paged shape so clients can honor config.pagination
     const defaultLimit = config.pagination || 10;
@@ -574,7 +579,12 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
     }
 
     const post = getPost(postsDir, slug);
-    
+
+    if (post && post.status === 'draft') {
+        // A draft is private: a public reader must not learn that it exists.
+        return res.status(404).json({ message: 'Post not found' });
+    }
+
     if (!post) {
         const to = findPostByAlias(postsDir, slug);
         if (to) {
@@ -596,7 +606,7 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
     }
     const config = getActive();
     const postsDir = postsDirOf(config);
-    
+
     // Security check: prevent directory traversal
     const postPath = path.join(postsDir, `${slug}.md`);
     if (!isSafePath(postsDir, postPath)) {
@@ -604,17 +614,30 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
         return res.status(403).json({ message: 'Forbidden' });
     }
 
-    savePost(postsDir, {
-        slug,
-        title,
-        content,
-        summary,
-        date,
-        pinned,
-        author: req.user.username
-    });
+    const caller: PostCaller = {
+        username: req.user.username,
+        role: req.user.role,
+        // A JWT or session caller is not scope-limited; a PAT carries its scopes.
+        scopes: req.tokenScopes
+    };
+    const result = savePostAsCaller(
+        postsDir,
+        { slug, title, content, summary, date, pinned },
+        caller
+    );
+    if (!result.ok) {
+        // Not the caller's post: the save is refused, the post is untouched.
+        const status = result.error === NOT_YOUR_POST ? 403 : 400;
+        return res.status(status).json({ message: result.error });
+    }
 
-    writeAudit({ event: 'content', action: 'update', resource: 'post', id: slug, username: req.user?.username });
+    writeAudit({
+        event: 'content',
+        action: result.created ? 'create' : 'update',
+        resource: 'post',
+        id: slug,
+        username: req.user?.username
+    });
     res.json({ message: 'Post saved' });
 });
 
@@ -741,10 +764,12 @@ if (fs.existsSync(distPath)) {
                 const slug = pathMatch[1];
                 const postsDir = postsDirOf(activeConfig);
                 const gp = getPost(postsDir, slug);
-                if (gp) {
+                if (gp && gp.status !== 'draft') {
                     post = gp;
                     isPost = true;
-                } else {
+                } else if (!gp) {
+                    // An old link may still point here through an alias. A draft
+                    // is not in the alias map, so it never leads a visitor to it.
                     const to = findPostByAlias(postsDir, slug);
                     if (to) {
                         const q = req.originalUrl.indexOf('?');
@@ -752,6 +777,8 @@ if (fs.existsSync(distPath)) {
                         return;
                     }
                 }
+                // A draft is private: the page is served without its post, so no
+                // title, summary or image of the draft reaches a reader.
             }
 
             const args = {

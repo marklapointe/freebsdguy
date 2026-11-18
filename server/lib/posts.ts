@@ -10,7 +10,20 @@ export interface PostMetadata {
     date: string;
     author: string;
     pinned?: boolean;
+    /** 'draft' or 'published'. A post without the key is published. */
+    status?: PostStatus;
     [key: string]: any;
+}
+
+/** A post is a draft until it is published; a post without the key is published. */
+export type PostStatus = 'draft' | 'published';
+
+/**
+ * The status of a post. Front matter without `status` means published, so every
+ * post that predates the drafts feature stays visible to the public.
+ */
+export function postStatus(post: { status?: unknown } | null | undefined): PostStatus {
+    return post && post.status === 'draft' ? 'draft' : 'published';
 }
 
 export interface Post extends PostMetadata {
@@ -53,7 +66,8 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
                 date: data.date || '',
                 author: data.author || '',
                 ...data,
-                pinned
+                pinned,
+                status: postStatus(data)
             } as PostMetadata;
         } catch (error) {
             console.error(`Error parsing post ${filename}:`, error);
@@ -62,7 +76,8 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
                 title: `Error: ${filename}`,
                 summary: 'This post could not be loaded due to a parsing error.',
                 date: '',
-                author: 'system'
+                author: 'system',
+                status: 'published'
             } as PostMetadata;
         }
     }).filter((p): p is PostMetadata => p !== null);
@@ -123,7 +138,8 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
             summary,
             date: parsed.data.date || '',
             author: parsed.data.author || '',
-            pinned
+            pinned,
+            status: postStatus(parsed.data)
         };
     } catch (error) {
         console.error(`Error parsing post ${slug}:`, error);
@@ -133,27 +149,89 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
             content: `This post could not be loaded due to a parsing error: ${error instanceof Error ? error.message : String(error)}`,
             summary: 'Parsing error',
             date: '',
-            author: 'system'
+            author: 'system',
+            status: 'published'
         };
     }
 };
 
-export const savePost = (postsDir: string, post: Partial<Post> & { slug: string; content: string; author: string }): void => {
+/** The keys savePost writes itself; every other key of the input is merged as it is. */
+const SAVE_OWNED_KEYS = new Set(['slug', 'content', 'title', 'summary', 'date', 'author', 'pinned']);
+
+/** The same keys, for the manual fallback that writes the front matter by hand. */
+const CORE_FRONTMATTER_KEYS = ['title', 'summary', 'date', 'author', 'pinned', 'status'];
+
+/**
+ * The front matter of a post file, exactly as it is on disk ({} when the post
+ * does not exist). A save merges over this, so keys the save does not know
+ * (aliases, publishedAt, ...) survive a save.
+ */
+export function readFrontMatter(postsDir: string, slug: string): Record<string, unknown> {
+    const filePath = path.join(postsDir, `${slug}.md`);
+    if (!fs.existsSync(filePath)) {
+        return {};
+    }
+    try {
+        const parsed = matter(fs.readFileSync(filePath, 'utf8'));
+        return { ...(parsed.data as Record<string, unknown>) };
+    } catch (error) {
+        console.error(`Error reading front matter of ${slug}:`, error);
+        return {};
+    }
+}
+
+/**
+ * The date of a post as it is written. gray-matter parses an unquoted YAML
+ * date as UTC midnight, so the calendar day is read back in UTC: writing the
+ * local midnight instead would move a post to the day before.
+ */
+function dateText(value: unknown): string {
+    if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) return '';
+        const y = value.getUTCFullYear();
+        const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(value.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    const text = String(value ?? '').trim();
+    return text || new Date().toISOString();
+}
+
+/**
+ * Write a post. The existing front matter is merged first and the input is
+ * merged over it, so a save may only change the keys the input names: the
+ * author, the status and the other keys of an existing post survive.
+ */
+export const savePost = (postsDir: string, post: Partial<Post> & { slug: string; content: string }): void => {
     if (!fs.existsSync(postsDir)) {
         fs.mkdirSync(postsDir, { recursive: true });
     }
 
+    // Existing front matter first: a save must not drop keys it does not know
+    // (aliases, publishedAt, ...), only the keys the input names may change.
+    const merged: Record<string, unknown> = { ...readFrontMatter(postsDir, post.slug) };
+    for (const [key, value] of Object.entries(post)) {
+        if (SAVE_OWNED_KEYS.has(key)) continue;
+        if (value === undefined) continue;
+        merged[key] = value;
+    }
+
     // Metadata only is HTML-stripped; body stays Markdown (authors are authenticated).
-    const cleanTitle = sanitizeHtml(String(post.title || ''), { allowedTags: [], allowedAttributes: {} });
-    const cleanSummary = sanitizeHtml(String(post.summary || ''), { allowedTags: [], allowedAttributes: {} });
+    const cleanTitle = sanitizeHtml(String(post.title ?? ''), { allowedTags: [], allowedAttributes: {} });
+    const cleanSummary = sanitizeHtml(String(post.summary ?? ''), { allowedTags: [], allowedAttributes: {} });
     const content = String(post.content ?? '');
 
-    const frontmatter = {
-        title: cleanTitle,
-        summary: cleanSummary,
-        date: String(post.date || new Date().toISOString()),
-        author: String(post.author || ''),
-        pinned: post.pinned === true
+    const frontmatter: Record<string, unknown> = {
+        ...merged,
+        title: post.title !== undefined ? cleanTitle : String(merged.title ?? ''),
+        summary: post.summary !== undefined ? cleanSummary : String(merged.summary ?? ''),
+        date: dateText(post.date ?? merged.date),
+        author: String(post.author ?? merged.author ?? ''),
+        pinned:
+            post.pinned !== undefined
+                ? post.pinned === true
+                : merged.pinned === true || merged.pinned === 'true',
+        status: postStatus(merged)
     };
 
     try {
@@ -162,7 +240,14 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
     } catch (error) {
         console.error(`Error saving post ${post.slug}:`, error);
         // Fallback to simple manual construction if matter.stringify fails for some reason
-        const manualContent = `---\ntitle: "${frontmatter.title.replace(/"/g, '\\"')}"\nsummary: "${frontmatter.summary.replace(/"/g, '\\"')}"\ndate: "${frontmatter.date}"\nauthor: "${frontmatter.author}"\npinned: ${frontmatter.pinned}\n---\n${content}`;
+        const core = CORE_FRONTMATTER_KEYS.map(
+            (key) => `${key}: ${JSON.stringify(frontmatter[key] ?? '')}`
+        ).join('\n');
+        const extra = Object.entries(frontmatter)
+            .filter(([key]) => !CORE_FRONTMATTER_KEYS.includes(key))
+            .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+            .join('\n');
+        const manualContent = `---\n${core}\n${extra ? `${extra}\n` : ''}---\n${content}`;
         fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), manualContent);
     }
 };
@@ -196,6 +281,8 @@ export const findPostByAlias = (postsDir: string, slug: string): string | null =
         for (const f of files) {
             try {
                 const { data } = matter(fs.readFileSync(path.join(postsDir, f), 'utf8'));
+                // A draft is private: an old link must not lead to it.
+                if (postStatus(data) === 'draft') continue;
                 const raw = data.aliases;
                 const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
                 for (const a of list) if (typeof a === 'string' && SLUG_RE.test(a) && !map.has(a)) map.set(a, f.replace(/\.md$/, ''));
