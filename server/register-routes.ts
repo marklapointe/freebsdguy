@@ -22,7 +22,10 @@ import {
     getConfigLoadStatus,
     sanitizeConfig,
     resolveAuthMode,
-    findUserByUsername
+    findUserByUsername,
+    preserveWebLoginFlag,
+    webLoginDisabled,
+    WEB_LOGIN_FLAG_IGNORED
 } from './lib/config.ts';
 import {
     parseCookies,
@@ -163,6 +166,13 @@ export function registerRoutes(app: Express, ctx: AppContext): void {
 
 // Login
 app.post('/api/login', async (req: Request, res: Response) => {
+    // Config-file-only kill switch: turns POST /api/login off (404). Credentials are never
+    // read and no password hash is compared; PAT/MCP auth keeps working. Fail closed: the
+    // file or the in-memory copy disabling it is enough.
+    if (webLoginDisabled(getActive())) {
+        writeAudit({ event: 'login', outcome: 'disabled' });
+        return res.status(404).json({ message: 'Not Found' });
+    }
     const { username, password } = req.body;
     const usersConfig = loadUsers();
 
@@ -937,9 +947,11 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
             };
         }
         if (isObj(b.appearance)) patch.appearance = { ...(current.appearance || {}), ...b.appearance };
+        let mentionsWebLogin = false;
         if (isObj(b.security)) {
             // Toggles are a full replacement (omitted → false); connection settings keep prev
             const prev = current.security || {};
+            mentionsWebLogin = Object.prototype.hasOwnProperty.call(b.security, 'disableWebLogin');
             patch.security = {
                 authMode: b.security.authMode ?? prev.authMode,
                 sessionTtlSeconds: b.security.sessionTtlSeconds ?? prev.sessionTtlSeconds,
@@ -972,13 +984,17 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         }
 
         const { config, warnings } = sanitizeConfig({ ...current, ...patch });
+        // The web-login flag is config-file only: every save writes back what the file
+        // says, and falls back to the in-memory copy when the file cannot be read.
+        config.security = { ...config.security, disableWebLogin: preserveWebLoginFlag(getActive()) };
+        if (mentionsWebLogin) warnings.push(WEB_LOGIN_FLAG_IGNORED);
         if (warnings.length) console.warn('[WARN] POST /api/admin/config:', warnings.join('; '));
 
         saveConfig(config);
         setActive(config);
 
         writeAudit({ event: 'content', action: 'update', resource: 'config', username: req.user?.username });
-        res.json({ message: 'Configuration updated', currentTheme: config.currentTheme });
+        res.json({ message: 'Configuration updated', currentTheme: config.currentTheme, warnings });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to save configuration';
         console.error('[ERROR] POST /api/admin/config:', msg);

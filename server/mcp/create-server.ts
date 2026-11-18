@@ -14,7 +14,9 @@ import {
     saveConfig,
     sanitizeConfig,
     findUserByUsername,
-    configPath
+    configPath,
+    preserveWebLoginFlag,
+    WEB_LOGIN_FLAG_IGNORED
 } from '../lib/config.ts';
 import { getPosts, getPost, savePost } from '../lib/posts.ts';
 import {
@@ -74,6 +76,13 @@ function requireAdmin(user: McpUser) {
 
 function configDir() {
     return path.dirname(configPath());
+}
+
+/** True when a config patch mentions the config-file-only web-login kill switch. */
+function patchMentionsWebLogin(patch: Record<string, unknown>): boolean {
+    const sec = patch.security;
+    if (!sec || typeof sec !== 'object' || Array.isArray(sec)) return false;
+    return Object.prototype.hasOwnProperty.call(sec, 'disableWebLogin');
 }
 
 function postsDir(cfg: Config) {
@@ -413,13 +422,27 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
     registerGuarded(
         'update_config',
         {
-            description: 'Merge and save site config (admin)',
+            description:
+                'Merge and save site config (admin). security.disableWebLogin is config-file only and is ignored here.',
             inputSchema: { patch: z.record(z.string(), z.unknown()) }
         },
         async ({ patch }) => {
             try {
                 requireAdmin(user);
-                const { config, warnings } = sanitizeConfig({ ...getActive(), ...patch });
+                const current = getActive();
+                const merged: Record<string, unknown> = { ...current, ...patch };
+                const mergedSecurity =
+                    merged.security && typeof merged.security === 'object' && !Array.isArray(merged.security)
+                        ? { ...(merged.security as Record<string, unknown>) }
+                        : {};
+                // The web-login flag is config-file only: the file wins, the in-memory
+                // copy is the fallback for a file that cannot be read.
+                mergedSecurity.disableWebLogin = preserveWebLoginFlag(current);
+                merged.security = mergedSecurity;
+                const { config, warnings } = sanitizeConfig(merged);
+                if (patchMentionsWebLogin(patch)) {
+                    warnings.push(WEB_LOGIN_FLAG_IGNORED);
+                }
                 saveConfig(config);
                 setActive(config);
                 return text({ message: 'Config saved', warnings });

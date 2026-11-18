@@ -169,6 +169,8 @@ export interface SecurityConfig {
     disableAI?: boolean;
     disableImages?: boolean;
     disablePublicSearch?: boolean;
+    /** Turns POST /api/login off (404). The public config projects this flag so the UI can hide the login link. PAT/MCP auth is unaffected. Config-file only. */
+    disableWebLogin?: boolean;
     /**
      * Express trust proxy. Default "loopback": only a reverse proxy on loopback
      * may set X-Forwarded-For. false trusts nobody. A number is a hop count.
@@ -256,6 +258,7 @@ export function defaultConfig(): Config {
                 disableAI: false,
                 disableImages: false,
                 disablePublicSearch: false,
+                disableWebLogin: false,
                 trustProxy: 'loopback'
             }
         };
@@ -283,6 +286,7 @@ export function defaultConfig(): Config {
             disableAI: false,
             disableImages: false,
             disablePublicSearch: false,
+            disableWebLogin: false,
             trustProxy: 'loopback'
         }
     };
@@ -586,13 +590,18 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
                 warnings.push('security.sessionCookieName invalid; using mdweb.sid');
             }
 
+            if (sec.disableWebLogin !== undefined && typeof sec.disableWebLogin !== 'boolean') {
+                warnings.push('security.disableWebLogin invalid; using false');
+            }
+
             config.security = {
                 authMode,
                 sessionTtlSeconds,
                 sessionCookieName,
                 disableAI: asBool(sec.disableAI, false),
                 disableImages: asBool(sec.disableImages, false),
-                disablePublicSearch: asBool(sec.disablePublicSearch, false)
+                disablePublicSearch: asBool(sec.disablePublicSearch, false),
+                disableWebLogin: asBool(sec.disableWebLogin, false)
             };
             const trust = parseTrustProxy(sec.trustProxy);
             if (!trust.ok) warnings.push('security.trustProxy invalid; using loopback');
@@ -716,6 +725,52 @@ export const loadConfig = (customPath?: string): Config => {
     return config;
 };
 
+/**
+ * The warning a save pushes when the caller tried to set the config-file-only flag.
+ * Shared, so the admin route and the MCP tool say exactly the same thing.
+ */
+export const WEB_LOGIN_FLAG_IGNORED = 'security.disableWebLogin is config-file only; ignored';
+
+/**
+ * The web-login kill switch lives in the config file only: the admin UI and the MCP tool
+ * must neither set nor clear it, and a hand edit of the file wins over the in-memory copy.
+ * The file is read directly instead of through loadConfig(), so a broken file is not
+ * quarantined and the value can be tri-state: undefined when the file is missing or cannot
+ * be parsed, which lets a save keep the in-memory value instead of clearing the flag.
+ */
+export function webLoginDisabledOnDisk(): boolean | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
+    } catch {
+        return undefined;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const security = (parsed as { security?: unknown }).security;
+    const flag =
+        security && typeof security === 'object' && !Array.isArray(security)
+            ? (security as { disableWebLogin?: unknown }).disableWebLogin
+            : undefined;
+    return flag === true;
+}
+
+/**
+ * Whether the web login is off. Fail closed: the config file or the in-memory copy
+ * disabling it is enough, so a hand edit takes effect without a restart and neither
+ * source can re-enable the login behind the other's back.
+ */
+export function webLoginDisabled(active: Config | undefined): boolean {
+    return webLoginDisabledOnDisk() === true || active?.security?.disableWebLogin === true;
+}
+
+/**
+ * The flag a save must write: the config file wins, and the in-memory copy is the fallback
+ * for a file that cannot be read, so a save never clears the kill switch.
+ */
+export function preserveWebLoginFlag(active: Config | undefined): boolean {
+    return webLoginDisabledOnDisk() ?? !!active?.security?.disableWebLogin;
+}
+
 export const loadAIConfig = (customPath?: string): AIConfig | null => {
     const config = loadConfig(customPath);
     return config.aiConfig || null;
@@ -725,6 +780,11 @@ export const saveConfig = (config: Config, customPath?: string) => {
     const targetPath = customPath || configPath();
     // Always persist a sanitized document so disk never holds half-broken shapes we wrote
     const { config: clean } = sanitizeConfig(config);
+    // Every writer goes through here, so this is the choke point for the web-login kill
+    // switch: the file's value wins and the incoming config is only the fallback for a
+    // file that cannot be read, otherwise a stale in-memory copy (MCP set_theme) or a
+    // body without a security section would silently clear the switch.
+    clean.security = { ...clean.security, disableWebLogin: preserveWebLoginFlag(config) };
     try {
         writeJsonAtomic(targetPath, clean);
     } catch (e: unknown) {

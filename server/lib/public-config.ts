@@ -15,7 +15,7 @@ import type {
     FooterConfig,
     ServiceConfig
 } from './config.ts';
-import { DEFAULT_FOOTER_COPYRIGHT, resolveAuthMode } from './config.ts';
+import { DEFAULT_FOOTER_COPYRIGHT, resolveAuthMode, webLoginDisabled } from './config.ts';
 
 /** Public AI surface: capability flags only; never the raw secret. */
 export interface PublicAIConfig {
@@ -42,6 +42,7 @@ export interface PublicSecurity {
     disableAI: boolean;
     disableImages: boolean;
     disablePublicSearch: boolean;
+    disableWebLogin: boolean;
 }
 
 export interface PublicFooter {
@@ -94,7 +95,9 @@ export function projectSecurity(config: Config): PublicSecurity {
                 : 86400,
         disableAI: !!s.disableAI,
         disableImages: !!s.disableImages,
-        disablePublicSearch: !!s.disablePublicSearch
+        disablePublicSearch: !!s.disablePublicSearch,
+        // The kill switch is config-file only: the file wins over the in-memory copy.
+        disableWebLogin: webLoginDisabled(config)
     };
 }
 
