@@ -17,13 +17,15 @@ import { User } from '../types';
 interface NavbarProps {
     user: User | null;
     setUser: (user: User | null) => void;
+    /** Show the Login entry point; false hides it (defaults to true for other callers). */
+    loginEnabled?: boolean;
 }
 
 /**
  * Theme pack is site-wide (admin Appearance). Light/dark mode of that pack is
  * per-browser and switchable here for every visitor.
  */
-export const Navbar = ({ user, setUser }: NavbarProps) => {
+export const Navbar = ({ user, setUser, loginEnabled = true }: NavbarProps) => {
     const [siteName, setSiteName] = useState('MDWeb');
     const [siteLogo, setSiteLogo] = useState<string | undefined>(undefined);
     const [themeMode, setThemeMode] = useState<ThemeMode>(() => getEffectiveThemeMode());
@@ -137,9 +139,11 @@ export const Navbar = ({ user, setUser }: NavbarProps) => {
                         </button>
                     </>
                 ) : (
-                    <Link to="/login" data-testid="login-link" className="p-2 hover:bg-accent rounded transition hover:text-on-accent" title="Login">
-                        Login
-                    </Link>
+                    loginEnabled ? (
+                        <Link to="/login" data-testid="login-link" className="p-2 hover:bg-accent rounded transition hover:text-on-accent" title="Login">
+                            Login
+                        </Link>
+                    ) : null
                 )}
             </div>
         </nav>

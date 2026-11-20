@@ -4,6 +4,7 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import type { SecurityConfig } from './config.ts';
+import { ADMIN_ONLY_MCP_TOOLS, WRITER_MCP_TOOLS, isMutatingHttpRequest } from './token-scope.ts';
 
 export interface RateRule {
     max: number;
@@ -73,6 +74,136 @@ export function resolveRateLimitSettings(
     };
 }
 
+/**
+ * The class of a request, counted per token (Track #2119 U8).
+ *
+ * publish is the rarest and the strictest: a publish also spends a write.
+ */
+export type TokenRateClass = 'read' | 'write' | 'publish';
+
+export interface TokenRateSettings {
+    read: RateRule;
+    write: RateRule;
+    publish: RateRule;
+}
+
+/** The default limits of one token. */
+export const TOKEN_RATE_DEFAULTS = {
+    readPerMinute: 60,
+    writePerMinute: 10,
+    publishPerHour: 3
+} as const;
+
+/**
+ * The per-token limits. The env wins; a value that is not a number or is
+ * negative is ignored, so a typo cannot open a bucket. Under VITEST the
+ * limits are relaxed, exactly as the per-IP limits are, unless
+ * MDWEB_ENFORCE_RATE_LIMIT=1.
+ */
+export function resolveTokenRateLimitSettings(
+    security: SecurityConfig | undefined | null,
+    env: NodeJS.ProcessEnv = process.env
+): TokenRateSettings {
+    const relaxed = Boolean(env.VITEST) && env.MDWEB_ENFORCE_RATE_LIMIT !== '1';
+    const configured = security?.tokenRateLimits;
+    const maxOf = (envName: string, configuredMax: number | undefined, fallback: number) => {
+        const fromEnv = finiteNonNeg(env[envName]);
+        if (fromEnv !== undefined) return fromEnv;
+        if (typeof configuredMax === 'number' && Number.isFinite(configuredMax) && configuredMax >= 0) {
+            return configuredMax;
+        }
+        return relaxed ? 1_000_000 : fallback;
+    };
+    return {
+        read: {
+            max: maxOf('MDWEB_TOKEN_READ_PER_MIN', configured?.readPerMinute, TOKEN_RATE_DEFAULTS.readPerMinute),
+            windowMs: 60 * 1000
+        },
+        write: {
+            max: maxOf('MDWEB_TOKEN_WRITE_PER_MIN', configured?.writePerMinute, TOKEN_RATE_DEFAULTS.writePerMinute),
+            windowMs: 60 * 1000
+        },
+        publish: {
+            max: maxOf('MDWEB_TOKEN_PUBLISH_PER_HOUR', configured?.publishPerHour, TOKEN_RATE_DEFAULTS.publishPerHour),
+            windowMs: 60 * 60 * 1000
+        }
+    };
+}
+
+/** The MCP tools whose call publishes or unpublishes a post. */
+export const PUBLISH_MCP_TOOLS: ReadonlySet<string> = new Set(['publish_post', 'unpublish_post']);
+
+/** One bucket hit a request makes. */
+export interface TokenRateUnit {
+    /** The class whose bucket this hit belongs to. */
+    cls: TokenRateClass;
+    /** A publish also spends a write: the second bucket it touches. */
+    also?: TokenRateClass;
+    /** The MCP tool this unit came from, when it came from one. */
+    tool?: string;
+}
+
+/** The tools/call entries of a JSON-RPC body, one object or a batch. */
+export function mcpToolCalls(body: unknown): { name: string; args: unknown }[] {
+    const entries = Array.isArray(body) ? body : body ? [body] : [];
+    const calls: { name: string; args: unknown }[] = [];
+    for (const entry of entries) {
+        if (!entry || typeof entry !== 'object') continue;
+        const rpc = entry as { method?: unknown; params?: unknown };
+        if (rpc.method !== 'tools/call') continue;
+        const params = (
+            rpc.params && typeof rpc.params === 'object' ? rpc.params : {}
+        ) as { name?: unknown; arguments?: unknown };
+        calls.push({
+            name: typeof params.name === 'string' ? params.name : '',
+            args: params.arguments
+        });
+    }
+    return calls;
+}
+
+/** A REST route that publishes or unpublishes a post. */
+export function isPublishHttpPath(rawPath: string): boolean {
+    const segments = (rawPath || '').split('?')[0].toLowerCase().split('/').filter(Boolean);
+    return segments.some((segment) => segment === 'publish' || segment === 'unpublish');
+}
+
+/**
+ * The buckets a request spends, in the order they are spent.
+ *
+ * A /mcp request is classified from the body it already carries: every
+ * tools/call entry of a batch counts on its own, and a publish counts as a
+ * write as well. Every other request is a write when it mutates and a read
+ * when it does not.
+ */
+export function tokenRateUnits(req: {
+    method: string;
+    path?: string;
+    originalUrl?: string;
+    body?: unknown;
+}): TokenRateUnit[] {
+    const pathOnly = (req.path || req.originalUrl || '').split('?')[0].toLowerCase();
+    if (pathOnly === '/mcp' || pathOnly.startsWith('/mcp/')) {
+        const calls = mcpToolCalls(req.body);
+        if (!calls.length) return [{ cls: 'read' }];
+        return calls.map((call) => {
+            if (PUBLISH_MCP_TOOLS.has(call.name)) {
+                return { cls: 'publish' as TokenRateClass, also: 'write' as TokenRateClass, tool: call.name };
+            }
+            if (WRITER_MCP_TOOLS.has(call.name) || ADMIN_ONLY_MCP_TOOLS.has(call.name)) {
+                return { cls: 'write' as TokenRateClass, tool: call.name };
+            }
+            return { cls: 'read' as TokenRateClass, tool: call.name };
+        });
+    }
+    const method = (req.method || '').toUpperCase();
+    if (method === 'POST' && isPublishHttpPath(pathOnly)) {
+        return [{ cls: 'publish', also: 'write' }];
+    }
+    if (isMutatingHttpRequest(method, pathOnly)) return [{ cls: 'write' }];
+    return [{ cls: 'read' }];
+}
+
 export class MemoryRateLimiter {
     private buckets = new Map<string, number[]>();
 
@@ -91,6 +222,31 @@ export class MemoryRateLimiter {
         prev.push(t);
         this.buckets.set(bucket, prev);
         return { allowed: true, limit: max, remaining: Math.max(0, max - prev.length), retryAfterSeconds: 0 };
+    }
+
+    /**
+     * Non-consuming preview of what `hit` would decide right now. Useful when a
+     * single request touches several buckets and must either consume all of them
+     * or none of them.
+     */
+    peek(bucket: string, max: number, windowMs: number): RateDecision {
+        const t = this.now();
+        const start = t - windowMs;
+        const prev = (this.buckets.get(bucket) || []).filter((ts) => ts > start);
+        if (prev.length >= max) {
+            const oldest = prev[0] ?? t;
+            const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - t) / 1000));
+            return { allowed: false, limit: max, remaining: 0, retryAfterSeconds };
+        }
+        return { allowed: true, limit: max, remaining: Math.max(0, max - prev.length - 1), retryAfterSeconds: 0 };
+    }
+
+    /** Current number of hits left in the bucket, without consuming one. */
+    remaining(bucket: string, max: number, windowMs: number): number {
+        const t = this.now();
+        const start = t - windowMs;
+        const prev = (this.buckets.get(bucket) || []).filter((ts) => ts > start);
+        return Math.max(0, max - prev.length);
     }
 
     reset(): void {

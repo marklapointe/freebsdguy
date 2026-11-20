@@ -66,6 +66,11 @@ export interface User {
     username: string;
     passwordHash: string;
     role: string;
+    /**
+     * An MCP-only agent account (Track #2119 U7): no password, never a web login,
+     * used through a personal access token only. Set on a contributor account.
+     */
+    mcpOnly?: boolean;
     /** @deprecated Site theme is config.currentTheme only; ignored if present in old users.json */
     theme?: string;
 }
@@ -164,11 +169,24 @@ export interface SecurityConfig {
     mcpRateLimitWindow?: number;
     /** Max requests per window for /mcp. */
     mcpRateLimitMax?: number;
+    /**
+     * Per-token limits (Track #2119 U8). Behind the gateway every agent shares
+     * one address, so these buckets are keyed by personal access token. The
+     * env MDWEB_TOKEN_READ_PER_MIN / MDWEB_TOKEN_WRITE_PER_MIN /
+     * MDWEB_TOKEN_PUBLISH_PER_HOUR wins over this object.
+     */
+    tokenRateLimits?: {
+        readPerMinute?: number;
+        writePerMinute?: number;
+        publishPerHour?: number;
+    };
     /** Allowed browser origins. Never "*". Empty means same-origin only. */
     corsOrigins?: string[];
     disableAI?: boolean;
     disableImages?: boolean;
     disablePublicSearch?: boolean;
+    /** Turns POST /api/login off (404). The public config projects this flag so the UI can hide the login link. PAT/MCP auth is unaffected. Config-file only. */
+    disableWebLogin?: boolean;
     /**
      * Express trust proxy. Default "loopback": only a reverse proxy on loopback
      * may set X-Forwarded-For. false trusts nobody. A number is a hop count.
@@ -256,6 +274,7 @@ export function defaultConfig(): Config {
                 disableAI: false,
                 disableImages: false,
                 disablePublicSearch: false,
+                disableWebLogin: false,
                 trustProxy: 'loopback'
             }
         };
@@ -283,6 +302,7 @@ export function defaultConfig(): Config {
             disableAI: false,
             disableImages: false,
             disablePublicSearch: false,
+            disableWebLogin: false,
             trustProxy: 'loopback'
         }
     };
@@ -586,13 +606,18 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
                 warnings.push('security.sessionCookieName invalid; using mdweb.sid');
             }
 
+            if (sec.disableWebLogin !== undefined && typeof sec.disableWebLogin !== 'boolean') {
+                warnings.push('security.disableWebLogin invalid; using false');
+            }
+
             config.security = {
                 authMode,
                 sessionTtlSeconds,
                 sessionCookieName,
                 disableAI: asBool(sec.disableAI, false),
                 disableImages: asBool(sec.disableImages, false),
-                disablePublicSearch: asBool(sec.disablePublicSearch, false)
+                disablePublicSearch: asBool(sec.disablePublicSearch, false),
+                disableWebLogin: asBool(sec.disableWebLogin, false)
             };
             const trust = parseTrustProxy(sec.trustProxy);
             if (!trust.ok) warnings.push('security.trustProxy invalid; using loopback');
@@ -605,6 +630,28 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
             if (typeof sec.loginRateLimitMax === 'number') config.security.loginRateLimitMax = sec.loginRateLimitMax;
             if (typeof sec.mcpRateLimitWindow === 'number') config.security.mcpRateLimitWindow = sec.mcpRateLimitWindow;
             if (typeof sec.mcpRateLimitMax === 'number') config.security.mcpRateLimitMax = sec.mcpRateLimitMax;
+            if (sec.tokenRateLimits && typeof sec.tokenRateLimits === 'object' && !Array.isArray(sec.tokenRateLimits)) {
+                const raw = sec.tokenRateLimits as Record<string, unknown>;
+                const limits: NonNullable<SecurityConfig['tokenRateLimits']> = {};
+                const names = [
+                    ['readPerMinute', 'readPerMinute'],
+                    ['writePerMinute', 'writePerMinute'],
+                    ['publishPerHour', 'publishPerHour']
+                ] as const;
+                for (const [key, outKey] of names) {
+                    const value = raw[key];
+                    if (value === undefined) continue;
+                    // A typo or a negative must not open a bucket.
+                    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+                        limits[outKey] = value;
+                    } else {
+                        warnings.push(`security.tokenRateLimits.${key} invalid; ignored`);
+                    }
+                }
+                if (Object.keys(limits).length) config.security.tokenRateLimits = limits;
+            } else if (sec.tokenRateLimits !== undefined) {
+                warnings.push('security.tokenRateLimits invalid; ignored');
+            }
             if (sec.corsOrigins !== undefined) {
                 config.security.corsOrigins = parseOriginList(sec.corsOrigins);
                 if (sec.corsOrigins === '*' || (Array.isArray(sec.corsOrigins) && sec.corsOrigins.includes('*'))) {
@@ -716,6 +763,52 @@ export const loadConfig = (customPath?: string): Config => {
     return config;
 };
 
+/**
+ * The warning a save pushes when the caller tried to set the config-file-only flag.
+ * Shared, so the admin route and the MCP tool say exactly the same thing.
+ */
+export const WEB_LOGIN_FLAG_IGNORED = 'security.disableWebLogin is config-file only; ignored';
+
+/**
+ * The web-login kill switch lives in the config file only: the admin UI and the MCP tool
+ * must neither set nor clear it, and a hand edit of the file wins over the in-memory copy.
+ * The file is read directly instead of through loadConfig(), so a broken file is not
+ * quarantined and the value can be tri-state: undefined when the file is missing or cannot
+ * be parsed, which lets a save keep the in-memory value instead of clearing the flag.
+ */
+export function webLoginDisabledOnDisk(): boolean | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
+    } catch {
+        return undefined;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const security = (parsed as { security?: unknown }).security;
+    const flag =
+        security && typeof security === 'object' && !Array.isArray(security)
+            ? (security as { disableWebLogin?: unknown }).disableWebLogin
+            : undefined;
+    return flag === true;
+}
+
+/**
+ * Whether the web login is off. Fail closed: the config file or the in-memory copy
+ * disabling it is enough, so a hand edit takes effect without a restart and neither
+ * source can re-enable the login behind the other's back.
+ */
+export function webLoginDisabled(active: Config | undefined): boolean {
+    return webLoginDisabledOnDisk() === true || active?.security?.disableWebLogin === true;
+}
+
+/**
+ * The flag a save must write: the config file wins, and the in-memory copy is the fallback
+ * for a file that cannot be read, so a save never clears the kill switch.
+ */
+export function preserveWebLoginFlag(active: Config | undefined): boolean {
+    return webLoginDisabledOnDisk() ?? !!active?.security?.disableWebLogin;
+}
+
 export const loadAIConfig = (customPath?: string): AIConfig | null => {
     const config = loadConfig(customPath);
     return config.aiConfig || null;
@@ -725,6 +818,11 @@ export const saveConfig = (config: Config, customPath?: string) => {
     const targetPath = customPath || configPath();
     // Always persist a sanitized document so disk never holds half-broken shapes we wrote
     const { config: clean } = sanitizeConfig(config);
+    // Every writer goes through here, so this is the choke point for the web-login kill
+    // switch: the file's value wins and the incoming config is only the fallback for a
+    // file that cannot be read, otherwise a stale in-memory copy (MCP set_theme) or a
+    // body without a security section would silently clear the switch.
+    clean.security = { ...clean.security, disableWebLogin: preserveWebLoginFlag(config) };
     try {
         writeJsonAtomic(targetPath, clean);
     } catch (e: unknown) {
@@ -785,6 +883,10 @@ export function sanitizeUsers(raw: unknown): { users: UsersConfig; warnings: str
         if (typeof a.passwordHash !== 'string' || !a.passwordHash) {
             warnings.push('admin.passwordHash missing or empty; login disabled until set');
         }
+        // The admin block never carries mcpOnly: the web admin always has a password.
+        if (a.mcpOnly !== undefined) {
+            warnings.push('admin.mcpOnly dropped; only a contributor account may be MCP-only');
+        }
     } else {
         warnings.push('admin block missing; login locked until users.json is repaired');
     }
@@ -796,11 +898,25 @@ export function sanitizeUsers(raw: unknown): { users: UsersConfig; warnings: str
             const u = item as Record<string, unknown>;
             const username = asNonEmptyString(u.username);
             if (!username) continue;
-            users.push({
+            const role = asNonEmptyString(u.role) || 'contributor';
+            const entry: User = {
                 username,
                 passwordHash: typeof u.passwordHash === 'string' ? u.passwordHash : '',
-                role: asNonEmptyString(u.role) || 'contributor'
-            });
+                role
+            };
+            // mcpOnly survives only as the boolean true on a contributor account.
+            // Anything else is dropped loudly, so a hand-edited file cannot turn
+            // an ordinary account into a passwordless one by accident.
+            if (u.mcpOnly !== undefined) {
+                if (u.mcpOnly === true && role === 'contributor') {
+                    entry.mcpOnly = true;
+                } else {
+                    warnings.push(
+                        `users[${username}].mcpOnly dropped; only true on a contributor account is kept`
+                    );
+                }
+            }
+            users.push(entry);
         }
     } else if (o.users !== undefined) {
         warnings.push('users array invalid; ignored');
@@ -874,7 +990,13 @@ export const saveUsers = (users: UsersConfig, customPath?: string) => {
     writeJsonAtomic(targetPath, clean);
 };
 
-/** Resolve a live account by username (admin or users[]). Null if missing or hash empty. */
+/**
+ * Resolve a live account by username (admin or users[]). Null if missing or locked.
+ *
+ * An MCP-only agent account (Track #2119 U7) has no password at all: it exists
+ * for its personal access token, so it is found even with an empty hash. Every
+ * other account still needs a password hash, so an empty hash keeps it locked.
+ */
 export function findUserByUsername(
     username: string,
     users: UsersConfig = loadUsers()
@@ -884,6 +1006,8 @@ export function findUserByUsername(
         return users.admin.passwordHash ? users.admin : null;
     }
     const u = users.users.find((x) => x.username === username);
-    if (!u || !u.passwordHash) return null;
+    if (!u) return null;
+    if (u.mcpOnly === true && u.role === 'contributor') return u;
+    if (!u.passwordHash) return null;
     return u;
 }

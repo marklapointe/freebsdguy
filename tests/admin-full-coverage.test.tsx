@@ -461,14 +461,26 @@ describe('Admin full coverage', () => {
         fireEvent.click(screen.getByTestId('footer-show-toggle')); // show again
         // open advanced paths
         fireEvent.click(screen.getByText('Advanced paths'));
-        fireEvent.change(screen.getByTestId('site-posts-dir'), { target: { value: '/var/db/mdweb/posts' } });
-        fireEvent.change(screen.getByTestId('site-theme-dir'), { target: { value: '/var/db/mdweb/themes' } });
+        // paths are server-only (#2119): visible but read-only, never posted
+        const postsInput = screen.getByTestId('site-posts-dir') as HTMLInputElement;
+        const themeInput = screen.getByTestId('site-theme-dir') as HTMLInputElement;
+        expect(postsInput.readOnly).toBe(true);
+        expect(themeInput.readOnly).toBe(true);
+        expect(postsInput.value).toBe('./posts');
+        expect(themeInput.value).toBe('./themes');
+        fireEvent.change(postsInput, { target: { value: '/etc' } });
+        expect(postsInput.value).toBe('./posts');
         // port change
         const portInput = screen.getByDisplayValue('5173');
         fireEvent.change(portInput, { target: { value: '8080' } });
         localStorage.setItem('lastPort', '5173');
         fireEvent.click(screen.getByTestId('site-save-button'));
         await waitFor(() => expect(showAlert).toHaveBeenCalledWith(expect.stringContaining('Port changed'), 'Success'));
+        const saveCall = post.mock.calls.find(c => c[0] === '/admin/config');
+        expect(saveCall).toBeTruthy();
+        expect(saveCall![1]).not.toHaveProperty('postsDir');
+        expect(saveCall![1]).not.toHaveProperty('themeDir');
+        expect(saveCall![1].siteName).toBe('NewSite');
 
         post.mockRejectedValueOnce({ response: { data: { message: 'EACCES' } } });
         fireEvent.click(screen.getByTestId('site-save-button'));

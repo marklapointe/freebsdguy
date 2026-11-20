@@ -13,6 +13,7 @@ import { app } from '../server/index.ts';
 import { mintToken } from '../server/lib/api-tokens.ts';
 import { loadConfig, loadUsers, saveUsers, configPath } from '../server/lib/config.ts';
 import { registerMcpRoutes } from '../server/mcp/register-mcp.ts';
+import { LEGACY_WRITE_SCOPES } from '../server/lib/token-scope.ts';
 
 const PNG =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -58,6 +59,20 @@ async function call(pat: string, name: string, args: Record<string, unknown> = {
     return toolText(res);
 }
 
+/**
+ * Reconfigure the live app through the admin REST route. MCP update_config only
+ * edits the allow-listed site settings (P0 E1), so aiConfig and security go through
+ * POST /api/admin/config. postsDir and themeDir are config-file only (P0 R3): this
+ * test points them at a temporary config file through CONFIG_PATH instead.
+ */
+async function setConfig(pat: string, patch: Record<string, unknown>) {
+    const res = await request(app)
+        .post('/api/admin/config')
+        .set('Authorization', `Bearer ${pat}`)
+        .send(patch);
+    return toolText(res);
+}
+
 describe('MCP tool bodies and route edges', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mdweb-mcp-cover-'));
     const posts = path.join(tmp, 'posts');
@@ -69,17 +84,14 @@ describe('MCP tool bodies and route edges', () => {
 
     afterAll(async () => {
         if (admin) {
-            await call(admin, 'update_config', {
-                patch: {
-                    postsDir: before.postsDir,
-                    themeDir: before.themeDir,
+            await setConfig(admin, {
                     currentTheme: before.currentTheme,
                     siteName: before.siteName,
                     security: before.security,
                     aiConfig: before.aiConfig
-                }
             });
         }
+        vi.unstubAllEnvs();
         fs.rmSync(tmp, { recursive: true, force: true });
     });
 
@@ -93,10 +105,14 @@ describe('MCP tool bodies and route edges', () => {
         admin = mintToken('admin', 'cover-admin', 'write').plaintext;
         writer = mintToken('writer', 'cover-writer', 'write').plaintext;
 
-        const moved = await call(admin, 'update_config', {
-            patch: { postsDir: posts, themeDir: themes, siteName: 'Coverage' }
-        });
-        expect(moved).toMatch(/Config saved/);
+        const cfgFile = path.join(tmp, 'config.json');
+        fs.writeFileSync(cfgFile, JSON.stringify({ ...before, postsDir: posts, themeDir: themes }));
+        vi.stubEnv('CONFIG_PATH', cfgFile);
+        const moved = await setConfig(admin, { siteName: 'Coverage' });
+        expect(moved).toMatch(/Configuration updated/);
+        expect(await setConfig(admin, { postsDir: '/etc' })).toMatch(/cannot be changed/);
+        expect(await call(admin, 'update_config', { patch: { siteName: 'Coverage' } })).toMatch(/Config saved/);
+        expect(await call(admin, 'update_config', { patch: { postsDir: '/etc' } })).toMatch(/cannot be changed/);
 
         expect(await call(admin, 'list_posts', {})).toMatch(/posts/);
         expect(await call(admin, 'list_posts', { q: 'needle', limit: 1, offset: 1 })).toMatch(/posts/);
@@ -165,27 +181,23 @@ describe('MCP tool bodies and route edges', () => {
         }
         expect(overflow).toMatch(/limit/i);
 
-        await call(admin, 'update_config', {
-            patch: {
-                aiConfig: { enabled: false, provider: 'ollama', baseUrl: '', apiKey: '', modelId: 'llama' },
-                security: { ...(before.security || {}), disableAI: true }
-            }
+        await setConfig(admin, {
+            aiConfig: { enabled: false, provider: 'ollama', baseUrl: '', apiKey: '', modelId: 'llama' },
+            security: { ...(before.security || {}), disableAI: true }
         });
         expect(await call(admin, 'ai_summarize', { content: 'hello' })).toMatch(/disabled|summary|fail|Error/i);
         expect(await call(admin, 'ai_enhance', { content: 'hello' })).toMatch(/disabled|enhanced|fail|Error/i);
         expect(await call(admin, 'ai_list_models', {})).toMatch(/disabled|models|fail|Error/i);
 
-        await call(admin, 'update_config', {
-            patch: {
-                aiConfig: {
-                    enabled: true,
-                    provider: 'ollama',
-                    baseUrl: 'http://127.0.0.1:9',
-                    apiKey: '',
-                    modelId: 'llama'
-                },
-                security: { ...(before.security || {}), disableAI: false, disableImages: false }
-            }
+        await setConfig(admin, {
+            aiConfig: {
+                enabled: true,
+                provider: 'ollama',
+                baseUrl: 'http://127.0.0.1:9',
+                apiKey: '',
+                modelId: 'llama'
+            },
+            security: { ...(before.security || {}), disableAI: false, disableImages: false }
         });
         const post = vi.spyOn(axios, 'post').mockResolvedValue({ data: { message: { content: ' summed ' } } } as never);
         const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { models: [{ name: 'llama' }] } } as never);
@@ -220,7 +232,7 @@ describe('MCP tool bodies and route edges', () => {
                 throw new Error('config boom');
             },
             setActive: () => undefined,
-            tokenScope: 'write'
+            tokenScopes: LEGACY_WRITE_SCOPES
         });
         const [clientT, serverT] = InMemoryTransport.createLinkedPair();
         await boom.connect(serverT);
@@ -256,7 +268,7 @@ describe('MCP tool bodies and route edges', () => {
             user: { username: 'ghost', role: 'ghost' as 'admin' },
             getActive: () => before,
             setActive: () => undefined,
-            tokenScope: 'write'
+            tokenScopes: LEGACY_WRITE_SCOPES
         });
         const [ct2, st2] = InMemoryTransport.createLinkedPair();
         await ghost.connect(st2);
@@ -297,6 +309,10 @@ describe('MCP tool bodies and route edges', () => {
             getActiveConfig: () => before,
             setActiveConfig: () => undefined,
             authenticate: (req, _res, next) => {
+                (req as { user?: { username: string; role: string } }).user = { username: 'ghost', role: 'ghost' };
+                next();
+            },
+            authenticateMcp: (req, _res, next) => {
                 (req as { user?: { username: string; role: string } }).user = { username: 'ghost', role: 'ghost' };
                 next();
             },

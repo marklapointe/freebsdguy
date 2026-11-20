@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import matter from 'gray-matter';
-import { getPosts, getPost, savePost } from '../server/lib/posts';
+import { getPosts, getPost, postStatus, readFrontMatter, savePost } from '../server/lib/posts';
 
 vi.mock('gray-matter', async () => {
     const actual = await vi.importActual('gray-matter') as any;
@@ -175,6 +175,9 @@ Paragraph.
         expect(posts.length).toBe(1);
         expect(posts[0].title).toContain('Error');
         expect(posts[0].author).toBe('system');
+        // A post that does not parse is not published (Track #2119).
+        expect(posts[0].status).toBe('draft');
+        expect(posts[0].status).not.toBe('published');
         // ensure subsequent calls still work via default mock (actual)
         mockMatter.mockImplementation((input: any, opts?: any) => actual.default(input, opts));
         Object.assign(mockMatter, actual);
@@ -191,7 +194,49 @@ Paragraph.
         expect(post?.title).toContain('Error');
         expect(post?.author).toBe('system');
         expect(post?.content).toMatch(/parsing error/i);
+        // A post that does not parse is not published (Track #2119).
+        expect(post?.status).toBe('draft');
+        expect(post?.status).not.toBe('published');
+        // The parser error itself never reaches a reader.
+        expect(post?.content).not.toContain('Mock parse error');
         mockMatter.mockImplementation((input: any, opts?: any) => actual.default(input, opts));
         Object.assign(mockMatter, actual);
+    });
+
+    it('readFrontMatter does not read a parse error as an empty front matter', () => {
+        // A missing post has no front matter, and no front matter means
+        // published. A front matter that does not parse must not look like a
+        // missing post (Track #2119).
+        const broken = path.join(tempDir, 'broken.md');
+        fs.writeFileSync(broken, '---\ntitle: [unterminated\n---\nsecret draft body\n');
+        expect(postStatus({})).toBe('published');
+        expect(() => readFrontMatter(tempDir, 'broken')).toThrow();
+        // A post that does not exist yet still has no front matter.
+        expect(readFrontMatter(tempDir, 'not-there')).toEqual({});
+    });
+
+    it('savePost refuses a post whose front matter does not parse', () => {
+        const broken = path.join(tempDir, 'broken.md');
+        const before = '---\ntitle: [unterminated\n---\nsecret draft body\n';
+        fs.writeFileSync(broken, before);
+
+        expect(() =>
+            savePost(tempDir, { slug: 'broken', title: 'Hijacked', content: 'new body' })
+        ).toThrow();
+        expect(fs.readFileSync(broken, 'utf8')).toBe(before);
+
+        // Not even an explicit published status may write over it.
+        expect(() =>
+            savePost(tempDir, {
+                slug: 'broken',
+                title: 'Hijacked',
+                content: 'new body',
+                status: 'published'
+            })
+        ).toThrow();
+        const after = fs.readFileSync(broken, 'utf8');
+        expect(after).toBe(before);
+        expect(after).not.toMatch(/status:\s*published/);
+        expect(getPost(tempDir, 'broken')?.status).not.toBe('published');
     });
 });

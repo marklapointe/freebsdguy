@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Plus, Pin } from 'lucide-react';
 import { MdPreview } from 'md-editor-rt';
+import { sanitizeMarkdownHtml } from '../lib/sanitize-md';
 import { api, getMdEditorTheme, getPublicConfig } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
 import { Post } from '../types';
@@ -114,7 +115,7 @@ export const Home = () => {
                             </Link>
                         </h2>
                         <div className="post-summary mb-4 prose-sm max-w-none">
-                            <MdPreview modelValue={post.summary || ''} theme={editorTheme} language="en-US" />
+                            <MdPreview sanitize={sanitizeMarkdownHtml} modelValue={post.summary || ''} theme={editorTheme} language="en-US" />
                         </div>
                         <Link to={`/post/${post.slug}`} className="card-more text-accent font-semibold hover:underline" aria-label={`Read more: ${post.title}`}>
                             Read more →

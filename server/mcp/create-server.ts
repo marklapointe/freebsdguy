@@ -13,10 +13,22 @@ import {
     saveUsers,
     saveConfig,
     sanitizeConfig,
+    loadConfig,
+    getConfigLoadStatus,
     findUserByUsername,
-    configPath
+    configPath,
+    preserveWebLoginFlag,
+    WEB_LOGIN_FLAG_IGNORED
 } from '../lib/config.ts';
-import { getPosts, getPost, savePost } from '../lib/posts.ts';
+import { getPosts, getPost } from '../lib/posts.ts';
+import {
+    maySeePost,
+    publishPostAsCaller,
+    savePostAsCaller,
+    unpublishPostAsCaller,
+    deletePostAsCaller,
+    type PostCaller
+} from '../lib/post-policy.ts';
 import {
     calculateMD5,
     loadManifest,
@@ -24,9 +36,10 @@ import {
     findDuplicate,
     withManifestLock
 } from '../lib/images.ts';
+import { validateMcpConfigPatch } from '../lib/config-patch.ts';
 import { PublicConfigBuilder } from '../lib/public-config.ts';
-import { resolvePostsDir, resolveImagesDir, isSafePath } from '../lib/safe-path.ts';
-import { listThemeCatalog, isValidThemeId, themeFilePath } from '../lib/themes.ts';
+import { resolvePostsDir, resolveImagesDir, isSafeExistingPath } from '../lib/safe-path.ts';
+import { listThemeCatalog, isValidThemeId, themeFilePath, selectThemeProblem } from '../lib/themes.ts';
 import { AIServiceFactory } from '../lib/ai-service.ts';
 import {
     mintToken,
@@ -35,18 +48,45 @@ import {
     revokeToken
 } from '../lib/api-tokens.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
-import { isReadAllowedMcpTool, mcpToolVisible, parseTokenScope, READ_ONLY_TOKEN_MESSAGE, type TokenScope } from '../lib/token-scope.ts';
+import {
+    mcpToolVisible,
+    parseTokenScopes,
+    requiredScopeForTool,
+    roleAllowsMcpTool,
+    scopeDeniedMessage,
+    tokenAllowsTool,
+    type TokenScopes
+} from '../lib/token-scope.ts';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { MDWEB_MCP_INSTRUCTIONS, MDWEB_MCP_PLAYBOOK } from './playbook.ts';
+import { writeAudit } from '../lib/audit-log.ts';
+import { argsSha256, type AuthVia } from '../lib/audit-context.ts';
 import sanitizeHtml from 'sanitize-html';
 
 export type McpUser = { username: string; role: Role };
+
+/** Who the caller is, for the audit rows of a tool call (Track #2119 U8). */
+export interface McpAuditContext {
+    /** The id of the personal access token, when the caller used one. */
+    tokenId?: string;
+    /** How the caller authenticated. */
+    via?: AuthVia;
+    /** The address the caller came from. */
+    ip?: string;
+    /** The site this server serves. */
+    site?: string;
+    /** The scopes the caller's token holds. */
+    scopes?: TokenScopes;
+}
 
 export interface McpServerDeps {
     user: McpUser;
     getActive: () => Config;
     setActive: (c: Config) => void;
     /** Omitted for JWT/session callers, who are not scope-limited. */
-    tokenScope?: TokenScope;
+    tokenScopes?: TokenScopes;
+    /** Who the caller is, for the audit rows. Omitted when there is no request. */
+    audit?: McpAuditContext;
 }
 
 function text(data: unknown) {
@@ -72,8 +112,44 @@ function requireAdmin(user: McpUser) {
     if (user.role !== 'admin') throw new Error('Forbidden: admin required');
 }
 
+/**
+ * The MCP SDK answers tools/list with every tool it has registered, so a tool
+ * this caller may not run would still be advertised. We keep the SDK's own tool
+ * definitions and drop the ones the caller may not see. The tools stay
+ * registered, so calling one answers with the scope it is missing instead of
+ * "unknown tool".
+ */
+function scopeToolList(server: McpServer, isVisible: (name: string) => boolean): void {
+    const low = server.server as unknown as {
+        _requestHandlers: Map<
+            string,
+            (request: unknown, extra: unknown) => Promise<{ tools: { name: string }[] }>
+        >;
+        removeRequestHandler: (method: string) => void;
+    };
+    const sdkList = low._requestHandlers.get('tools/list');
+    if (!sdkList) {
+        throw new Error('MCP SDK: tools/list handler missing; the tool list cannot be scoped');
+    }
+    low.removeRequestHandler('tools/list');
+    server.server.setRequestHandler(
+        ListToolsRequestSchema,
+        (async (request: unknown, extra: unknown) => {
+            const result = await sdkList(request, extra);
+            return { ...result, tools: result.tools.filter((tool) => isVisible(tool.name)) };
+        }) as never
+    );
+}
+
 function configDir() {
     return path.dirname(configPath());
+}
+
+/** True when a config patch mentions the config-file-only web-login kill switch. */
+function patchMentionsWebLogin(patch: Record<string, unknown>): boolean {
+    const sec = patch.security;
+    if (!sec || typeof sec !== 'object' || Array.isArray(sec)) return false;
+    return Object.prototype.hasOwnProperty.call(sec, 'disableWebLogin');
 }
 
 function postsDir(cfg: Config) {
@@ -85,28 +161,77 @@ function imagesDir(cfg: Config) {
 }
 
 export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
-    const { user, getActive, setActive, tokenScope } = deps;
+    const { user, getActive, setActive, tokenScopes } = deps;
+    /** The caller of every tool: who it is and what its token may do. */
+    const caller: PostCaller = {
+        username: user.username,
+        role: user.role,
+        scopes: tokenScopes,
+        tokenId: deps.audit?.tokenId,
+        via: deps.audit?.via,
+        ip: deps.audit?.ip,
+        site: deps.audit?.site
+    };
 
     const server = new McpServer(
         { name: 'mdweb', version: packageVersion() },
         { instructions: MDWEB_MCP_INSTRUCTIONS }
     );
 
+    /**
+     * The row of one tool call. It names the tool and the scopes, and the
+     * hash of the arguments — never the arguments themselves — and says how
+     * the call ended.
+     */
+    const writeMcpAudit = (
+        tool: string,
+        args: unknown,
+        outcome: 'accepted' | 'denied' | 'error',
+        reason?: string
+    ) => {
+        const audit = deps.audit;
+        if (!audit) return;
+        writeAudit({
+            event: 'mcp',
+            tool,
+            scopes: audit.scopes ? [...audit.scopes] : [],
+            argsSha256: argsSha256(args),
+            outcome,
+            ...(reason ? { reason } : {}),
+            ...(audit.tokenId ? { tokenId: audit.tokenId } : {}),
+            ...(audit.via ? { via: audit.via } : {}),
+            ...(audit.ip ? { ip: audit.ip } : {}),
+            ...(audit.site ? { site: audit.site } : {})
+        });
+    };
+
     const registerGuarded = (
         name: string,
         config: object,
         handler: (args: any, extra?: any) => any
     ) => {
-        // F9: tools/list shows only what this caller may run.
-        if (!mcpToolVisible(name, user.role, tokenScope)) return;
+        // A tool the role may not run is not registered at all, so calling it
+        // fails as an unknown tool. A tool the scope does not cover stays
+        // registered but is hidden from the tool list, so calling it names the
+        // scope it is missing.
+        if (!roleAllowsMcpTool(name, user.role)) return;
         server.registerTool(name, config as never, (async (args: any, extra: any) => {
-            // Defence in depth: since #1701 F9 read tokens never see these tools.
-            /* v8 ignore start */
-            if (tokenScope === 'read' && !isReadAllowedMcpTool(name)) {
-                return err(READ_ONLY_TOKEN_MESSAGE);
+            if (tokenScopes && !tokenAllowsTool(tokenScopes, name)) {
+                writeMcpAudit(name, args, 'denied', `scope:${requiredScopeForTool(name)}`);
+                return err(scopeDeniedMessage(requiredScopeForTool(name)));
             }
-            /* v8 ignore stop */
-            return handler(args, extra);
+            try {
+                const result = await handler(args, extra);
+                const failed =
+                    Boolean(result) &&
+                    typeof result === 'object' &&
+                    (result as { isError?: unknown }).isError === true;
+                writeMcpAudit(name, args, failed ? 'error' : 'accepted');
+                return result;
+            } catch (e: unknown) {
+                writeMcpAudit(name, args, 'error', 'exception');
+                throw e;
+            }
         }) as never);
     };
 
@@ -146,16 +271,25 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             inputSchema: {
                 q: z.string().optional().describe('Optional search query'),
                 limit: z.number().optional(),
-                offset: z.number().optional()
+                offset: z.number().optional(),
+                status: z
+                    .enum(['draft', 'published', 'all'])
+                    .optional()
+                    .describe('Only drafts, only published posts, or all (default)')
             }
         },
-        async ({ q, limit, offset }) => {
+        async ({ q, limit, offset, status }) => {
             try {
                 const cfg = getActive();
                 let posts = getPosts(postsDir(cfg), {
                     sortBy: (cfg.sortBy as 'date') || 'date',
                     sortOrder: (cfg.sortOrder as 'desc') || 'desc'
                 });
+                // A draft is private: only its author and the admins see it.
+                posts = posts.filter((p) => maySeePost(p, caller));
+                if (status && status !== 'all') {
+                    posts = posts.filter((p) => p.status === status);
+                }
                 if (q) {
                     const qq = q.toLowerCase();
                     posts = posts.filter(
@@ -184,12 +318,47 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             try {
                 const post = getPost(postsDir(getActive()), slug);
                 if (!post) return err('Post not found');
+                // A draft the caller may not see does not exist for them.
+                if (!maySeePost(post, caller)) return err('Post not found');
                 return text(post);
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));
             }
         }
     );
+
+    /**
+     * create_post and update_post are the same save: a slug that does not exist
+     * yet becomes a draft stamped with the caller's name, an existing post may
+     * only be saved by its author (or by an admin with the moderate scope) and
+     * keeps its author, its status and its other front-matter keys.
+     */
+    const savePostAs = async (args: any) => {
+        try {
+            requireWriter(user);
+            const slug = args.slug.trim();
+            if (!slug) return err('slug is required');
+            const dir = postsDir(getActive());
+            const postPath = path.join(dir, `${slug}.md`);
+            if (!isSafeExistingPath(dir, postPath)) return err('Forbidden slug');
+            const result = savePostAsCaller(
+                dir,
+                {
+                    slug,
+                    title: args.title,
+                    content: args.content,
+                    summary: args.summary,
+                    date: args.date,
+                    pinned: args.pinned
+                },
+                caller
+            );
+            if (!result.ok) return err(result.error);
+            return text({ message: 'Post saved', slug });
+        } catch (e: unknown) {
+            return err(e instanceof Error ? e.message : String(e));
+        }
+    };
 
     registerGuarded(
         'create_post',
@@ -204,28 +373,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 pinned: z.boolean().optional()
             }
         },
-        async (args) => {
-            try {
-                requireWriter(user);
-                const slug = args.slug.trim();
-                if (!slug) return err('slug is required');
-                const dir = postsDir(getActive());
-                const postPath = path.join(dir, `${slug}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden slug');
-                savePost(dir, {
-                    slug,
-                    title: args.title,
-                    content: args.content,
-                    summary: args.summary || '',
-                    date: args.date,
-                    pinned: args.pinned,
-                    author: user.username
-                });
-                return text({ message: 'Post saved', slug });
-            } catch (e: unknown) {
-                return err(e instanceof Error ? e.message : String(e));
-            }
-        }
+        async (args) => savePostAs(args)
     );
 
     registerGuarded(
@@ -241,25 +389,49 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 pinned: z.boolean().optional()
             }
         },
-        async (args) => {
-            // Same implementation as create_post
+        async (args) => savePostAs(args)
+    );
+
+    registerGuarded(
+        'publish_post',
+        {
+            description: 'Publish a post (draft becomes published)',
+            inputSchema: { slug: z.string() }
+        },
+        async ({ slug }) => {
             try {
                 requireWriter(user);
-                const slug = args.slug.trim();
-                if (!slug) return err('slug is required');
+                const clean = slug.trim();
+                if (!clean) return err('slug is required');
                 const dir = postsDir(getActive());
-                const postPath = path.join(dir, `${slug}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden slug');
-                savePost(dir, {
-                    slug,
-                    title: args.title,
-                    content: args.content,
-                    summary: args.summary || '',
-                    date: args.date,
-                    pinned: args.pinned,
-                    author: user.username
-                });
-                return text({ message: 'Post saved', slug });
+                const postPath = path.join(dir, `${clean}.md`);
+                if (!isSafeExistingPath(dir, postPath)) return err('Forbidden slug');
+                const result = publishPostAsCaller(dir, clean, caller);
+                if (!result.ok) return err(result.error);
+                return text({ message: 'Post published', slug: clean });
+            } catch (e: unknown) {
+                return err(e instanceof Error ? e.message : String(e));
+            }
+        }
+    );
+
+    registerGuarded(
+        'unpublish_post',
+        {
+            description: 'Unpublish a post (published becomes draft). Admin only.',
+            inputSchema: { slug: z.string() }
+        },
+        async ({ slug }) => {
+            try {
+                requireAdmin(user);
+                const clean = slug.trim();
+                if (!clean) return err('slug is required');
+                const dir = postsDir(getActive());
+                const postPath = path.join(dir, `${clean}.md`);
+                if (!isSafeExistingPath(dir, postPath)) return err('Forbidden slug');
+                const result = unpublishPostAsCaller(dir, clean, caller);
+                if (!result.ok) return err(result.error);
+                return text({ message: 'Post unpublished', slug: clean });
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));
             }
@@ -277,9 +449,9 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 requireWriter(user);
                 const dir = postsDir(getActive());
                 const postPath = path.join(dir, `${slug}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden');
-                if (!fs.existsSync(postPath)) return err('Post not found');
-                fs.unlinkSync(postPath);
+                if (!isSafeExistingPath(dir, postPath)) return err('Forbidden');
+                const result = deletePostAsCaller(dir, slug, caller);
+                if (!result.ok) return err(result.error);
                 return text({ message: 'Post deleted', slug });
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));
@@ -380,7 +552,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 requireWriter(user);
                 const dir = imagesDir(getActive());
                 const filePath = path.join(dir, filename);
-                if (!isSafePath(dir, filePath)) return err('Forbidden');
+                if (!isSafeExistingPath(dir, filePath)) return err('Forbidden');
                 if (!fs.existsSync(filePath)) return err('Image not found');
                 fs.unlinkSync(filePath);
                 await withManifestLock(dir, async () => {
@@ -413,13 +585,56 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
     registerGuarded(
         'update_config',
         {
-            description: 'Merge and save site config (admin)',
+            description:
+                'Merge and save site config (admin). security.disableWebLogin is config-file only and is ignored here.',
             inputSchema: { patch: z.record(z.string(), z.unknown()) }
         },
         async ({ patch }) => {
             try {
                 requireAdmin(user);
-                const { config, warnings } = sanitizeConfig({ ...getActive(), ...patch });
+                // Allow-list first (P0 E1): an unknown, forbidden or prototype key
+                // is an error and nothing is written.
+                const check = validateMcpConfigPatch(patch);
+                if (!check.ok) return err(check.error);
+                // Merge over what is on disk, not over the in-memory copy: a save
+                // must keep every key the file holds (service.port, keys a newer
+                // version wrote). The in-memory copy is the fallback for a file
+                // that cannot be read.
+                const active = getActive();
+                const disk = loadConfig();
+                const current = getConfigLoadStatus().usedDefaults ? active : disk;
+                if ((patch as Record<string, unknown>).currentTheme !== undefined) {
+                    // Checked against the themeDir the save will actually keep (the on-disk one).
+                    const themeProblem = selectThemeProblem(
+                        configDir(),
+                        current,
+                        (patch as Record<string, unknown>).currentTheme
+                    );
+                    if (themeProblem) return err(`${themeProblem}. No changes were saved.`);
+                }
+                const merged: Record<string, unknown> = { ...current };
+                for (const [key, value] of Object.entries(patch)) {
+                    // security is never merged here: the only security key a patch may carry
+                    // is the ignored disableWebLogin flag (see validateMcpConfigPatch).
+                    if (key === 'security') continue;
+                    const prev = (current as unknown as Record<string, unknown>)[key];
+                    merged[key] =
+                        (key === 'appearance' || key === 'footer') && prev && typeof prev === 'object'
+                            ? { ...(prev as Record<string, unknown>), ...(value as Record<string, unknown>) }
+                            : value;
+                }
+                const mergedSecurity =
+                    merged.security && typeof merged.security === 'object' && !Array.isArray(merged.security)
+                        ? { ...(merged.security as Record<string, unknown>) }
+                        : {};
+                // The web-login flag is config-file only: the file wins, the in-memory
+                // copy is the fallback for a file that cannot be read.
+                mergedSecurity.disableWebLogin = preserveWebLoginFlag(current);
+                merged.security = mergedSecurity;
+                const { config, warnings } = sanitizeConfig(merged);
+                if (patchMentionsWebLogin(patch)) {
+                    warnings.push(WEB_LOGIN_FLAG_IGNORED);
+                }
                 saveConfig(config);
                 setActive(config);
                 return text({ message: 'Config saved', warnings });
@@ -452,7 +667,9 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         async ({ themeId }) => {
             try {
                 requireAdmin(user);
-                if (!isValidThemeId(themeId)) return err('Invalid theme id');
+                // A theme file that is a symlink is not a theme (P0 C1).
+                const themeProblem = selectThemeProblem(configDir(), getActive(), themeId);
+                if (themeProblem) return err(themeProblem);
                 const cfg = { ...getActive(), currentTheme: themeId };
                 saveConfig(cfg);
                 setActive(cfg);
@@ -596,14 +813,20 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             inputSchema: {
                 label: z.string().optional(),
                 username: z.string().optional(),
-                scope: z.enum(['read', 'write']).optional()
+                scope: z.union([z.string(), z.array(z.string())]).optional()
             }
         },
         async ({ label, username, scope }) => {
             try {
+                const scopes = parseTokenScopes(scope);
+                // A token may never mint a token that is stronger than itself.
+                if (tokenScopes) {
+                    const missing = scopes.find((s) => !tokenScopes.includes(s));
+                    if (missing) return err(scopeDeniedMessage(missing));
+                }
                 const target = user.role === 'admin' && username ? username : user.username;
                 if (!findUserByUsername(target)) return err('User not found');
-                const { plaintext, record } = mintToken(target, label || '', parseTokenScope(scope));
+                const { plaintext, record } = mintToken(target, label || '', scopes);
                 return text({
                     token: plaintext,
                     id: record.id,
@@ -611,6 +834,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                     username: record.username,
                     label: record.label,
                     scope: record.scope,
+                    scopes: record.scopes,
                     createdAt: record.createdAt,
                     note: 'Store this token securely; it will not be shown again.'
                 });
@@ -710,6 +934,9 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             }
         }
     );
+
+    // F9: tools/list shows only what this caller may run.
+    scopeToolList(server, (name) => mcpToolVisible(name, user.role, tokenScopes));
 
     return server;
 }

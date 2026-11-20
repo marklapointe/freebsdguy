@@ -22,7 +22,10 @@ import {
     getConfigLoadStatus,
     sanitizeConfig,
     resolveAuthMode,
-    findUserByUsername
+    findUserByUsername,
+    preserveWebLoginFlag,
+    webLoginDisabled,
+    WEB_LOGIN_FLAG_IGNORED
 } from './lib/config.ts';
 import {
     parseCookies,
@@ -31,12 +34,22 @@ import {
     FileSessionStore,
     safeDecode
 } from './lib/session-store.ts';
-import { getPosts, getPost, savePost, findPostByAlias } from './lib/posts.ts';
+import { getPosts, getPost, findPostByAlias } from './lib/posts.ts';
+import {
+    NOT_ALLOWED_TO_DELETE,
+    NOT_YOUR_POST,
+    POST_NOT_FOUND,
+    deletePostAsCaller,
+    savePostAsCaller,
+    type PostCaller
+} from './lib/post-policy.ts';
+import { requestAuditFields, resolveAuditSite } from './lib/audit-context.ts';
 import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
-import { isSafePath, resolveConfiguredPath, resolvePostsDir, resolveImagesDir } from './lib/safe-path.ts';
+import { validateRestConfigBody } from './lib/config-patch.ts';
+import { isSafePath, isSafeExistingPath, resolveConfiguredPath, resolvePostsDir, resolveImagesDir } from './lib/safe-path.ts';
 import { isAllowedRole, AuthenticatedRequest } from './middleware/auth.ts';
 import type { AppContext } from './lib/app-context.ts';
 import {
@@ -46,7 +59,8 @@ import {
     revokeToken,
     revokeTokensForUser
 } from './lib/api-tokens.ts';
-import { parseTokenScope } from './lib/token-scope.ts';
+import { parseTokenScopes, scopeDeniedMessage, type TokenScopes } from './lib/token-scope.ts';
+import { passwordMatches as defaultPasswordMatches, DUMMY_PASSWORD_HASH } from './lib/password.ts';
 import { writeAudit } from './lib/audit-log.ts';
 import { DEFAULT_ADMIN_PASSWORD } from './lib/default-credentials.ts';
 import { isDefaultAdminCredential } from './lib/setup-admin.ts';
@@ -57,7 +71,8 @@ import {
     listThemeIds,
     loadThemeColors,
     loadThemeColorsForMode,
-    themeFilePath
+    themeFilePath,
+    selectThemeProblem
 } from './lib/themes.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -119,8 +134,13 @@ export function registerRoutes(app: Express, ctx: AppContext): void {
     const getActive = ctx.getActiveConfig;
     const setActive = ctx.setActiveConfig;
     const sessionStore = ctx.sessionStore || new FileSessionStore();
+    /** The password compare; a test may inject a spy over it. */
+    const passwordMatches = ctx.passwordMatches || defaultPasswordMatches;
     /** Theme dir from the active config (admin saves call setActive, so this stays fresh). */
     const themeDirOf = () => themeDirForConfig(getActive());
+    /** Who acted, how, and from where: the fields every authenticated audit row carries. */
+    const auditFieldsOf = (req: AuthenticatedRequest) =>
+        requestAuditFields(req, resolveAuditSite(getActive()));
 
     // MCP Streamable HTTP (auth required) — before SPA catch-all
     registerMcpRoutes(app, ctx);
@@ -163,19 +183,17 @@ export function registerRoutes(app: Express, ctx: AppContext): void {
 
 // Login
 app.post('/api/login', async (req: Request, res: Response) => {
+    // Config-file-only kill switch: turns POST /api/login off (404). Credentials are never
+    // read and no password hash is compared; PAT/MCP auth keeps working. Fail closed: the
+    // file or the in-memory copy disabling it is enough.
+    if (webLoginDisabled(getActive())) {
+        writeAudit({ event: 'login', outcome: 'disabled' });
+        return res.status(404).json({ message: 'Not Found' });
+    }
     const { username, password } = req.body;
     const usersConfig = loadUsers();
 
     console.log(`[AUTH] Login attempt for user: ${username}`);
-
-    const passwordMatches = async (plain: unknown, hash: string | undefined): Promise<boolean> => {
-        if (!hash || typeof plain !== 'string' || !plain) return false;
-        try {
-            return await bcrypt.compare(plain, hash);
-        } catch {
-            return false;
-        }
-    };
 
     const auditName = typeof username === 'string' ? username.slice(0, 120) : undefined;
 
@@ -202,14 +220,28 @@ app.post('/api/login', async (req: Request, res: Response) => {
 
     // Check other users
     const user = usersConfig.users.find(u => u.username === username);
-    if (user && (await passwordMatches(password, user.passwordHash))) {
-        if (await rejectDefault(user.passwordHash)) {
-            writeAudit({ event: 'login', outcome: 'rejected', username: auditName });
-            return res.status(403).json({ message: 'Default credentials are disabled' });
+    if (user) {
+        // An MCP-only agent account has no password and may never log in on the web.
+        // The answer is the one a wrong password gets, so nothing tells the caller
+        // that the account exists at all.
+        if (user.mcpOnly === true) {
+            // The same work a wrong password costs: a bcrypt compare against a
+            // fixed dummy hash. A refusal that returns faster than a wrong
+            // password would tell the caller that the account exists.
+            await passwordMatches(password, DUMMY_PASSWORD_HASH);
+            console.warn(`[AUTH] Login refused for MCP-only account: ${username}`);
+            writeAudit({ event: 'login', outcome: 'rejected', reason: 'mcp-only', username: auditName });
+            return res.status(401).json({ message: 'Invalid credentials' });
         }
-        console.log(`[AUTH] User login successful: ${username}`);
-        writeAudit({ event: 'login', outcome: 'success', username: auditName });
-        return issueAuthResponse(res, { username: user.username, role: user.role });
+        if (await passwordMatches(password, user.passwordHash)) {
+            if (await rejectDefault(user.passwordHash)) {
+                writeAudit({ event: 'login', outcome: 'rejected', username: auditName });
+                return res.status(403).json({ message: 'Default credentials are disabled' });
+            }
+            console.log(`[AUTH] User login successful: ${username}`);
+            writeAudit({ event: 'login', outcome: 'success', username: auditName });
+            return issueAuthResponse(res, { username: user.username, role: user.role });
+        }
     }
 
     console.warn(`[AUTH] Login failed for user: ${username}`);
@@ -273,7 +305,7 @@ app.post('/api/admin/users', authenticate, requireAdmin, async (req: Authenticat
     saveUsers(usersConfig);
 
     console.log(`[INFO] New user created: ${cleanUsername} with role ${cleanRole}`);
-    writeAudit({ event: 'content', action: 'create', resource: 'user', id: cleanUsername, username: req.user?.username });
+    writeAudit({ event: 'content', action: 'create', resource: 'user', id: cleanUsername, username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: 'User created' });
 });
 
@@ -297,7 +329,7 @@ app.delete('/api/admin/users/:username', authenticate, requireAdmin, (req: Authe
     sessionStore.destroyForUser(String(username));
     revokeTokensForUser(String(username));
     console.log(`[INFO] User deleted: ${username}`);
-    writeAudit({ event: 'content', action: 'delete', resource: 'user', id: String(username), username: req.user?.username });
+    writeAudit({ event: 'content', action: 'delete', resource: 'user', id: String(username), username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: 'User deleted' });
 });
 
@@ -310,15 +342,23 @@ app.get('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) 
 app.post('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response) => {
     const username = req.user?.username as string;
     const label = typeof req.body?.label === 'string' ? req.body.label : '';
-    let scope: ReturnType<typeof parseTokenScope>;
+    let scopes: TokenScopes;
     try {
-        scope = parseTokenScope(req.body?.scope);
+        scopes = parseTokenScopes(req.body?.scope);
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Invalid token scope';
         return res.status(400).json({ message: msg });
     }
+    // A token may never mint a token that is stronger than itself.
+    if (req.tokenScopes) {
+        const callerScopes = req.tokenScopes;
+        const missing = scopes.find((s) => !callerScopes.includes(s));
+        if (missing) {
+            return res.status(403).json({ message: scopeDeniedMessage(missing) });
+        }
+    }
     try {
-        const { plaintext, record } = mintToken(username, label, scope);
+        const { plaintext, record } = mintToken(username, label, scopes);
         writeAudit({ event: 'token', action: 'mint', username, tokenId: record.id, scope: record.scope });
         res.status(201).json({
             token: plaintext,
@@ -327,6 +367,7 @@ app.post('/api/tokens', authenticate, (req: AuthenticatedRequest, res: Response)
             label: record.label,
             username: record.username,
             scope: record.scope,
+            scopes: record.scopes,
             createdAt: record.createdAt
         });
     } catch (e: unknown) {
@@ -360,15 +401,23 @@ app.post('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedReq
     if (!findUserByUsername(username)) {
         return res.status(404).json({ message: 'User not found' });
     }
-    let scope: ReturnType<typeof parseTokenScope>;
+    let scopes: TokenScopes;
     try {
-        scope = parseTokenScope(req.body?.scope);
+        scopes = parseTokenScopes(req.body?.scope);
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Invalid token scope';
         return res.status(400).json({ message: msg });
     }
+    // A token may never mint a token that is stronger than itself.
+    if (req.tokenScopes) {
+        const callerScopes = req.tokenScopes;
+        const missing = scopes.find((s) => !callerScopes.includes(s));
+        if (missing) {
+            return res.status(403).json({ message: scopeDeniedMessage(missing) });
+        }
+    }
     try {
-        const { plaintext, record } = mintToken(username, label, scope);
+        const { plaintext, record } = mintToken(username, label, scopes);
         writeAudit({ event: 'token', action: 'mint', username, tokenId: record.id, scope: record.scope });
         res.status(201).json({
             token: plaintext,
@@ -377,6 +426,7 @@ app.post('/api/admin/tokens', authenticate, requireAdmin, (req: AuthenticatedReq
             label: record.label,
             username: record.username,
             scope: record.scope,
+            scopes: record.scopes,
             createdAt: record.createdAt
         });
     } catch (e: unknown) {
@@ -396,7 +446,7 @@ app.get('/api/posts', (req: Request, res: Response) => {
     const posts = getPosts(postsDir, {
         sortBy: (config.sortBy as 'title' | 'date' | 'author') || 'date',
         sortOrder: (config.sortOrder as 'asc' | 'desc') || 'desc'
-    });
+    }).filter((p) => p.status !== 'draft'); // a draft is private, never public
 
     // Always return paged shape so clients can honor config.pagination
     const defaultLimit = config.pagination || 10;
@@ -546,7 +596,12 @@ app.get('/api/posts/:slug', (req: Request, res: Response) => {
     }
 
     const post = getPost(postsDir, slug);
-    
+
+    if (post && post.status === 'draft') {
+        // A draft is private: a public reader must not learn that it exists.
+        return res.status(404).json({ message: 'Post not found' });
+    }
+
     if (!post) {
         const to = findPostByAlias(postsDir, slug);
         if (to) {
@@ -568,25 +623,40 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
     }
     const config = getActive();
     const postsDir = postsDirOf(config);
-    
+
     // Security check: prevent directory traversal
     const postPath = path.join(postsDir, `${slug}.md`);
-    if (!isSafePath(postsDir, postPath)) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+    if (!isSafeExistingPath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal or symlink for slug: ${slug}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
 
-    savePost(postsDir, {
-        slug,
-        title,
-        content,
-        summary,
-        date,
-        pinned,
-        author: req.user.username
-    });
+    const caller: PostCaller = {
+        username: req.user.username,
+        role: req.user.role,
+        // A JWT or session caller is not scope-limited; a PAT carries its scopes.
+        scopes: req.tokenScopes,
+        ...auditFieldsOf(req)
+    };
+    const result = savePostAsCaller(
+        postsDir,
+        { slug, title, content, summary, date, pinned },
+        caller
+    );
+    if (!result.ok) {
+        // Not the caller's post: the save is refused, the post is untouched.
+        const status = result.error === NOT_YOUR_POST ? 403 : 400;
+        return res.status(status).json({ message: result.error });
+    }
 
-    writeAudit({ event: 'content', action: 'update', resource: 'post', id: slug, username: req.user?.username });
+    writeAudit({
+        event: 'content',
+        action: result.created ? 'create' : 'update',
+        resource: 'post',
+        id: slug,
+        username: req.user?.username,
+        ...auditFieldsOf(req)
+    });
     res.json({ message: 'Post saved' });
 });
 
@@ -713,10 +783,12 @@ if (fs.existsSync(distPath)) {
                 const slug = pathMatch[1];
                 const postsDir = postsDirOf(activeConfig);
                 const gp = getPost(postsDir, slug);
-                if (gp) {
+                if (gp && gp.status !== 'draft') {
                     post = gp;
                     isPost = true;
-                } else {
+                } else if (!gp) {
+                    // An old link may still point here through an alias. A draft
+                    // is not in the alias map, so it never leads a visitor to it.
                     const to = findPostByAlias(postsDir, slug);
                     if (to) {
                         const q = req.originalUrl.indexOf('?');
@@ -724,6 +796,8 @@ if (fs.existsSync(distPath)) {
                         return;
                     }
                 }
+                // A draft is private: the page is served without its post, so no
+                // title, summary or image of the draft reaches a reader.
             }
 
             const args = {
@@ -820,7 +894,7 @@ app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: Authenticated
 
     saveConfig(config);
     setActive(config);
-    writeAudit({ event: 'content', action: 'update', resource: 'ai-config', username: req.user?.username });
+    writeAudit({ event: 'content', action: 'update', resource: 'ai-config', username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: 'AI Configuration updated' });
 });
 
@@ -831,7 +905,7 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, async (re
     const imagesDir = imagesDirOf(config);
     const filePath = path.join(imagesDir, filename);
 
-    if (!isSafePath(imagesDir, filePath)) {
+    if (!isSafeExistingPath(imagesDir, filePath)) {
         console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
@@ -850,7 +924,7 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, async (re
             });
 
             console.log(`[INFO] Image deleted: ${filename}`);
-            writeAudit({ event: 'content', action: 'delete', resource: 'image', id: String(req.params.filename || ''), username: req.user?.username });
+            writeAudit({ event: 'content', action: 'delete', resource: 'image', id: String(req.params.filename || ''), username: req.user?.username, ...auditFieldsOf(req) });
             res.json({ message: 'Image deleted' });
         } catch (error: any) {
             console.error(`[ERROR] Failed to delete image ${filename}:`, error.message);
@@ -876,7 +950,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
 
     for (const filename of filenames) {
         const filePath = path.join(imagesDir, filename);
-        if (!isSafePath(imagesDir, filePath)) {
+        if (!isSafeExistingPath(imagesDir, filePath)) {
             errors.push(`${filename}: Invalid path`);
             continue;
         }
@@ -897,7 +971,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
     }
 
     saveManifest(imagesDir, manifest);
-    writeAudit({ event: 'content', action: 'delete', resource: 'image', username: req.user?.username });
+    writeAudit({ event: 'content', action: 'delete', resource: 'image', username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: `Deleted ${deletedCount} images`, deletedCount, errors });
     });
 });
@@ -907,14 +981,23 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
 // then run the single shared validator (sanitizeConfig) so route and loader never drift.
 app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     try {
+        // P0 E1: an unknown top-level key or a prototype-pollution key is a 400,
+        // and config.json is not touched.
+        const bodyCheck = validateRestConfigBody(req.body);
+        if (!bodyCheck.ok) return res.status(400).json({ message: bodyCheck.error });
         const current = loadConfig();
         const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
         const isObj = (v: unknown): v is Record<string, unknown> =>
             !!v && typeof v === 'object' && !Array.isArray(v);
         const strip = (v: unknown): string | undefined =>
             typeof v === 'string' ? sanitizeHtml(v, { allowedTags: [], allowedAttributes: {} }) : undefined;
-        const cleanPath = (v: unknown): string | undefined =>
-            typeof v === 'string' && v.trim() && !v.includes('\0') ? v.trim() : undefined;
+        if (typeof b.currentTheme === 'string') {
+            // A theme file that is a symlink, or lies behind one, is not a theme (P0 C1).
+            // Checked against the configured themeDir (file-only; this route cannot change it).
+            const nextThemeDir = current.themeDir;
+            const themeProblem = selectThemeProblem(configDirOf(), { ...current, themeDir: nextThemeDir }, b.currentTheme);
+            if (themeProblem) return res.status(400).json({ message: `${themeProblem}. No changes were saved.` });
+        }
 
         const patch: Record<string, unknown> = {};
         if (b.siteName) patch.siteName = strip(b.siteName);
@@ -923,10 +1006,6 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         for (const k of ['pagination', 'sortBy', 'sortOrder', 'searchPlacement'] as const) {
             if (b[k] !== undefined) patch[k] = b[k];
         }
-        const postsDir = cleanPath(b.postsDir);
-        if (postsDir) patch.postsDir = postsDir;
-        const themeDir = cleanPath(b.themeDir);
-        if (themeDir) patch.themeDir = themeDir;
 
         if (isObj(b.footer)) {
             patch.footer = {
@@ -937,9 +1016,11 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
             };
         }
         if (isObj(b.appearance)) patch.appearance = { ...(current.appearance || {}), ...b.appearance };
+        let mentionsWebLogin = false;
         if (isObj(b.security)) {
             // Toggles are a full replacement (omitted → false); connection settings keep prev
             const prev = current.security || {};
+            mentionsWebLogin = Object.prototype.hasOwnProperty.call(b.security, 'disableWebLogin');
             patch.security = {
                 authMode: b.security.authMode ?? prev.authMode,
                 sessionTtlSeconds: b.security.sessionTtlSeconds ?? prev.sessionTtlSeconds,
@@ -953,7 +1034,8 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
                 loginRateLimitMax: b.security.loginRateLimitMax ?? prev.loginRateLimitMax,
                 mcpRateLimitWindow: b.security.mcpRateLimitWindow ?? prev.mcpRateLimitWindow,
                 mcpRateLimitMax: b.security.mcpRateLimitMax ?? prev.mcpRateLimitMax,
-                corsOrigins: b.security.corsOrigins ?? prev.corsOrigins,
+                // Never from the request body (validated away); keep what is on disk.
+                corsOrigins: prev.corsOrigins,
                 trustProxy: b.security.trustProxy ?? prev.trustProxy
             };
         }
@@ -972,13 +1054,17 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         }
 
         const { config, warnings } = sanitizeConfig({ ...current, ...patch });
+        // The web-login flag is config-file only: every save writes back what the file
+        // says, and falls back to the in-memory copy when the file cannot be read.
+        config.security = { ...config.security, disableWebLogin: preserveWebLoginFlag(getActive()) };
+        if (mentionsWebLogin) warnings.push(WEB_LOGIN_FLAG_IGNORED);
         if (warnings.length) console.warn('[WARN] POST /api/admin/config:', warnings.join('; '));
 
         saveConfig(config);
         setActive(config);
 
-        writeAudit({ event: 'content', action: 'update', resource: 'config', username: req.user?.username });
-        res.json({ message: 'Configuration updated', currentTheme: config.currentTheme });
+        writeAudit({ event: 'content', action: 'update', resource: 'config', username: req.user?.username, ...auditFieldsOf(req) });
+        res.json({ message: 'Configuration updated', currentTheme: config.currentTheme, warnings });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to save configuration';
         console.error('[ERROR] POST /api/admin/config:', msg);
@@ -1023,29 +1109,49 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
     }
 
     fs.writeFileSync(themePath, JSON.stringify(sanitizedColors, null, 2));
-    writeAudit({ event: 'content', action: 'update', resource: 'theme', id: name, username: req.user?.username });
+    writeAudit({ event: 'content', action: 'update', resource: 'theme', id: name, username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: `Theme ${name} saved` });
 });
 
 // Admin: Delete post
 app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
-    const slug = req.params.slug;
+    const slug = String(req.params.slug);
     const config = getActive();
     const postsDir = postsDirOf(config);
     const postPath = path.join(postsDir, `${slug}.md`);
 
-    if (!isSafePath(postsDir, postPath)) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+    if (!isSafeExistingPath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal or symlink for slug: ${slug}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
 
-    if (fs.existsSync(postPath)) {
-        fs.unlinkSync(postPath);
-        writeAudit({ event: 'content', action: 'delete', resource: 'post', id: String(slug), username: req.user?.username });
-        res.json({ message: 'Post deleted' });
-    } else {
-        res.status(404).json({ message: 'Post not found' });
+    // deletePostAsCaller writes the post row with the bytes that were there.
+    const caller: PostCaller = {
+        username: req.user.username,
+        role: req.user.role,
+        scopes: req.tokenScopes,
+        ...auditFieldsOf(req)
+    };
+    const result = deletePostAsCaller(postsDir, slug, caller);
+    if (!result.ok) {
+        if (result.error === POST_NOT_FOUND) {
+            return res.status(404).json({ message: result.error });
+        }
+        if (result.error === NOT_ALLOWED_TO_DELETE) {
+            return res.status(403).json({ message: result.error });
+        }
+        // A parse-error refusal (or any other policy refusal) is a bad request.
+        return res.status(400).json({ message: result.error });
     }
+    writeAudit({
+        event: 'content',
+        action: 'delete',
+        resource: 'post',
+        id: String(slug),
+        username: req.user?.username,
+        ...auditFieldsOf(req)
+    });
+    res.json({ message: 'Post deleted' });
 });
 
 // Image upload (with WebP conversion and renaming)
@@ -1142,7 +1248,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
         saveManifest(imagesDir, manifest);
 
         console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
-        writeAudit({ event: 'content', action: 'create', resource: 'image', id: newFilename, username: req.user?.username });
+        writeAudit({ event: 'content', action: 'create', resource: 'image', id: newFilename, username: req.user?.username, ...auditFieldsOf(req) });
         res.json({ filename: newFilename, url: `/api/getimage?fileName=${newFilename}` });
       });
     } catch (error) {
@@ -1247,7 +1353,7 @@ app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, r
         saveConfig(config);
         setActive(config);
         console.log(`[INFO] Admin set site theme to: ${currentTheme}`);
-        writeAudit({ event: 'content', action: 'update', resource: 'site-theme', id: String(currentTheme), username: req.user?.username });
+        writeAudit({ event: 'content', action: 'update', resource: 'site-theme', id: String(currentTheme), username: req.user?.username, ...auditFieldsOf(req) });
         res.json({ message: 'Site theme updated', currentTheme });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to set theme';

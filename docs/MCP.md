@@ -20,15 +20,29 @@ REST equivalents: `POST /api/tokens`, `POST /api/admin/tokens`, `GET /api/tokens
 
 Plaintext is returned only at mint. Disk stores SHA-256 hashes in `tokens.json` next to `users.json` (`CONFIG_DIR` / `/usr/local/etc/mdweb/tokens.json` on FreeBSD packages), plus a `scope` of `read` or `write`.
 
-Mint from the CLI (scope is required):
+Mint from the CLI (scope is required). `npm run` prints its own banner lines on stdout, and those lines would land in the token file, so use the silent form:
 
 ```sh
-npm run mint-token -- --username admin --label cursor --scope read
+npm run --silent mint-token -- --username admin --label cursor --scope read
+# the direct form prints no banner at all:
+npx tsx server/scripts/mint-token.ts --username admin --label cursor --scope read
 ```
 
 New tokens default to **read**. Pass `--scope write` (or choose write in the admin UI) to mint a token that can change the site. A record without an explicit `"scope": "write"` is read.
 
 A read token may call only `get_playbook`, `health`, `list_posts`, `get_post`, `list_images`, and `list_themes`. Every other tool — including `list_users`, `list_tokens`, `get_config`, `ai_list_models`, and any tool added later — is refused. HTTP create, edit, and delete routes also return 403.
+
+## Agent accounts (no password)
+
+An AI agent account has **no password** and can never sign in on the web: it exists for one personal access token. Create it from the CLI:
+
+```sh
+npm run --silent create-agent-user -- --username ampere-mcp --scope read,content:write
+# the direct form prints no banner at all:
+npx tsx server/scripts/create-agent-user.ts --username ampere-mcp --scope read,content:write
+```
+
+The token is printed on stdout and nothing else, and only when stdout is a pipe, so it can go straight into a secret store. The CLI refuses to run when `users.json` is missing or broken: it never creates a default admin and never quarantines the file.
 
 ## Cursor / HTTP client config
 

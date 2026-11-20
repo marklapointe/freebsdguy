@@ -135,7 +135,8 @@ describe('Theme Update with Admin Token', () => {
             .set('Authorization', `Bearer invalid_token`)
             .send({ currentTheme: 'dark' });
 
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
+        expect(res.headers['www-authenticate']).toMatch(/^Bearer/);
     });
 });
 

@@ -742,6 +742,9 @@ describe('middleware auth default session store factory', () => {
         const auth = g.authenticate();
         const res: any = {
             statusCode: 200,
+            set() {
+                return this;
+            },
             status(c: number) {
                 this.statusCode = c;
                 return this;
@@ -754,7 +757,7 @@ describe('middleware auth default session store factory', () => {
         // valid-looking sid that won't exist — still hits getSessionStore()
         const sid = 'a'.repeat(64);
         auth({ headers: { cookie: `mdweb.sid=${sid}` } } as any, res, vi.fn());
-        expect(res.statusCode).toBe(403);
+        expect(res.statusCode).toBe(401);
     });
 });
 
@@ -819,14 +822,12 @@ describe('register-routes remaining coverage', () => {
         expect(badRole.status).toBe(400);
     });
 
-    it('admin config footer, appearance, paths, siteLogo, aiConfig keep key', async () => {
+    it('admin config footer, appearance, siteLogo, aiConfig keep key', async () => {
         const res = await request(app)
             .post('/api/admin/config')
             .set('Authorization', `Bearer ${token}`)
             .send({
                 siteLogo: 'logo2.webp',
-                postsDir: './posts',
-                themeDir: './themes',
                 footer: {
                     show: true,
                     copyrightText: '© {year}',
@@ -1684,19 +1685,18 @@ describe('register-routes error paths', () => {
         expect([200, 409, 500, 503, 403]).toContain(resName.status);
     });
 
-    it('admin theme save mkdirs missing themeDir', async () => {
-        const config = loadConfig();
-        const configDir = path.dirname(configPath());
-        // Isolated dir under CONFIG_DIR — never write incomplete packs into server/themes
+    it('themeDir cannot be moved through the REST route (file-only); saving a theme still works in the configured dir', async () => {
+        // The mkdir-a-missing-themeDir path cannot be reached over HTTP any more (P0 R3).
         const nested = './themes-cov-' + Date.now();
-        const themePath = path.resolve(configDir, nested);
-        if (fs.existsSync(themePath)) fs.rmSync(themePath, { recursive: true, force: true });
-
-        await request(app)
+        const moved = await request(app)
             .post('/api/admin/config')
             .set('Authorization', `Bearer ${token()}`)
             .send({ themeDir: nested });
+        expect(moved.status).toBe(400);
+        expect(fs.existsSync(path.resolve(path.dirname(configPath()), nested))).toBe(false);
+        expect(loadConfig().themeDir).not.toBe(nested);
 
+        const themeDir = path.resolve(path.dirname(configPath()), loadConfig().themeDir || './themes');
         const res = await request(app)
             .post('/api/admin/themes/covpack')
             .set('Authorization', `Bearer ${token()}`)
@@ -1712,13 +1712,7 @@ describe('register-routes error paths', () => {
                 mdEditorTheme: 'dark'
             });
         expect(res.status).toBe(200);
-        expect(fs.existsSync(path.join(themePath, 'covpack.json'))).toBe(true);
-
-        // restore themeDir and drop isolated dir
-        await request(app)
-            .post('/api/admin/config')
-            .set('Authorization', `Bearer ${token()}`)
-            .send({ themeDir: config.themeDir || './themes' });
-        fs.rmSync(themePath, { recursive: true, force: true });
+        expect(fs.existsSync(path.join(themeDir, 'covpack.json'))).toBe(true);
+        fs.rmSync(path.join(themeDir, 'covpack.json'), { force: true });
     });
 });

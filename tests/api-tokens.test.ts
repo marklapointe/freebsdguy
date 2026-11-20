@@ -148,7 +148,10 @@ describe('PAT REST + auth', () => {
         expect(del.status).toBe(200);
 
         const me2 = await request(app).get('/api/me').set('Authorization', `Bearer ${pat}`);
-        expect(me2.status).toBe(403);
+        // A revoked token is no longer an identity: 401, not 403 (Track 2119).
+        expect(me2.status).toBe(401);
+        expect(me2.body).toEqual({ message: 'Invalid or expired token' });
+        expect(me2.headers['www-authenticate']).toBe('Bearer');
     });
 
     it('admin mints for contributor; contributor cannot hit admin config', async () => {
@@ -199,6 +202,8 @@ describe('PAT REST + auth', () => {
         expect(del.status).toBe(200);
 
         const me = await request(app).get('/api/me').set('Authorization', `Bearer ${pat}`);
-        expect(me.status).toBe(403);
+        // The user is gone, so the token is not an identity either: 401 (Track 2119).
+        expect(me.status).toBe(401);
+        expect(me.body).toEqual({ message: 'Invalid or expired token' });
     });
 });

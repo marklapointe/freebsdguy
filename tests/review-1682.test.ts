@@ -132,9 +132,9 @@ describe('WP #1682 read token over /mcp', () => {
             });
             const text = toolText(res);
             if (READ_TOOLS.includes(name)) {
-                expect(text, name).not.toMatch(/read-only/i);
+                expect(text, name).not.toMatch(/Token lacks scope/i);
             } else {
-                expect(text, name).toMatch(/read-only|not found/i);
+                expect(text, name).toMatch(/Token lacks scope|not found/i);
             }
         }
     });

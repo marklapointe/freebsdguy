@@ -12,10 +12,17 @@ export interface AppContext {
     getActiveConfig: () => Config;
     setActiveConfig: (c: Config) => void;
     authenticate: RequestHandler;
+    /** Same as authenticate, but answers 401 and writes an audit row for every failed auth (the /mcp route). */
+    authenticateMcp: RequestHandler;
     requireAdmin: RequestHandler;
     requireWriter: RequestHandler;
     upload: multer.Multer;
     sessionStore?: FileSessionStore;
+    /**
+     * Password comparison. Injectable so a test can watch the work the login
+     * does; the default is the real bcrypt compare.
+     */
+    passwordMatches?: (plain: unknown, hash: string | undefined) => Promise<boolean>;
 }
 
 export function createActiveConfigHolder(initial: Config) {

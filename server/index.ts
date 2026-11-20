@@ -7,7 +7,12 @@ import { runPreflight } from './lib/preflight.ts';
 import { JwtSecretFactory, JwtSecretError, resolveJwtSecret, INSECURE_DEFAULT_JWT_SECRET } from './lib/jwt-secret.ts';
 import { SecretFileError } from './lib/secret-file.ts';
 import { resolveBindHost, startHttpServer } from './lib/bind-address.ts';
-import { createRateLimitMiddleware, resolveRateLimitSettings } from './lib/rate-limit.ts';
+import {
+    createRateLimitMiddleware,
+    resolveRateLimitSettings,
+    resolveTokenRateLimitSettings
+} from './lib/rate-limit.ts';
+import { resolveAuditSite } from './lib/audit-context.ts';
 import { corsOriginDecision, resolveAllowedOrigins } from './lib/cors-policy.ts';
 import { resolveTrustProxy } from './lib/trust-proxy.ts';
 import { isDefaultAdminCredential } from './lib/setup-admin.ts';
@@ -127,9 +132,13 @@ const guards = new RoleGuardFactory(SECRET, {
     getMode: () => resolveAuthMode(configHolder.get()),
     getSessionStore: () => sessionStore,
     getSessionCookieName: () =>
-        configHolder.get().security?.sessionCookieName || 'mdweb.sid'
+        configHolder.get().security?.sessionCookieName || 'mdweb.sid',
+    getTokenRateSettings: () =>
+        resolveTokenRateLimitSettings(configHolder.get().security, process.env),
+    getAuditSite: () => resolveAuditSite(configHolder.get())
 });
 const authenticate = guards.authenticate();
+const authenticateMcp = guards.authenticate({ mcp: true });
 const requireAdmin = guards.requireAdmin();
 const requireWriter = guards.requireContributorOrAdmin();
 
@@ -157,7 +166,10 @@ app.use(cors({
         );
         callback(null, corsOriginDecision(allowed, origin));
     },
-    credentials: true
+    // Agents use bearer tokens and the UI is same-origin, so no response may
+    // tell a browser to send credentials. Allowed origins still get an
+    // Access-Control-Allow-Origin; Access-Control-Allow-Credentials is absent.
+    credentials: false
 }));
 app.use(express.json());
 app.use(createRateLimitMiddleware({
@@ -169,6 +181,7 @@ registerRoutes(app, {
     getActiveConfig: configHolder.get,
     setActiveConfig: configHolder.set,
     authenticate,
+    authenticateMcp,
     requireAdmin,
     requireWriter,
     upload,

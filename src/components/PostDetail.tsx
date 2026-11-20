@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MdPreview, MdCatalog } from 'md-editor-rt';
+import { sanitizeMarkdownHtml } from '../lib/sanitize-md';
 import { api, siteConfig, getMdEditorTheme } from '../lib/api';
 import { onThemeChanged } from '../lib/theme-events';
 import { enhanceCollapsibleLists } from '../lib/collapse-lists';
@@ -95,6 +96,7 @@ export const PostDetail = () => {
             <div className="article-layout">
                 <div className="article-body min-w-0" ref={bodyRef}>
                     <MdPreview
+                        sanitize={sanitizeMarkdownHtml}
                         id={id}
                         modelValue={post.content}
                         theme={editorTheme}

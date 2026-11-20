@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 import sanitizeHtml from 'sanitize-html';
+import { isSafeExistingPath } from './safe-path.ts';
 
 export interface PostMetadata {
     slug: string;
@@ -10,7 +11,74 @@ export interface PostMetadata {
     date: string;
     author: string;
     pinned?: boolean;
+    /** 'draft' or 'published'. A post without the key is published. */
+    status?: PostStatus;
     [key: string]: any;
+}
+
+/** A post is a draft until it is published; a post without the key is published. */
+export type PostStatus = 'draft' | 'published';
+
+/**
+ * The status of a post. Front matter without `status` means published, so every
+ * post that predates the drafts feature stays visible to the public.
+ */
+export function postStatus(post: { status?: unknown } | null | undefined): PostStatus {
+    return post && post.status === 'draft' ? 'draft' : 'published';
+}
+
+/**
+ * Parse the front matter of a post.
+ *
+ * gray-matter caches a file *before* it parses it: when the YAML is broken
+ * the first call throws, but every later call for the same content hands out
+ * the half-parsed file instead — the whole file comes back as the body, with
+ * no front matter at all, so the post looks published and the draft body is
+ * served to every reader. Passing options bypasses that cache, so a front
+ * matter that does not parse fails every time and the caller always sees the
+ * parse-error stub (a draft, never published).
+ */
+function parseFrontMatter(content: string): matter.GrayMatterFile<string> {
+    return matter(content, {});
+}
+
+/** Thrown when a post file is, or lies behind, a symlink or leaves the posts directory. */
+export class UnsafePostPathError extends Error {
+    readonly slug: string;
+
+    constructor(slug: string) {
+        super('Forbidden path');
+        this.name = 'UnsafePostPathError';
+        this.slug = slug;
+    }
+}
+
+/** Whether `<postsDir>/<slug>.md` is a plain file path inside the posts directory (P0 C1). */
+export function isSafePostFile(postsDir: string, slug: string): boolean {
+    return isSafeExistingPath(postsDir, path.join(postsDir, `${slug}.md`));
+}
+
+/**
+ * Write a file without following a symlink at the final component (O_NOFOLLOW),
+ * so a link planted between the check and the write cannot redirect the write.
+ * Where O_NOFOLLOW does not exist the write fails closed.
+ *
+ * `opts.noFollow` defaults to the platform's O_NOFOLLOW when the key is absent.
+ * `fs.constants` is frozen, so a test passes `{ noFollow: undefined }` to
+ * simulate a platform without the flag (a default parameter would not do: it
+ * replaces an explicit `undefined`).
+ */
+export function writeFileNoFollow(filePath: string, data: string, opts?: { noFollow?: unknown }): void {
+    const noFollow = opts && 'noFollow' in opts ? opts.noFollow : fs.constants.O_NOFOLLOW;
+    if (typeof noFollow !== 'number') {
+        throw new UnsafePostPathError(path.basename(filePath, '.md'));
+    }
+    const fd = fs.openSync(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | noFollow, 0o666);
+    try {
+        fs.writeFileSync(fd, data);
+    } finally {
+        fs.closeSync(fd);
+    }
 }
 
 export interface Post extends PostMetadata {
@@ -38,13 +106,15 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
     const files = fs.readdirSync(postsDir);
     const posts = files.filter(f => f.endsWith('.md')).map(filename => {
         const filePath = path.join(postsDir, filename);
+        // A symlinked post is never listed: it may point outside the posts directory.
+        if (!isSafeExistingPath(postsDir, filePath)) return null;
         try {
             /* v8 ignore next */
             if (!fs.existsSync(filePath)) {
                 return null;
             }
             const content = fs.readFileSync(filePath, 'utf8');
-            const { data, content: mdContent } = matter(content);
+            const { data, content: mdContent } = parseFrontMatter(content);
             const pinned = data.pinned === true || data.pinned === 'true';
             return {
                 slug: filename.replace(/\.md$/, ''),
@@ -53,16 +123,21 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
                 date: data.date || '',
                 author: data.author || '',
                 ...data,
-                pinned
+                pinned,
+                status: postStatus(data)
             } as PostMetadata;
         } catch (error) {
             console.error(`Error parsing post ${filename}:`, error);
+            // A post that does not parse is not published: fail closed. The
+            // stub is a draft, so the public reads never show it, and it
+            // carries nothing of the file that failed to parse.
             return {
                 slug: filename.replace('.md', ''),
                 title: `Error: ${filename}`,
                 summary: 'This post could not be loaded due to a parsing error.',
                 date: '',
-                author: 'system'
+                author: 'system',
+                status: 'draft'
             } as PostMetadata;
         }
     }).filter((p): p is PostMetadata => p !== null);
@@ -100,13 +175,16 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
 
 export const getPost = (postsDir: string, slug: string): Post | null => {
     const filePath = path.join(postsDir, `${slug}.md`);
+    if (!isSafeExistingPath(postsDir, filePath)) {
+        return null;
+    }
     if (!fs.existsSync(filePath)) {
         return null;
     }
 
     const content = fs.readFileSync(filePath, 'utf8');
     try {
-        const parsed = matter(content);
+        const parsed = parseFrontMatter(content);
         const pinned = parsed.data.pinned === true || parsed.data.pinned === 'true';
         // Body must come from gray-matter `content` (after frontmatter), never from
         // list metadata or frontmatter keys — spread data first, then set body fields.
@@ -123,47 +201,179 @@ export const getPost = (postsDir: string, slug: string): Post | null => {
             summary,
             date: parsed.data.date || '',
             author: parsed.data.author || '',
-            pinned
+            pinned,
+            status: postStatus(parsed.data)
         };
     } catch (error) {
         console.error(`Error parsing post ${slug}:`, error);
+        // A post that does not parse is not published: fail closed. The stub
+        // is a draft, and it quotes no parser error and no line of the file —
+        // the real error goes to the server log, not to a reader.
         return {
             title: `Error: ${slug}`,
             slug,
-            content: `This post could not be loaded due to a parsing error: ${error instanceof Error ? error.message : String(error)}`,
-            summary: 'Parsing error',
+            content: 'This post could not be loaded due to a parsing error.',
+            summary: 'This post could not be loaded due to a parsing error.',
             date: '',
-            author: 'system'
+            author: 'system',
+            status: 'draft'
         };
     }
 };
 
-export const savePost = (postsDir: string, post: Partial<Post> & { slug: string; content: string; author: string }): void => {
+/** The keys savePost writes itself; every other key of the input is merged as it is. */
+const SAVE_OWNED_KEYS = new Set(['slug', 'content', 'title', 'summary', 'date', 'author', 'pinned']);
+
+/** The same keys, for the manual fallback that writes the front matter by hand. */
+const CORE_FRONTMATTER_KEYS = ['title', 'summary', 'date', 'author', 'pinned', 'status'];
+
+/**
+ * The public refusal for a post file whose front matter cannot be parsed. It
+ * names no parser error, no line of the file and nothing of the body: the real
+ * error goes to the server log.
+ */
+export function frontMatterBrokenMessage(slug: string): string {
+    return `The front matter of post "${slug}" could not be parsed`;
+}
+
+/**
+ * Thrown when the front matter of a post file cannot be read or parsed.
+ *
+ * A parse error is not "no front matter": {} is what a missing file looks
+ * like, and a post without a status is published. A file that does not parse
+ * may therefore never be read as an empty front matter and may never be
+ * written over: the caller refuses the save and leaves the bytes on disk for
+ * an operator to inspect.
+ */
+export class FrontMatterParseError extends Error {
+    /** The post whose front matter does not parse. */
+    readonly slug: string;
+
+    constructor(slug: string) {
+        super(frontMatterBrokenMessage(slug));
+        this.name = 'FrontMatterParseError';
+        this.slug = slug;
+    }
+}
+
+/**
+ * The front matter of a post file, exactly as it is on disk ({} when the post
+ * does not exist). A save merges over this, so keys the save does not know
+ * (aliases, publishedAt, ...) survive a save.
+ *
+ * A file whose front matter cannot be parsed throws FrontMatterParseError:
+ * it is not a post without front matter, and a post without front matter is
+ * published. A post that does not exist yet still returns {}, so a new slug
+ * stays a draft as the policy specifies.
+ */
+export function readFrontMatter(postsDir: string, slug: string): Record<string, unknown> {
+    const filePath = path.join(postsDir, `${slug}.md`);
+    if (!isSafeExistingPath(postsDir, filePath)) throw new UnsafePostPathError(slug);
+    if (!fs.existsSync(filePath)) {
+        // A post that does not exist yet has no front matter.
+        return {};
+    }
+    let content: string;
+    try {
+        content = fs.readFileSync(filePath, 'utf8');
+    } catch (error) {
+        console.error(`Error reading the file of ${slug}:`, error);
+        throw new FrontMatterParseError(slug);
+    }
+    try {
+        const parsed = parseFrontMatter(content);
+        return { ...(parsed.data as Record<string, unknown>) };
+    } catch (error) {
+        // The real error (js-yaml quotes the line it choked on) goes to the
+        // log; the caller only learns that the front matter does not parse.
+        console.error(`Error reading front matter of ${slug}:`, error);
+        throw new FrontMatterParseError(slug);
+    }
+}
+
+/**
+ * The date of a post as it is written. gray-matter parses an unquoted YAML
+ * date as UTC midnight, so the calendar day is read back in UTC: writing the
+ * local midnight instead would move a post to the day before.
+ */
+function dateText(value: unknown): string {
+    if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) return '';
+        const y = value.getUTCFullYear();
+        const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(value.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    const text = String(value ?? '').trim();
+    return text || new Date().toISOString();
+}
+
+/**
+ * Write a post. The existing front matter is merged first and the input is
+ * merged over it, so a save may only change the keys the input names: the
+ * author, the status and the other keys of an existing post survive.
+ */
+export const savePost = (postsDir: string, post: Partial<Post> & { slug: string; content: string }): void => {
     if (!fs.existsSync(postsDir)) {
         fs.mkdirSync(postsDir, { recursive: true });
     }
+    if (!isSafePostFile(postsDir, post.slug)) throw new UnsafePostPathError(post.slug);
+
+    // Existing front matter first: a save must not drop keys it does not know
+    // (aliases, publishedAt, ...), only the keys the input names may change.
+    // A file whose front matter does not parse is refused: the save ends
+    // before anything is written, so the broken bytes stay on disk for an
+    // operator to inspect, the stub body never replaces them and nothing is
+    // published from them.
+    let merged: Record<string, unknown>;
+    try {
+        merged = { ...readFrontMatter(postsDir, post.slug) };
+    } catch (error) {
+        console.error(`Refusing to save post ${post.slug}:`, error);
+        if (error instanceof UnsafePostPathError) throw error;
+        throw error instanceof FrontMatterParseError
+            ? error
+            : new FrontMatterParseError(post.slug);
+    }
+    for (const [key, value] of Object.entries(post)) {
+        if (SAVE_OWNED_KEYS.has(key)) continue;
+        if (value === undefined) continue;
+        merged[key] = value;
+    }
 
     // Metadata only is HTML-stripped; body stays Markdown (authors are authenticated).
-    const cleanTitle = sanitizeHtml(String(post.title || ''), { allowedTags: [], allowedAttributes: {} });
-    const cleanSummary = sanitizeHtml(String(post.summary || ''), { allowedTags: [], allowedAttributes: {} });
+    const cleanTitle = sanitizeHtml(String(post.title ?? ''), { allowedTags: [], allowedAttributes: {} });
+    const cleanSummary = sanitizeHtml(String(post.summary ?? ''), { allowedTags: [], allowedAttributes: {} });
     const content = String(post.content ?? '');
 
-    const frontmatter = {
-        title: cleanTitle,
-        summary: cleanSummary,
-        date: String(post.date || new Date().toISOString()),
-        author: String(post.author || ''),
-        pinned: post.pinned === true
+    const frontmatter: Record<string, unknown> = {
+        ...merged,
+        title: post.title !== undefined ? cleanTitle : String(merged.title ?? ''),
+        summary: post.summary !== undefined ? cleanSummary : String(merged.summary ?? ''),
+        date: dateText(post.date ?? merged.date),
+        author: String(post.author ?? merged.author ?? ''),
+        pinned:
+            post.pinned !== undefined
+                ? post.pinned === true
+                : merged.pinned === true || merged.pinned === 'true',
+        status: postStatus(merged)
     };
 
     try {
         const fileContent = matter.stringify(content, frontmatter);
-        fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), fileContent);
+        writeFileNoFollow(path.join(postsDir, `${post.slug}.md`), fileContent);
     } catch (error) {
         console.error(`Error saving post ${post.slug}:`, error);
         // Fallback to simple manual construction if matter.stringify fails for some reason
-        const manualContent = `---\ntitle: "${frontmatter.title.replace(/"/g, '\\"')}"\nsummary: "${frontmatter.summary.replace(/"/g, '\\"')}"\ndate: "${frontmatter.date}"\nauthor: "${frontmatter.author}"\npinned: ${frontmatter.pinned}\n---\n${content}`;
-        fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), manualContent);
+        const core = CORE_FRONTMATTER_KEYS.map(
+            (key) => `${key}: ${JSON.stringify(frontmatter[key] ?? '')}`
+        ).join('\n');
+        const extra = Object.entries(frontmatter)
+            .filter(([key]) => !CORE_FRONTMATTER_KEYS.includes(key))
+            .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+            .join('\n');
+        const manualContent = `---\n${core}\n${extra ? `${extra}\n` : ''}---\n${content}`;
+        writeFileNoFollow(path.join(postsDir, `${post.slug}.md`), manualContent);
     }
 };
 
@@ -189,13 +399,18 @@ function aliasSignature(postsDir: string, files: string[]): string {
  */
 export const findPostByAlias = (postsDir: string, slug: string): string | null => {
     if (!SLUG_RE.test(slug) || !fs.existsSync(postsDir)) return null;
-    const files = fs.readdirSync(postsDir).filter((f) => f.endsWith('.md')).sort();
+    const files = fs
+        .readdirSync(postsDir)
+        .filter((f) => f.endsWith('.md') && isSafeExistingPath(postsDir, path.join(postsDir, f)))
+        .sort();
     const sig = aliasSignature(postsDir, files);
     if (!aliasCache || aliasCache.dir !== postsDir || aliasCache.sig !== sig) {
         const map = new Map<string, string>();
         for (const f of files) {
             try {
-                const { data } = matter(fs.readFileSync(path.join(postsDir, f), 'utf8'));
+                const { data } = parseFrontMatter(fs.readFileSync(path.join(postsDir, f), 'utf8'));
+                // A draft is private: an old link must not lead to it.
+                if (postStatus(data) === 'draft') continue;
                 const raw = data.aliases;
                 const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
                 for (const a of list) if (typeof a === 'string' && SLUG_RE.test(a) && !map.has(a)) map.set(a, f.replace(/\.md$/, ''));
