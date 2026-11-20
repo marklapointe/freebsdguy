@@ -214,9 +214,8 @@ describe('config routes refuse a symlinked theme file', () => {
     });
 });
 
-describe('custom themeDir: one shared check for set_theme, update_config and REST', () => {
+describe('custom on-disk themeDir: one shared check for update_config and REST', () => {
     it('all three paths refuse a symlinked theme file, and selectThemeProblem agrees', async () => {
-        const originalThemeDir = JSON.parse(fs.readFileSync(configPath(), 'utf8')).themeDir as string;
         const cfgFile = path.join(tmp, 'config.json');
         const customThemes = path.join(tmp, 'my-themes');
         fs.mkdirSync(customThemes, { recursive: true });
@@ -226,18 +225,14 @@ describe('custom themeDir: one shared check for set_theme, update_config and RES
         );
         vi.stubEnv('CONFIG_PATH', cfgFile);
         fs.symlinkSync(outside, path.join(customThemes, 'evil-theme.json'));
-        // Point the active (in-memory) config at the custom themeDir through the REST route.
-        const point = (themeDir: string) =>
-            request(app).post('/api/admin/config').set('Authorization', `Bearer ${pat}`).send({ themeDir });
-        expect((await point(customThemes)).status).toBe(200);
+        // themeDir is config-file only (P0 R3): the file written above is what the routes read.
         try {
             const before = fs.readFileSync(cfgFile);
             expect(selectThemeProblem(tmp, { themeDir: customThemes }, 'evil-theme')).toBe('Invalid theme path');
             expect(selectThemeProblem(tmp, { themeDir: customThemes }, '../x')).toBe('Invalid theme id');
 
-            const set = await mcp('set_theme', { themeId: 'evil-theme' });
-            expect(set.body.result?.isError, JSON.stringify(set.body)).toBe(true);
-            expect(JSON.stringify(set.body)).toContain('Invalid theme path');
+            // set_theme reads the active (startup) config, which a request can no longer move
+            // (themeDir is file-only); it is covered against the default themeDir above.
             const upd = await mcp('update_config', { patch: { currentTheme: 'evil-theme' } });
             expect(upd.body.result?.isError, JSON.stringify(upd.body)).toBe(true);
             expect(JSON.stringify(upd.body)).toContain('Invalid theme path');
@@ -249,7 +244,7 @@ describe('custom themeDir: one shared check for set_theme, update_config and RES
             expect(JSON.stringify(rest.body)).toContain('Invalid theme path');
             expect(fs.readFileSync(cfgFile).equals(before)).toBe(true);
         } finally {
-            await point(originalThemeDir);
+            vi.unstubAllEnvs();
         }
     });
 });
@@ -274,7 +269,7 @@ describe('update_config checks the theme against the on-disk themeDir', () => {
 });
 
 describe('POST /api/admin/config theme check uses the post-merge themeDir', () => {
-    it('themeDir + currentTheme in one request is checked against the new themeDir', async () => {
+    it('themeDir in the body is refused outright (file-only), so no theme is checked against it', async () => {
         const cfgFile = path.join(tmp, 'config.json');
         const customDir = path.join(tmp, 'new-themes');
         fs.mkdirSync(customDir, { recursive: true });

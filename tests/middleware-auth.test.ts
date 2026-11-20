@@ -11,6 +11,9 @@ function mockRes() {
     const res: any = {
         statusCode: 200,
         body: null as any,
+        set() {
+            return this;
+        },
         status(c: number) {
             this.statusCode = c;
             return this;
@@ -69,7 +72,7 @@ describe('RoleGuardFactory', () => {
         // async jwt.verify
         return new Promise<void>(resolve => {
             setTimeout(() => {
-                expect(res2.statusCode).toBe(403);
+                expect(res2.statusCode).toBe(401);
                 const token = jwt.sign({ username: 'a', role: 'admin' }, secret);
                 const res3 = mockRes();
                 const req3: any = { headers: { authorization: `Bearer ${token}` } };
@@ -97,7 +100,7 @@ describe('RoleGuardFactory', () => {
 
         const res2 = mockRes();
         auth({ headers: { cookie: 'mdweb.sid=deadbeef' } } as any, res2, next);
-        expect(res2.statusCode).toBe(403);
+        expect(res2.statusCode).toBe(401);
 
         const rec = store.create('bob', 'contributor', 3600);
         const res3 = mockRes();

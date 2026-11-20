@@ -261,7 +261,9 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
     }, [activeTab, config.aiConfig?.provider, config.aiConfig?.baseUrl]);
 
     const handleSaveConfig = () => {
-        api.post('/admin/config', config)
+        // postsDir/themeDir are server-only: the API rejects them, so never send them
+        const { postsDir: _postsDir, themeDir: _themeDir, ...payload } = config;
+        api.post('/admin/config', payload)
             .then(() => {
                 const oldPort = parseInt(localStorage.getItem('lastPort') || '5173');
                 const newPort = config.service?.port || 5173;
@@ -825,8 +827,8 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                 <details className="rounded border border-border p-4">
                                     <summary className="font-bold cursor-pointer">Advanced paths</summary>
                                     <p className="text-xs opacity-60 mt-2 mb-4">
-                                        Wrong paths make the site look empty. Prefer FreeBSD defaults under{' '}
-                                        <code>/var/db/mdweb</code>.
+                                        These paths can only be changed in the config file on the server.
+                                        Prefer FreeBSD defaults under <code>/var/db/mdweb</code>.
                                     </p>
                                     <div className="space-y-4">
                                         <div>
@@ -835,7 +837,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                                 data-testid="site-posts-dir"
                                                 type="text"
                                                 value={config.postsDir || ''}
-                                                onChange={e => setConfig((prev: any) => ({ ...prev, postsDir: e.target.value }))}
+                                                readOnly
                                                 className="w-full p-3 bg-bg border border-accent rounded text-text font-mono text-sm"
                                             />
                                         </div>
@@ -845,7 +847,7 @@ export const Admin = ({ user, siteName, setSiteName, siteLogo, setSiteLogo, show
                                                 data-testid="site-theme-dir"
                                                 type="text"
                                                 value={config.themeDir || ''}
-                                                onChange={e => setConfig((prev: any) => ({ ...prev, themeDir: e.target.value }))}
+                                                readOnly
                                                 className="w-full p-3 bg-bg border border-accent rounded text-text font-mono text-sm"
                                             />
                                         </div>

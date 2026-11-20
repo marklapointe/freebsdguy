@@ -11,7 +11,7 @@
 const NO_CHANGES = 'No changes were saved.';
 const REST_HINT = 'Use POST /api/admin/config to change it.';
 const FILE_ONLY_HINT = 'This setting can only be changed in the config file on the server.';
-const CONFIG_FILE_ONLY_KEYS = new Set(['corsOrigins', 'bind', 'tls']);
+const CONFIG_FILE_ONLY_KEYS = new Set(['corsOrigins', 'bind', 'tls', 'postsDir', 'themeDir']);
 
 export type PatchCheck = { ok: true } | { ok: false; error: string };
 
@@ -26,9 +26,9 @@ const MCP_NESTED_KEYS: Record<string, readonly string[]> = {
     footer: ['show', 'copyrightText', 'creditText']
 };
 
-/** Keys the admin REST route accepts at the top level (it also edits service, security, AI and paths). */
+/** Keys the admin REST route accepts at the top level (it also edits service, security and AI). */
 export const REST_CONFIG_KEYS = [
-    ...MCP_CONFIG_KEYS, 'postsDir', 'themeDir', 'security', 'service', 'aiConfig'
+    ...MCP_CONFIG_KEYS, 'security', 'service', 'aiConfig'
 ] as const;
 
 /** Keys the admin REST route may change that an MCP patch may not. */
@@ -116,9 +116,10 @@ export function validateMcpConfigPatch(patch: unknown): PatchCheck {
         if (FORBIDDEN_CONFIG_KEYS.has(key)) {
             const v = patch[key];
             const fileOnly =
-                REST_ONLY_KEYS.has(key) &&
-                isPlainObject(v) &&
-                Object.getOwnPropertyNames(v).some((k) => CONFIG_FILE_ONLY_KEYS.has(k));
+                CONFIG_FILE_ONLY_KEYS.has(key) ||
+                (REST_ONLY_KEYS.has(key) &&
+                    isPlainObject(v) &&
+                    Object.getOwnPropertyNames(v).some((k) => CONFIG_FILE_ONLY_KEYS.has(k)));
             const hint = fileOnly ? ` ${FILE_ONLY_HINT}` : REST_ONLY_KEYS.has(key) ? ` ${REST_HINT}` : '';
             return { ok: false, error: `Config key "${key}" cannot be changed through this tool.${hint} ${NO_CHANGES}` };
         }
@@ -145,6 +146,9 @@ export function validateRestConfigBody(body: unknown): PatchCheck {
     if (bad) return { ok: false, error: pollutionError('body', bad) };
     const allowed = new Set<string>(REST_CONFIG_KEYS);
     for (const key of Object.getOwnPropertyNames(body)) {
+        if (key === 'postsDir' || key === 'themeDir') {
+            return { ok: false, error: `Config key "${key}" cannot be changed through this route. ${FILE_ONLY_HINT} ${NO_CHANGES}` };
+        }
         if (!allowed.has(key)) return { ok: false, error: `Unknown config key "${key}". ${NO_CHANGES}` };
     }
     for (const [section, keys] of Object.entries(REST_NESTED_KEYS)) {

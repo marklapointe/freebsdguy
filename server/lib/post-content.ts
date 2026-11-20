@@ -15,13 +15,13 @@
  * are skipped.
  */
 
-import { isDangerousUrl } from './url-safety.ts';
+import { isDangerousUrl, normalizeUrl } from './url-safety.ts';
 
 export type ContentCheck = { ok: true } | { ok: false; error: string };
 
 export const CONTENT_REFUSED = 'Post content refused';
 
-const BANNED_TAGS = new Set(['script', 'iframe', 'object', 'embed', 'base', 'form', 'meta']);
+const BANNED_TAGS = new Set(['script', 'iframe', 'object', 'embed', 'base', 'form', 'meta', 'style', 'noscript']);
 const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href', 'poster']);
 
 /** Replace fenced code blocks and inline code spans with blanks. */
@@ -182,6 +182,27 @@ function* htmlTags(text: string): Generator<{ name: string; attrs: Attr[] }> {
     }
 }
 
+const EXEC_SCHEMES = ['javascript', 'vbscript', 'livescript', 'jscript', 'mocha', 'data'];
+
+/**
+ * True when the lines after a destination's first token complete an executable scheme
+ * the token only began or exactly spelled (`java` + `script:x`, `javascript` + `:x`). A browser ignores whitespace inside a
+ * scheme, so the squeezed blob is what it would act on. The scheme must be a known
+ * executable one that the token is a prefix of (or equal to): a relative token followed by
+ * prose (`foo` + `Note: x`) is not a scheme and stays accepted.
+ */
+function splitSchemeCompleted(token: string, blob: string): boolean {
+    const m = /^([a-z][a-z0-9+.-]*):/.exec(normalizeUrl(blob));
+    if (!m || !EXEC_SCHEMES.includes(m[1])) return false;
+    const tok = normalizeUrl(token);
+    return tok.length <= m[1].length && m[1].startsWith(tok);
+}
+
+/** A `"` in a reference destination closes the attribute it is rendered into. */
+function destBreaksOut(dest: string): boolean {
+    return dest.includes('"');
+}
+
 const REF_START = /^[ \t>\-+*\d.)]*\[/;
 const BLANK_LINE = /^[ \t]*$/;
 const MAX_LABEL = 999; // the CommonMark label limit
@@ -247,8 +268,25 @@ function hasDangerousRefDef(text: string): boolean {
             const gt = rest.indexOf('>');
             if (gt >= 0) dest = rest.slice(0, gt + 1);
         }
-        if (!dest) dest = /^\S+/.exec(rest)?.[0] ?? '';
-        if (dest && isDangerousUrl(dest.replace(/^<|>$/g, ''))) return true;
+        if (!dest) {
+            // Unbracketed: the first token is the destination. A browser ignores whitespace and
+            // newlines inside a scheme, so the following lines (up to a blank line or a title
+            // line, bounded) are read with it for the scheme check.
+            dest = /^\S+/.exec(rest)?.[0] ?? '';
+            if (destBreaksOut(dest)) return true;
+            let blob = rest;
+            for (
+                let k = (line === lines[l] ? l : l + 1) + 1;
+                k < lines.length && blob.length < MAX_DEST && !BLANK_LINE.test(lines[k]) && !/^[ \t]*["'(]/.test(lines[k]);
+                k++
+            ) {
+                blob += '\n' + lines[k];
+            }
+            if (dest && (isDangerousUrl(dest) || splitSchemeCompleted(dest, blob.slice(0, MAX_DEST)))) return true;
+        } else {
+            const inner = dest.slice(1, -1);
+            if (destBreaksOut(inner) || isDangerousUrl(inner)) return true;
+        }
         li = l + 1;
     }
     return false;
@@ -294,10 +332,13 @@ function scanText(raw: string): string | null {
             let j = i + 1;
             while (j < text.length && j - i <= MAX_DEST && text[j] !== '>' && !(text[j] === ']' && text[j + 1] === '(')) j++;
             dest = text.slice(i + 1, j);
+            if (destBreaksOut(dest)) return 'quote in a link or image destination is not allowed';
         } else {
             let depth = 0;
             let j = i;
-            while (j < text.length && j - i < MAX_DEST && !/\s/.test(text[j]) && !(text[j] === ']' && text[j + 1] === '(')) {
+            let firstEnd = -1; // end of the first whitespace-delimited token (the real destination)
+            while (j < text.length && j - i < MAX_DEST && !(text[j] === ']' && text[j + 1] === '(')) {
+                if (firstEnd < 0 && /\s/.test(text[j])) firstEnd = j;
                 if (text[j] === '(') depth++;
                 else if (text[j] === ')') {
                     if (depth === 0) break;
@@ -305,7 +346,11 @@ function scanText(raw: string): string | null {
                 }
                 j++;
             }
+            // Whitespace and controls inside the scheme are ignored by a browser, so the whole
+            // span (destination plus any title) is checked, not only the first token.
             dest = text.slice(i, j);
+            const first = firstEnd < 0 ? dest : text.slice(i, firstEnd);
+            if (first.includes('"')) return 'quote in a link or image destination is not allowed';
         }
         const open = matchOpen.get(at);
         const image = open !== undefined && open > 0 && text[open - 1] === '!';

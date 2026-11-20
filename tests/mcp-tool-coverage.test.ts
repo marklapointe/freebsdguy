@@ -61,8 +61,9 @@ async function call(pat: string, name: string, args: Record<string, unknown> = {
 
 /**
  * Reconfigure the live app through the admin REST route. MCP update_config only
- * edits the allow-listed site settings (P0 E1), so postsDir, themeDir, aiConfig
- * and security go through POST /api/admin/config, which still accepts them.
+ * edits the allow-listed site settings (P0 E1), so aiConfig and security go through
+ * POST /api/admin/config. postsDir and themeDir are config-file only (P0 R3): this
+ * test points them at a temporary config file through CONFIG_PATH instead.
  */
 async function setConfig(pat: string, patch: Record<string, unknown>) {
     const res = await request(app)
@@ -84,14 +85,13 @@ describe('MCP tool bodies and route edges', () => {
     afterAll(async () => {
         if (admin) {
             await setConfig(admin, {
-                    postsDir: before.postsDir,
-                    themeDir: before.themeDir,
                     currentTheme: before.currentTheme,
                     siteName: before.siteName,
                     security: before.security,
                     aiConfig: before.aiConfig
             });
         }
+        vi.unstubAllEnvs();
         fs.rmSync(tmp, { recursive: true, force: true });
     });
 
@@ -105,8 +105,12 @@ describe('MCP tool bodies and route edges', () => {
         admin = mintToken('admin', 'cover-admin', 'write').plaintext;
         writer = mintToken('writer', 'cover-writer', 'write').plaintext;
 
-        const moved = await setConfig(admin, { postsDir: posts, themeDir: themes, siteName: 'Coverage' });
+        const cfgFile = path.join(tmp, 'config.json');
+        fs.writeFileSync(cfgFile, JSON.stringify({ ...before, postsDir: posts, themeDir: themes }));
+        vi.stubEnv('CONFIG_PATH', cfgFile);
+        const moved = await setConfig(admin, { siteName: 'Coverage' });
         expect(moved).toMatch(/Configuration updated/);
+        expect(await setConfig(admin, { postsDir: '/etc' })).toMatch(/cannot be changed/);
         expect(await call(admin, 'update_config', { patch: { siteName: 'Coverage' } })).toMatch(/Config saved/);
         expect(await call(admin, 'update_config', { patch: { postsDir: '/etc' } })).toMatch(/cannot be changed/);
 

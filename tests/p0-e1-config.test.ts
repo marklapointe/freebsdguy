@@ -92,16 +92,29 @@ describe('validateMcpConfigPatch', () => {
 });
 
 describe('config-file-only hint', () => {
-    it('corsOrigins is not pointed at the REST route; postsDir still is', () => {
-        for (const patch of [{ security: { corsOrigins: [] } }, { service: { bind: 'x' } }, { service: { tls: {} } }]) {
+    it('corsOrigins, postsDir and themeDir are file-only, not pointed at the REST route', () => {
+        for (const patch of [{ security: { corsOrigins: [] } }, { service: { bind: 'x' } }, { service: { tls: {} } }, { postsDir: 'x' }, { themeDir: 'x' }]) {
             const r = validateMcpConfigPatch(patch);
             expect(r.ok).toBe(false);
             const err = r.ok ? '' : r.error;
             expect(err).not.toContain('POST /api/admin/config');
             expect(err).toContain('config file');
         }
-        const r = validateMcpConfigPatch({ postsDir: 'x' });
-        expect(r.ok ? '' : r.error).toContain('POST /api/admin/config');
+    });
+    it('MCP update_config refuses postsDir and themeDir with the file-only hint', () => {
+        for (const k of ['postsDir', 'themeDir']) {
+            const r = validateMcpConfigPatch({ [k]: '/x' });
+            expect(r.ok).toBe(false);
+            expect(!r.ok && r.error).toContain('config file');
+            expect(!r.ok && r.error).not.toContain('POST /api/admin/config');
+        }
+    });
+    it('the REST body validator refuses postsDir and themeDir', () => {
+        for (const k of ['postsDir', 'themeDir']) {
+            const r = validateRestConfigBody({ [k]: '/tmp/x' });
+            expect(r.ok, k).toBe(false);
+            expect(!r.ok && r.error).toContain('No changes were saved.');
+        }
     });
 });
 
@@ -129,18 +142,12 @@ describe('error clarity', () => {
         const rest = validateRestConfigBody({ zzz: 1 });
         expect(!rest.ok && rest.error.endsWith('No changes were saved.')).toBe(true);
     });
-    it('names POST /api/admin/config for keys editable through REST', () => {
-        for (const k of ['postsDir', 'themeDir']) {
-            const r = validateMcpConfigPatch({ [k]: '/x' });
-            expect(!r.ok && r.error).toContain('Use POST /api/admin/config to change it.');
-        }
-    });
     it('names POST /api/admin/config for every REST-editable key and for no REST-refused key', () => {
-        for (const k of ['postsDir', 'themeDir', 'security', 'service', 'aiConfig']) {
+        for (const k of ['security', 'service', 'aiConfig']) {
             const r = validateMcpConfigPatch({ [k]: {} });
             expect(!r.ok && r.error, k).toContain('Use POST /api/admin/config to change it.');
         }
-        for (const k of ['corsOrigins', 'bind', 'tls', 'csp']) {
+        for (const k of ['corsOrigins', 'bind', 'tls', 'csp', 'postsDir', 'themeDir']) {
             const r = validateMcpConfigPatch({ [k]: {} });
             expect(r.ok, k).toBe(false);
             expect(!r.ok && r.error, k).not.toContain('POST /api/admin/config');
@@ -221,6 +228,8 @@ describe('POST /api/admin/config', () => {
     const EVIL = 'https://evil.example';
     for (const [name, raw] of Object.entries({
         'security.corsOrigins': `{"security":{"corsOrigins":["${EVIL}"]}}`,
+        postsDir: '{"postsDir":"/tmp/p0-r3-posts"}',
+        themeDir: '{"themeDir":"/tmp/p0-r3-themes"}',
         'service.bind': '{"service":{"bind":"0.0.0.0"}}',
         'service.tls': '{"service":{"tls":{"minVersion":"TLSv1"}}}',
         'service.unknown': '{"service":{"port":5200,"other":1}}',

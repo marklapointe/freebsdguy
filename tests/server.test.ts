@@ -104,7 +104,13 @@ describe('API Endpoints', () => {
     });
 
     it('Authenticated GET /api/admin/users should return 403 for non-admin', async () => {
-        const userToken = jwt.sign({ username: 'user', role: 'contributor' }, SECRET);
+        // A real, trusted contributor: 403 is the permission answer. (A token for an
+        // account that does not exist is untrusted and gets 401.)
+        const users = loadUsers();
+        users.users = users.users.filter((u) => u.username !== 'nonadmin403');
+        users.users.push({ username: 'nonadmin403', passwordHash: await bcrypt.hash('pass123', 10), role: 'contributor' });
+        saveUsers(users);
+        const userToken = jwt.sign({ username: 'nonadmin403', role: 'contributor' }, SECRET);
         const res = await request(app)
             .get('/api/admin/users')
             .set('Authorization', `Bearer ${userToken}`);
@@ -526,11 +532,12 @@ describe('API Endpoints', () => {
         expect([200, 400, 429]).toContain(res.status);
     });
 
-    it('GET /api/ai/models should return 403 for invalid token', async () => {
+    it('GET /api/ai/models should return 401 for invalid token', async () => {
         const res = await request(app)
             .get('/api/ai/models')
             .set('Authorization', 'Bearer invalid_token');
-        expect([403, 429]).toContain(res.status);
+        expect([401, 429]).toContain(res.status);
+        if (res.status === 401) expect(res.headers['www-authenticate']).toMatch(/^Bearer/);
     });
 
     it('GET / (root) should return 404 if dist/index.html does not exist', async () => {

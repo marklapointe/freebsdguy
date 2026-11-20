@@ -173,7 +173,7 @@ describe('P0: auth rechecks live users.json', () => {
         const res = await request(app)
             .get('/api/me')
             .set('Authorization', `Bearer ${token}`);
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('session for deleted user is destroyed and rejected', async () => {
@@ -204,7 +204,7 @@ describe('P0: auth rechecks live users.json', () => {
 
         const stale = jwt.sign({ username: 'purge-me', role: 'contributor' }, secret);
         const me = await request(app).get('/api/me').set('Authorization', `Bearer ${stale}`);
-        expect(me.status).toBe(403);
+        expect(me.status).toBe(401);
         vi.unstubAllEnvs();
     });
 });

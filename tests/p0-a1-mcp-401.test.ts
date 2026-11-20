@@ -72,9 +72,12 @@ describe('/mcp unauthenticated', () => {
         });
     }
 
-    it('REST routes keep their 403 for a bad JWT', async () => {
+    it('REST routes answer 401 + WWW-Authenticate for a bad JWT, like /mcp', async () => {
         const res = await request(app).get('/api/me').set('Authorization', 'Bearer not-a-token');
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
+        expect(res.headers['www-authenticate']).toMatch(/^Bearer/);
+        expect(res.body.message).toBe('Invalid or expired token');
+        expect(fs.readFileSync(audit, 'utf8')).not.toContain('not-a-token');
     });
 });
 

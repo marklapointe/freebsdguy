@@ -57,6 +57,27 @@ const BAD_BODIES: Record<string, string> = {
     'reference label with escaped bracket': '[a\\]b]: javascript:alert(1)\n\n[x][a\\]b]',
     'indented fence in a bullet list': '- foo\n  ```\n[x](javascript:alert(1))\n```',
     'indented fence in an ordered list': '1. foo\n   ```\n[x](javascript:alert(1))\n```',
+    'newline inside scheme (link)': '[x]( java\nscript:alert(1))',
+    'newline inside scheme (image)': '![x]( java\nscript:alert(1))',
+    'newline inside scheme (ref def)': '[id]: java\nscript:alert(1)\n\n[x][id]',
+    'tab and CR inside scheme (link)': '[x](java\t\rscript:alert(1))',
+    'control char inside scheme (link)': '[x](java\u0001script:alert(1))',
+    'style import': '<style>@import url(https://evil.example/x.css);</style>',
+    'raw style': '<style>*{display:none}</style>',
+    'noscript mxss': '<noscript><p title="</noscript><img src=x onerror=alert(1)>">',
+    'noscript plain': '<noscript>x</noscript>',
+    'image attribute breakout': '![x](x" onerror="alert(1))',
+    'link quote breakout': '[x](x" onmouseover="alert(1))',
+    'image bracketed quote breakout (event handler)': '![x](<x" onerror="alert(1)>)',
+    'link bracketed quote breakout (event handler)': '[x](<x" onmouseover="alert(1)>)',
+    'image bracketed quote breakout (relative)': '![x](<./foo"bar>)',
+    'image bracketed quote breakout (no space)': '![x](<foo.jpg"onclick="x>)',
+    'link bracketed quote breakout (relative)': '[x](<./a"b>)',
+    'link bracketed quote breakout (absolute)': '[x](<https://e.com/a"b>)',
+    'ref def quote breakout': '[id]: x"onerror="alert(1)\n\n![x][id]',
+    'ref def bracketed quote breakout': '[id]: <x"onerror="alert(1)>\n\n![x][id]',
+    'ref def scheme split at the colon (javascript)': '[id]: javascript\n:alert(1)\n\n[x][id]',
+    'ref def scheme split at the colon (data)': '[id]: data\n:text/html,x\n\n[x][id]',
     'srcset': '<img srcset="javascript:x 1x">',
     'srcset second candidate': '<img srcset="/a.png 1x, javascript:x 2x">'
 };
@@ -130,6 +151,12 @@ describe('validatePostContent', () => {
             '``a ` tick``\n\n[ok](/x)',
             'real `\\`code` span',
             'a <b and `<script>` here',
+            '[x](https://example.com "a title") ![i](/a.png "t")',
+            '[x]( https://e.com "title")',
+            '[x](<./a b.png>) ![i](<https://e.com/a b.png> "t")',
+            '[id]: https://example.com "Title"\n\n[x][id]',
+            '[home]: foo\nNote: x\n\n[x][home]',
+            '[id]: bar\nSee also: more\n\n[x][id]',
             '> quote with [id]: text but no url scheme\n\n- [id]: https://example.com'
         ];
         for (const content of good) expect(validatePostContent({ content, summary: 'A fine summary', title: 'T' }), content).toEqual({ ok: true });
@@ -270,6 +297,7 @@ describe('client render helper', () => {
         }
     });
 
+    // Write-time rejection is the contract for style/noscript; this is the render-time backstop only.
     it('strips script, iframe, object, embed, form, base, style, handlers, srcdoc and bad schemes', () => {
         const html = [
             '<p onclick="x()">hi</p>',

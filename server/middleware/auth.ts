@@ -306,12 +306,10 @@ export class RoleGuardFactory {
                 ? denyMcp(res, req, 'missing', 'No token', site)
                 : res.status(401).json({ message: 'No token' });
         }
-        // A credential the server cannot trust on /mcp is "not authenticated": 401,
+        // A credential the server cannot trust (on /mcp and on REST routes) is "not authenticated": 401,
         // the same body for every cause, an audit row, and no token text anywhere.
         const refuse = (res2: Response) =>
-            mcp
-                ? denyMcp(res2, req, 'invalid', INVALID_TOKEN_MESSAGE, site)
-                : res2.status(403).json({ message: 'Failed to authenticate token' });
+            denyMcp(res2, req, 'invalid', INVALID_TOKEN_MESSAGE, site);
 
         jwt.verify(token, secret, (err, decoded) => {
             if (err) {
@@ -341,9 +339,7 @@ export class RoleGuardFactory {
     ) {
         const site = this.opts.getAuditSite ? this.opts.getAuditSite() : undefined;
         const refuse = () =>
-            mcp
-                ? denyMcp(res, req, 'invalid', INVALID_TOKEN_MESSAGE, site)
-                : res.status(403).json({ message: 'Failed to authenticate token' });
+            denyMcp(res, req, 'invalid', INVALID_TOKEN_MESSAGE, site);
         const name = this.opts.getSessionCookieName();
         const cookies = parseCookies(req.headers.cookie);
         const sid = cookies[name];

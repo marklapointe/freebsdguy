@@ -991,12 +991,10 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
             !!v && typeof v === 'object' && !Array.isArray(v);
         const strip = (v: unknown): string | undefined =>
             typeof v === 'string' ? sanitizeHtml(v, { allowedTags: [], allowedAttributes: {} }) : undefined;
-        const cleanPath = (v: unknown): string | undefined =>
-            typeof v === 'string' && v.trim() && !v.includes('\0') ? v.trim() : undefined;
         if (typeof b.currentTheme === 'string') {
             // A theme file that is a symlink, or lies behind one, is not a theme (P0 C1).
-            // Checked against the themeDir this same request will leave in place.
-            const nextThemeDir = cleanPath(b.themeDir) || current.themeDir;
+            // Checked against the configured themeDir (file-only; this route cannot change it).
+            const nextThemeDir = current.themeDir;
             const themeProblem = selectThemeProblem(configDirOf(), { ...current, themeDir: nextThemeDir }, b.currentTheme);
             if (themeProblem) return res.status(400).json({ message: `${themeProblem}. No changes were saved.` });
         }
@@ -1008,10 +1006,6 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         for (const k of ['pagination', 'sortBy', 'sortOrder', 'searchPlacement'] as const) {
             if (b[k] !== undefined) patch[k] = b[k];
         }
-        const postsDir = cleanPath(b.postsDir);
-        if (postsDir) patch.postsDir = postsDir;
-        const themeDir = cleanPath(b.themeDir);
-        if (themeDir) patch.themeDir = themeDir;
 
         if (isObj(b.footer)) {
             patch.footer = {
