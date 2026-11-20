@@ -5,7 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { isSafePath } from './safe-path.ts';
+import { isSafeExistingPath, resolveConfiguredPath } from './safe-path.ts';
 
 export interface ThemeColors {
     [key: string]: string;
@@ -29,8 +29,34 @@ export function isValidThemeId(id: string): boolean {
 export function themeFilePath(themeDir: string, id: string): string | null {
     if (!isValidThemeId(id)) return null;
     const filePath = path.join(themeDir, `${id}.json`);
-    if (!isSafePath(themeDir, filePath)) return null;
+    // Disk-aware (P0 C1): a theme file that is a symlink, or lies behind one, is refused.
+    if (!isSafeExistingPath(themeDir, filePath)) return null;
     return filePath;
+}
+
+/**
+ * Refuse a theme selection that is not a valid id, or whose file is a symlink
+ * or lies behind one. Returns an error message, or null when the selection is fine.
+ */
+export function assertSafeThemeSelection(themeDir: string, themeId: string): string | null {
+    if (!isValidThemeId(themeId)) return 'Invalid theme id';
+    if (themeFilePath(themeDir, themeId) === null) return 'Invalid theme path';
+    return null;
+}
+
+/**
+ * The one theme-selection check for set_theme, update_config and POST
+ * /api/admin/config: resolves the configured themeDir next to the config file
+ * and refuses an invalid id or a theme file that is a symlink or lies behind one.
+ * Returns an error message, or null when the selection is fine.
+ */
+export function selectThemeProblem(
+    configDir: string,
+    config: { themeDir?: string },
+    themeId: unknown
+): string | null {
+    if (typeof themeId !== 'string') return 'Invalid theme id';
+    return assertSafeThemeSelection(resolveConfiguredPath(configDir, config.themeDir || './themes'), themeId);
 }
 
 /** Package/repo layout: server/themes next to server/lib, or cwd/server/themes. */

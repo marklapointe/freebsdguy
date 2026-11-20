@@ -13,7 +13,9 @@ import { KNOWN_MCP_TOOLS } from '../lib/token-scope.ts';
 import { mcpToolCalls } from '../lib/rate-limit.ts';
 
 export function registerMcpRoutes(app: Express, ctx: AppContext): void {
-    const { authenticate, getActiveConfig, setActiveConfig } = ctx;
+    const { getActiveConfig, setActiveConfig } = ctx;
+    // /mcp answers every failed authentication with 401 and an audit row (P0 A1).
+    const authenticate = ctx.authenticateMcp;
 
     const handleMcp = async (req: AuthenticatedRequest, res: Response) => {
         const username = req.user?.username;

@@ -13,6 +13,8 @@ import {
     saveUsers,
     saveConfig,
     sanitizeConfig,
+    loadConfig,
+    getConfigLoadStatus,
     findUserByUsername,
     configPath,
     preserveWebLoginFlag,
@@ -34,9 +36,10 @@ import {
     findDuplicate,
     withManifestLock
 } from '../lib/images.ts';
+import { validateMcpConfigPatch } from '../lib/config-patch.ts';
 import { PublicConfigBuilder } from '../lib/public-config.ts';
-import { resolvePostsDir, resolveImagesDir, isSafePath } from '../lib/safe-path.ts';
-import { listThemeCatalog, isValidThemeId, themeFilePath } from '../lib/themes.ts';
+import { resolvePostsDir, resolveImagesDir, isSafeExistingPath } from '../lib/safe-path.ts';
+import { listThemeCatalog, isValidThemeId, themeFilePath, selectThemeProblem } from '../lib/themes.ts';
 import { AIServiceFactory } from '../lib/ai-service.ts';
 import {
     mintToken,
@@ -337,7 +340,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
             if (!slug) return err('slug is required');
             const dir = postsDir(getActive());
             const postPath = path.join(dir, `${slug}.md`);
-            if (!isSafePath(dir, postPath)) return err('Forbidden slug');
+            if (!isSafeExistingPath(dir, postPath)) return err('Forbidden slug');
             const result = savePostAsCaller(
                 dir,
                 {
@@ -402,7 +405,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 if (!clean) return err('slug is required');
                 const dir = postsDir(getActive());
                 const postPath = path.join(dir, `${clean}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden slug');
+                if (!isSafeExistingPath(dir, postPath)) return err('Forbidden slug');
                 const result = publishPostAsCaller(dir, clean, caller);
                 if (!result.ok) return err(result.error);
                 return text({ message: 'Post published', slug: clean });
@@ -425,7 +428,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 if (!clean) return err('slug is required');
                 const dir = postsDir(getActive());
                 const postPath = path.join(dir, `${clean}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden slug');
+                if (!isSafeExistingPath(dir, postPath)) return err('Forbidden slug');
                 const result = unpublishPostAsCaller(dir, clean, caller);
                 if (!result.ok) return err(result.error);
                 return text({ message: 'Post unpublished', slug: clean });
@@ -446,7 +449,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 requireWriter(user);
                 const dir = postsDir(getActive());
                 const postPath = path.join(dir, `${slug}.md`);
-                if (!isSafePath(dir, postPath)) return err('Forbidden');
+                if (!isSafeExistingPath(dir, postPath)) return err('Forbidden');
                 const result = deletePostAsCaller(dir, slug, caller);
                 if (!result.ok) return err(result.error);
                 return text({ message: 'Post deleted', slug });
@@ -549,7 +552,7 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 requireWriter(user);
                 const dir = imagesDir(getActive());
                 const filePath = path.join(dir, filename);
-                if (!isSafePath(dir, filePath)) return err('Forbidden');
+                if (!isSafeExistingPath(dir, filePath)) return err('Forbidden');
                 if (!fs.existsSync(filePath)) return err('Image not found');
                 fs.unlinkSync(filePath);
                 await withManifestLock(dir, async () => {
@@ -589,8 +592,37 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         async ({ patch }) => {
             try {
                 requireAdmin(user);
-                const current = getActive();
-                const merged: Record<string, unknown> = { ...current, ...patch };
+                // Allow-list first (P0 E1): an unknown, forbidden or prototype key
+                // is an error and nothing is written.
+                const check = validateMcpConfigPatch(patch);
+                if (!check.ok) return err(check.error);
+                // Merge over what is on disk, not over the in-memory copy: a save
+                // must keep every key the file holds (service.port, keys a newer
+                // version wrote). The in-memory copy is the fallback for a file
+                // that cannot be read.
+                const active = getActive();
+                const disk = loadConfig();
+                const current = getConfigLoadStatus().usedDefaults ? active : disk;
+                if ((patch as Record<string, unknown>).currentTheme !== undefined) {
+                    // Checked against the themeDir the save will actually keep (the on-disk one).
+                    const themeProblem = selectThemeProblem(
+                        configDir(),
+                        current,
+                        (patch as Record<string, unknown>).currentTheme
+                    );
+                    if (themeProblem) return err(`${themeProblem}. No changes were saved.`);
+                }
+                const merged: Record<string, unknown> = { ...current };
+                for (const [key, value] of Object.entries(patch)) {
+                    // security is never merged here: the only security key a patch may carry
+                    // is the ignored disableWebLogin flag (see validateMcpConfigPatch).
+                    if (key === 'security') continue;
+                    const prev = (current as unknown as Record<string, unknown>)[key];
+                    merged[key] =
+                        (key === 'appearance' || key === 'footer') && prev && typeof prev === 'object'
+                            ? { ...(prev as Record<string, unknown>), ...(value as Record<string, unknown>) }
+                            : value;
+                }
                 const mergedSecurity =
                     merged.security && typeof merged.security === 'object' && !Array.isArray(merged.security)
                         ? { ...(merged.security as Record<string, unknown>) }
@@ -635,7 +667,9 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         async ({ themeId }) => {
             try {
                 requireAdmin(user);
-                if (!isValidThemeId(themeId)) return err('Invalid theme id');
+                // A theme file that is a symlink is not a theme (P0 C1).
+                const themeProblem = selectThemeProblem(configDir(), getActive(), themeId);
+                if (themeProblem) return err(themeProblem);
                 const cfg = { ...getActive(), currentTheme: themeId };
                 saveConfig(cfg);
                 setActive(cfg);

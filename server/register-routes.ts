@@ -48,7 +48,8 @@ import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
 import { PublicConfigBuilder } from './lib/public-config.ts';
-import { isSafePath, resolveConfiguredPath, resolvePostsDir, resolveImagesDir } from './lib/safe-path.ts';
+import { validateRestConfigBody } from './lib/config-patch.ts';
+import { isSafePath, isSafeExistingPath, resolveConfiguredPath, resolvePostsDir, resolveImagesDir } from './lib/safe-path.ts';
 import { isAllowedRole, AuthenticatedRequest } from './middleware/auth.ts';
 import type { AppContext } from './lib/app-context.ts';
 import {
@@ -70,7 +71,8 @@ import {
     listThemeIds,
     loadThemeColors,
     loadThemeColorsForMode,
-    themeFilePath
+    themeFilePath,
+    selectThemeProblem
 } from './lib/themes.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -624,8 +626,8 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
 
     // Security check: prevent directory traversal
     const postPath = path.join(postsDir, `${slug}.md`);
-    if (!isSafePath(postsDir, postPath)) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+    if (!isSafeExistingPath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal or symlink for slug: ${slug}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
 
@@ -903,7 +905,7 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, async (re
     const imagesDir = imagesDirOf(config);
     const filePath = path.join(imagesDir, filename);
 
-    if (!isSafePath(imagesDir, filePath)) {
+    if (!isSafeExistingPath(imagesDir, filePath)) {
         console.warn(`[WARN] Blocked potential directory traversal attempt for filename: ${filename}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
@@ -948,7 +950,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
 
     for (const filename of filenames) {
         const filePath = path.join(imagesDir, filename);
-        if (!isSafePath(imagesDir, filePath)) {
+        if (!isSafeExistingPath(imagesDir, filePath)) {
             errors.push(`${filename}: Invalid path`);
             continue;
         }
@@ -979,6 +981,10 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
 // then run the single shared validator (sanitizeConfig) so route and loader never drift.
 app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     try {
+        // P0 E1: an unknown top-level key or a prototype-pollution key is a 400,
+        // and config.json is not touched.
+        const bodyCheck = validateRestConfigBody(req.body);
+        if (!bodyCheck.ok) return res.status(400).json({ message: bodyCheck.error });
         const current = loadConfig();
         const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
         const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -987,6 +993,13 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
             typeof v === 'string' ? sanitizeHtml(v, { allowedTags: [], allowedAttributes: {} }) : undefined;
         const cleanPath = (v: unknown): string | undefined =>
             typeof v === 'string' && v.trim() && !v.includes('\0') ? v.trim() : undefined;
+        if (typeof b.currentTheme === 'string') {
+            // A theme file that is a symlink, or lies behind one, is not a theme (P0 C1).
+            // Checked against the themeDir this same request will leave in place.
+            const nextThemeDir = cleanPath(b.themeDir) || current.themeDir;
+            const themeProblem = selectThemeProblem(configDirOf(), { ...current, themeDir: nextThemeDir }, b.currentTheme);
+            if (themeProblem) return res.status(400).json({ message: `${themeProblem}. No changes were saved.` });
+        }
 
         const patch: Record<string, unknown> = {};
         if (b.siteName) patch.siteName = strip(b.siteName);
@@ -1027,7 +1040,8 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
                 loginRateLimitMax: b.security.loginRateLimitMax ?? prev.loginRateLimitMax,
                 mcpRateLimitWindow: b.security.mcpRateLimitWindow ?? prev.mcpRateLimitWindow,
                 mcpRateLimitMax: b.security.mcpRateLimitMax ?? prev.mcpRateLimitMax,
-                corsOrigins: b.security.corsOrigins ?? prev.corsOrigins,
+                // Never from the request body (validated away); keep what is on disk.
+                corsOrigins: prev.corsOrigins,
                 trustProxy: b.security.trustProxy ?? prev.trustProxy
             };
         }
@@ -1112,8 +1126,8 @@ app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedR
     const postsDir = postsDirOf(config);
     const postPath = path.join(postsDir, `${slug}.md`);
 
-    if (!isSafePath(postsDir, postPath)) {
-        console.warn(`[WARN] Blocked potential directory traversal attempt for slug: ${slug}`);
+    if (!isSafeExistingPath(postsDir, postPath)) {
+        console.warn(`[WARN] Blocked potential directory traversal or symlink for slug: ${slug}`);
         return res.status(403).json({ message: 'Forbidden' });
     }
 

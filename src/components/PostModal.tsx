@@ -1,5 +1,6 @@
 import { X, FileText, Pin, Sparkles } from 'lucide-react';
 import { MdEditor, MdPreview } from 'md-editor-rt';
+import { sanitizeMarkdownHtml } from '../lib/sanitize-md';
 
 interface PostModalProps {
     isOpen: boolean;
@@ -179,6 +180,7 @@ export const PostModal = ({
                                 </div>
                                 <div className="max-h-60 overflow-y-auto p-1 bg-bg rounded text-sm border border-accent border-opacity-10">
                                     <MdPreview
+                                        sanitize={sanitizeMarkdownHtml}
                                         modelValue={enhancedPreview}
                                         theme={theme}
                                         language="en-US"
@@ -189,6 +191,7 @@ export const PostModal = ({
                         )}
 
                         <MdEditor
+                            sanitize={sanitizeMarkdownHtml}
                             modelValue={post.content || ''}
                             onChange={(val) => setPost({...post, content: val})}
                             theme={theme}

@@ -12,6 +12,8 @@ export interface AppContext {
     getActiveConfig: () => Config;
     setActiveConfig: (c: Config) => void;
     authenticate: RequestHandler;
+    /** Same as authenticate, but answers 401 and writes an audit row for every failed auth (the /mcp route). */
+    authenticateMcp: RequestHandler;
     requireAdmin: RequestHandler;
     requireWriter: RequestHandler;
     upload: multer.Multer;

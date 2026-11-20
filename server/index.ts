@@ -138,6 +138,7 @@ const guards = new RoleGuardFactory(SECRET, {
     getAuditSite: () => resolveAuditSite(configHolder.get())
 });
 const authenticate = guards.authenticate();
+const authenticateMcp = guards.authenticate({ mcp: true });
 const requireAdmin = guards.requireAdmin();
 const requireWriter = guards.requireContributorOrAdmin();
 
@@ -180,6 +181,7 @@ registerRoutes(app, {
     getActiveConfig: configHolder.get,
     setActiveConfig: configHolder.set,
     authenticate,
+    authenticateMcp,
     requireAdmin,
     requireWriter,
     upload,

@@ -96,6 +96,39 @@ function denyPat(res: Response, reason: 'invalid' | 'user', fields?: AuditFields
     return res.status(401).json({ message: INVALID_TOKEN_MESSAGE });
 }
 
+/**
+ * A failed authentication on a route that must answer 401 (the /mcp route).
+ * The audit row carries the reason and where the call came from, never the
+ * credential that was presented.
+ */
+function denyMcp(
+    res: Response,
+    req: AuthenticatedRequest,
+    reason: 'missing' | 'invalid',
+    message: string,
+    site?: string
+): Response {
+    writeAudit({
+        event: 'token',
+        action: 'denied',
+        outcome: 'denied',
+        reason,
+        ...auditFields(req, site)
+    });
+    res.set('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ message });
+}
+
+/** Where the call came from, for an audit row. */
+function auditFields(req: AuthenticatedRequest, site?: string): AuditFields {
+    return { ip: req.ip, ...(site ? { site } : {}) };
+}
+
+export interface AuthenticateOptions {
+    /** Answer 401 and write an audit row for every failed auth (the /mcp route). */
+    mcp?: boolean;
+}
+
 export class RoleGuardFactory {
     private secret: string;
     private opts: AuthGuardOptions;
@@ -116,9 +149,10 @@ export class RoleGuardFactory {
      * Product: require valid PAT, JWT, or session; attaches req.user from live users.json.
      * Bearer PAT wins when present (works in both jwt and session site modes).
      */
-    authenticate() {
+    authenticate(options?: AuthenticateOptions) {
         const secret = this.secret;
         const opts = this.opts;
+        const mcp = options?.mcp === true;
         return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (bearer && isPatToken(bearer)) {
@@ -126,9 +160,9 @@ export class RoleGuardFactory {
             }
             const mode = opts.getMode();
             if (mode === 'session') {
-                return this.authenticateSession(req, res, next);
+                return this.authenticateSession(req, res, next, mcp);
             }
-            return this.authenticateJwt(req, res, next, secret);
+            return this.authenticateJwt(req, res, next, secret, mcp);
         };
     }
 
@@ -262,24 +296,36 @@ export class RoleGuardFactory {
         req: AuthenticatedRequest,
         res: Response,
         next: NextFunction,
-        secret: string
+        secret: string,
+        mcp = false
     ) {
         const token = req.headers['authorization']?.split(' ')[1];
-        if (!token) return res.status(401).json({ message: 'No token' });
+        const site = this.opts.getAuditSite ? this.opts.getAuditSite() : undefined;
+        if (!token) {
+            return mcp
+                ? denyMcp(res, req, 'missing', 'No token', site)
+                : res.status(401).json({ message: 'No token' });
+        }
+        // A credential the server cannot trust on /mcp is "not authenticated": 401,
+        // the same body for every cause, an audit row, and no token text anywhere.
+        const refuse = (res2: Response) =>
+            mcp
+                ? denyMcp(res2, req, 'invalid', INVALID_TOKEN_MESSAGE, site)
+                : res2.status(403).json({ message: 'Failed to authenticate token' });
 
         jwt.verify(token, secret, (err, decoded) => {
             if (err) {
                 console.error(`[AUTH] JWT verification failed: ${err.message}`);
-                return res.status(403).json({ message: 'Failed to authenticate token' });
+                return refuse(res);
             }
             const payload = decoded as { username?: string };
             const identity = liveIdentity(payload?.username);
             if (!identity) {
-                return res.status(403).json({ message: 'Failed to authenticate token' });
+                return refuse(res);
             }
             // An MCP-only agent account has no browser identity: its token is all it gets.
             if (identity.mcpOnly) {
-                return res.status(403).json({ message: 'Failed to authenticate token' });
+                return refuse(res);
             }
             req.user = { username: identity.username, role: identity.role };
             req.authVia = 'jwt';
@@ -287,24 +333,40 @@ export class RoleGuardFactory {
         });
     }
 
-    private authenticateSession(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    private authenticateSession(
+        req: AuthenticatedRequest,
+        res: Response,
+        next: NextFunction,
+        mcp = false
+    ) {
+        const site = this.opts.getAuditSite ? this.opts.getAuditSite() : undefined;
+        const refuse = () =>
+            mcp
+                ? denyMcp(res, req, 'invalid', INVALID_TOKEN_MESSAGE, site)
+                : res.status(403).json({ message: 'Failed to authenticate token' });
         const name = this.opts.getSessionCookieName();
         const cookies = parseCookies(req.headers.cookie);
         const sid = cookies[name];
-        if (!sid) return res.status(401).json({ message: 'No token' });
+        if (!sid) {
+            if (!mcp) return res.status(401).json({ message: 'No token' });
+            // A bearer that is not a personal access token was presented and cannot
+            // be trusted in session mode: that is "invalid", not "missing".
+            const presented = req.headers['authorization']?.split(' ')[1];
+            return denyMcp(res, req, presented ? 'invalid' : 'missing', presented ? INVALID_TOKEN_MESSAGE : 'No token', site);
+        }
 
         const store = this.opts.getSessionStore();
         const rec: SessionRecord | null = store.get(sid);
-        if (!rec) return res.status(403).json({ message: 'Failed to authenticate token' });
+        if (!rec) return refuse();
 
         const identity = liveIdentity(rec.username, store, rec.id);
         if (!identity) {
-            return res.status(403).json({ message: 'Failed to authenticate token' });
+            return refuse();
         }
         // An MCP-only agent account may not hold a browser session.
         if (identity.mcpOnly) {
             store.destroy(rec.id);
-            return res.status(403).json({ message: 'Failed to authenticate token' });
+            return refuse();
         }
         req.user = { username: identity.username, role: identity.role };
         req.authVia = 'session';

@@ -65,6 +65,7 @@ function buildApp(active: Config) {
         getActiveConfig: holder.get,
         setActiveConfig: holder.set,
         authenticate: guards.authenticate(),
+        authenticateMcp: guards.authenticate({ mcp: true }),
         requireAdmin: guards.requireAdmin(),
         requireWriter: guards.requireContributorOrAdmin(),
         upload: {} as never

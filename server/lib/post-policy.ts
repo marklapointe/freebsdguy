@@ -18,8 +18,9 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { getPost, postStatus, readFrontMatter, savePost, FrontMatterParseError, type PostMetadata, type PostStatus } from './posts.ts';
+import { getPost, postStatus, readFrontMatter, savePost, FrontMatterParseError, UnsafePostPathError, isSafePostFile, type PostMetadata, type PostStatus } from './posts.ts';
 import { writeAudit } from './audit-log.ts';
+import { validatePostContent } from './post-content.ts';
 import { scopeDeniedMessage, type TokenScopes } from './token-scope.ts';
 import type { AuditFields, AuthVia } from './audit-context.ts';
 
@@ -152,6 +153,8 @@ function frontMatterRefusal(postsDir: string, slug: string): string | null {
         return null;
     } catch (error) {
         if (error instanceof FrontMatterParseError) return error.message;
+        // A symlink, or a path that leaves the posts directory (P0 C1).
+        if (error instanceof UnsafePostPathError) return error.message;
         throw error;
     }
 }
@@ -181,6 +184,9 @@ export function savePostAsCaller(
     if (existing && !mayWritePost(existing.author, caller)) {
         return { ok: false, error: NOT_YOUR_POST };
     }
+    // Dangerous URL schemes and raw HTML are refused at write time (P0 D1/D2).
+    const content = validatePostContent(input);
+    if (!content.ok) return { ok: false, error: content.error };
     const created = !existing;
     const beforeSha256 = postFileSha256(postsDir, input.slug);
     savePost(postsDir, {
@@ -226,6 +232,9 @@ export function publishPostAsCaller(
     const existing = getPost(postsDir, slug);
     if (!existing) return { ok: false, error: POST_NOT_FOUND };
     if (!mayWritePost(existing.author, caller)) return { ok: false, error: NOT_YOUR_POST };
+    // A post is public once published: it must pass the same content rules (P0 D1/D2).
+    const content = validatePostContent(existing);
+    if (!content.ok) return { ok: false, error: content.error };
     const stamped = existing.publishedAt;
     const publishedAt =
         typeof stamped === 'string' && stamped ? stamped : new Date().toISOString();
@@ -307,6 +316,22 @@ export function deletePostAsCaller(
     caller: PostCaller
 ): PostWriteResult {
     const filePath = path.join(postsDir, `${slug}.md`);
+    // A symlink (or a path behind one) is never deleted through, and it is
+    // answered as a missing post (P0 C1).
+    if (!isSafePostFile(postsDir, slug)) {
+        writeAudit({
+            event: 'post',
+            action: 'delete',
+            slug,
+            user: caller.username,
+            outcome: 'denied',
+            reason: 'unsafe_path',
+            beforeSha256: null,
+            afterSha256: null,
+            ...auditFields(caller)
+        });
+        return { ok: false, error: POST_NOT_FOUND };
+    }
     if (!fs.existsSync(filePath)) {
         writeAudit({
             event: 'post',

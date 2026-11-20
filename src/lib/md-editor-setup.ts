@@ -19,6 +19,11 @@ mermaid.initialize({
 });
 
 config({
+    // Raw HTML in Markdown is off (P0 D1): a post is Markdown, not HTML. The
+    // sanitizer in sanitize-md.ts is the second layer for whatever still renders.
+    markdownItConfig: (md) => {
+        md.set({ html: false });
+    },
     editorExtensions: {
         highlight: {
             instance: hljs,

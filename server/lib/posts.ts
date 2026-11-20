@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 import sanitizeHtml from 'sanitize-html';
+import { isSafeExistingPath } from './safe-path.ts';
 
 export interface PostMetadata {
     slug: string;
@@ -41,6 +42,45 @@ function parseFrontMatter(content: string): matter.GrayMatterFile<string> {
     return matter(content, {});
 }
 
+/** Thrown when a post file is, or lies behind, a symlink or leaves the posts directory. */
+export class UnsafePostPathError extends Error {
+    readonly slug: string;
+
+    constructor(slug: string) {
+        super('Forbidden path');
+        this.name = 'UnsafePostPathError';
+        this.slug = slug;
+    }
+}
+
+/** Whether `<postsDir>/<slug>.md` is a plain file path inside the posts directory (P0 C1). */
+export function isSafePostFile(postsDir: string, slug: string): boolean {
+    return isSafeExistingPath(postsDir, path.join(postsDir, `${slug}.md`));
+}
+
+/**
+ * Write a file without following a symlink at the final component (O_NOFOLLOW),
+ * so a link planted between the check and the write cannot redirect the write.
+ * Where O_NOFOLLOW does not exist the write fails closed.
+ *
+ * `opts.noFollow` defaults to the platform's O_NOFOLLOW when the key is absent.
+ * `fs.constants` is frozen, so a test passes `{ noFollow: undefined }` to
+ * simulate a platform without the flag (a default parameter would not do: it
+ * replaces an explicit `undefined`).
+ */
+export function writeFileNoFollow(filePath: string, data: string, opts?: { noFollow?: unknown }): void {
+    const noFollow = opts && 'noFollow' in opts ? opts.noFollow : fs.constants.O_NOFOLLOW;
+    if (typeof noFollow !== 'number') {
+        throw new UnsafePostPathError(path.basename(filePath, '.md'));
+    }
+    const fd = fs.openSync(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | noFollow, 0o666);
+    try {
+        fs.writeFileSync(fd, data);
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
 export interface Post extends PostMetadata {
     content: string;
 }
@@ -66,6 +106,8 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
     const files = fs.readdirSync(postsDir);
     const posts = files.filter(f => f.endsWith('.md')).map(filename => {
         const filePath = path.join(postsDir, filename);
+        // A symlinked post is never listed: it may point outside the posts directory.
+        if (!isSafeExistingPath(postsDir, filePath)) return null;
         try {
             /* v8 ignore next */
             if (!fs.existsSync(filePath)) {
@@ -133,6 +175,9 @@ export const getPosts = (postsDir: string, options?: GetPostsOptions): PostMetad
 
 export const getPost = (postsDir: string, slug: string): Post | null => {
     const filePath = path.join(postsDir, `${slug}.md`);
+    if (!isSafeExistingPath(postsDir, filePath)) {
+        return null;
+    }
     if (!fs.existsSync(filePath)) {
         return null;
     }
@@ -223,6 +268,7 @@ export class FrontMatterParseError extends Error {
  */
 export function readFrontMatter(postsDir: string, slug: string): Record<string, unknown> {
     const filePath = path.join(postsDir, `${slug}.md`);
+    if (!isSafeExistingPath(postsDir, filePath)) throw new UnsafePostPathError(slug);
     if (!fs.existsSync(filePath)) {
         // A post that does not exist yet has no front matter.
         return {};
@@ -271,6 +317,7 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
     if (!fs.existsSync(postsDir)) {
         fs.mkdirSync(postsDir, { recursive: true });
     }
+    if (!isSafePostFile(postsDir, post.slug)) throw new UnsafePostPathError(post.slug);
 
     // Existing front matter first: a save must not drop keys it does not know
     // (aliases, publishedAt, ...), only the keys the input names may change.
@@ -283,6 +330,7 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
         merged = { ...readFrontMatter(postsDir, post.slug) };
     } catch (error) {
         console.error(`Refusing to save post ${post.slug}:`, error);
+        if (error instanceof UnsafePostPathError) throw error;
         throw error instanceof FrontMatterParseError
             ? error
             : new FrontMatterParseError(post.slug);
@@ -313,7 +361,7 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
 
     try {
         const fileContent = matter.stringify(content, frontmatter);
-        fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), fileContent);
+        writeFileNoFollow(path.join(postsDir, `${post.slug}.md`), fileContent);
     } catch (error) {
         console.error(`Error saving post ${post.slug}:`, error);
         // Fallback to simple manual construction if matter.stringify fails for some reason
@@ -325,7 +373,7 @@ export const savePost = (postsDir: string, post: Partial<Post> & { slug: string;
             .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
             .join('\n');
         const manualContent = `---\n${core}\n${extra ? `${extra}\n` : ''}---\n${content}`;
-        fs.writeFileSync(path.join(postsDir, `${post.slug}.md`), manualContent);
+        writeFileNoFollow(path.join(postsDir, `${post.slug}.md`), manualContent);
     }
 };
 
@@ -351,7 +399,10 @@ function aliasSignature(postsDir: string, files: string[]): string {
  */
 export const findPostByAlias = (postsDir: string, slug: string): string | null => {
     if (!SLUG_RE.test(slug) || !fs.existsSync(postsDir)) return null;
-    const files = fs.readdirSync(postsDir).filter((f) => f.endsWith('.md')).sort();
+    const files = fs
+        .readdirSync(postsDir)
+        .filter((f) => f.endsWith('.md') && isSafeExistingPath(postsDir, path.join(postsDir, f)))
+        .sort();
     const sig = aliasSignature(postsDir, files);
     if (!aliasCache || aliasCache.dir !== postsDir || aliasCache.sig !== sig) {
         const map = new Map<string, string>();
