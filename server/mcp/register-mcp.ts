@@ -8,6 +8,9 @@ import type { AuthenticatedRequest } from '../middleware/auth.ts';
 import { isAllowedRole, type Role } from '../middleware/auth.ts';
 import { createMdwebMcpServer } from './create-server.ts';
 import { writeAudit } from '../lib/audit-log.ts';
+import { argsSha256, resolveAuditSite } from '../lib/audit-context.ts';
+import { KNOWN_MCP_TOOLS } from '../lib/token-scope.ts';
+import { mcpToolCalls } from '../lib/rate-limit.ts';
 
 export function registerMcpRoutes(app: Express, ctx: AppContext): void {
     const { authenticate, getActiveConfig, setActiveConfig } = ctx;
@@ -19,16 +22,47 @@ export function registerMcpRoutes(app: Express, ctx: AppContext): void {
             return res.status(403).json({ message: 'Forbidden' });
         }
 
+        const site = resolveAuditSite(getActiveConfig());
+        const scopes = req.tokenScopes ? [...req.tokenScopes] : [];
+        const fields = {
+            ...(req.tokenId ? { tokenId: req.tokenId } : {}),
+            ...(req.authVia ? { via: req.authVia } : {}),
+            ...(req.ip ? { ip: req.ip } : {}),
+            ...(site ? { site } : {})
+        };
+
         const server = createMdwebMcpServer({
             user: { username, role: role as Role },
             getActive: getActiveConfig,
             setActive: setActiveConfig,
-            tokenScopes: req.tokenScopes
+            tokenScopes: req.tokenScopes,
+            audit: {
+                ...(req.tokenId ? { tokenId: req.tokenId } : {}),
+                ...(req.authVia ? { via: req.authVia } : {}),
+                ...(req.ip ? { ip: req.ip } : {}),
+                ...(site ? { site } : {}),
+                scopes
+            }
         });
-        const rpc = req.body as { method?: string; params?: { name?: string } } | undefined;
-        if (rpc?.method === 'tools/call') {
-            const tool = typeof rpc.params?.name === 'string' ? rpc.params.name : 'unknown';
-            writeAudit({ event: 'mcp', tool, username, outcome: 'accepted' });
+
+        // The row of a tool call is written by the tool itself, so a call that
+        // never reaches a tool needs one here: a tool the role may not run is
+        // not registered at all, and a tool nobody knows is an error.
+        const registered =
+            (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools || {};
+        for (const call of mcpToolCalls(req.body)) {
+            if (call.name && registered[call.name]) continue;
+            const known = KNOWN_MCP_TOOLS.has(call.name);
+            writeAudit({
+                event: 'mcp',
+                tool: call.name || 'unknown',
+                scopes: [...scopes],
+                argsSha256: argsSha256(call.args),
+                outcome: known ? 'denied' : 'error',
+                reason: known ? 'role' : 'unknown_tool',
+                username,
+                ...fields
+            });
         }
 
         try {

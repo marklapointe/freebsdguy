@@ -53,7 +53,7 @@ const TOOL_SCOPES: Record<string, Scope> = {
     ai_enhance: 'content:write',
     ai_list_models: 'content:write',
     unpublish_post: 'moderate',
-    delete_post: 'moderate',
+    delete_post: 'content:write',
     delete_image: 'moderate',
     get_config: 'admin',
     update_config: 'admin',
@@ -66,6 +66,12 @@ const TOOL_SCOPES: Record<string, Scope> = {
     create_token: 'admin',
     revoke_token: 'admin'
 };
+
+/**
+ * Every MCP tool the server knows. A tool that is not in this set is unknown:
+ * the server never registered it, so a call for it is an error, not a denial.
+ */
+export const KNOWN_MCP_TOOLS: ReadonlySet<string> = new Set(Object.keys(TOOL_SCOPES));
 
 /** MCP tools that change server state (their handlers write). */
 const MUTATING_MCP_TOOLS = new Set([
@@ -226,8 +232,10 @@ export function isMutatingHttpRequest(method: string, rawPath: string): boolean 
 /** The scope a mutating REST call needs. */
 function requiredScopeForHttp(method: string, rawPath: string): Scope {
     const pathOnly = scopePath(rawPath);
-    // Removing content is moderation, not authoring.
-    if (method === 'DELETE' && pathOnly.startsWith('/api/posts/')) return 'moderate';
+    // Deleting a post is authoring: post-policy then allows only the author's
+    // own draft (or a moderator/admin). Deleting anyone's content other than a
+    // post (images) is moderation.
+    if (method === 'DELETE' && pathOnly.startsWith('/api/posts/')) return 'content:write';
     if (pathOnly === '/api/admin/images/delete-bulk') return 'moderate';
     if (method === 'DELETE' && pathOnly.startsWith('/api/admin/images')) return 'moderate';
     // The rest of /api/admin and the token routes administer the site.

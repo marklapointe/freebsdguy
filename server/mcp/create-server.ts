@@ -24,6 +24,7 @@ import {
     publishPostAsCaller,
     savePostAsCaller,
     unpublishPostAsCaller,
+    deletePostAsCaller,
     type PostCaller
 } from '../lib/post-policy.ts';
 import {
@@ -55,9 +56,25 @@ import {
 } from '../lib/token-scope.ts';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { MDWEB_MCP_INSTRUCTIONS, MDWEB_MCP_PLAYBOOK } from './playbook.ts';
+import { writeAudit } from '../lib/audit-log.ts';
+import { argsSha256, type AuthVia } from '../lib/audit-context.ts';
 import sanitizeHtml from 'sanitize-html';
 
 export type McpUser = { username: string; role: Role };
+
+/** Who the caller is, for the audit rows of a tool call (Track #2119 U8). */
+export interface McpAuditContext {
+    /** The id of the personal access token, when the caller used one. */
+    tokenId?: string;
+    /** How the caller authenticated. */
+    via?: AuthVia;
+    /** The address the caller came from. */
+    ip?: string;
+    /** The site this server serves. */
+    site?: string;
+    /** The scopes the caller's token holds. */
+    scopes?: TokenScopes;
+}
 
 export interface McpServerDeps {
     user: McpUser;
@@ -65,6 +82,8 @@ export interface McpServerDeps {
     setActive: (c: Config) => void;
     /** Omitted for JWT/session callers, who are not scope-limited. */
     tokenScopes?: TokenScopes;
+    /** Who the caller is, for the audit rows. Omitted when there is no request. */
+    audit?: McpAuditContext;
 }
 
 function text(data: unknown) {
@@ -141,12 +160,47 @@ function imagesDir(cfg: Config) {
 export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
     const { user, getActive, setActive, tokenScopes } = deps;
     /** The caller of every tool: who it is and what its token may do. */
-    const caller: PostCaller = { username: user.username, role: user.role, scopes: tokenScopes };
+    const caller: PostCaller = {
+        username: user.username,
+        role: user.role,
+        scopes: tokenScopes,
+        tokenId: deps.audit?.tokenId,
+        via: deps.audit?.via,
+        ip: deps.audit?.ip,
+        site: deps.audit?.site
+    };
 
     const server = new McpServer(
         { name: 'mdweb', version: packageVersion() },
         { instructions: MDWEB_MCP_INSTRUCTIONS }
     );
+
+    /**
+     * The row of one tool call. It names the tool and the scopes, and the
+     * hash of the arguments — never the arguments themselves — and says how
+     * the call ended.
+     */
+    const writeMcpAudit = (
+        tool: string,
+        args: unknown,
+        outcome: 'accepted' | 'denied' | 'error',
+        reason?: string
+    ) => {
+        const audit = deps.audit;
+        if (!audit) return;
+        writeAudit({
+            event: 'mcp',
+            tool,
+            scopes: audit.scopes ? [...audit.scopes] : [],
+            argsSha256: argsSha256(args),
+            outcome,
+            ...(reason ? { reason } : {}),
+            ...(audit.tokenId ? { tokenId: audit.tokenId } : {}),
+            ...(audit.via ? { via: audit.via } : {}),
+            ...(audit.ip ? { ip: audit.ip } : {}),
+            ...(audit.site ? { site: audit.site } : {})
+        });
+    };
 
     const registerGuarded = (
         name: string,
@@ -160,9 +214,21 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
         if (!roleAllowsMcpTool(name, user.role)) return;
         server.registerTool(name, config as never, (async (args: any, extra: any) => {
             if (tokenScopes && !tokenAllowsTool(tokenScopes, name)) {
+                writeMcpAudit(name, args, 'denied', `scope:${requiredScopeForTool(name)}`);
                 return err(scopeDeniedMessage(requiredScopeForTool(name)));
             }
-            return handler(args, extra);
+            try {
+                const result = await handler(args, extra);
+                const failed =
+                    Boolean(result) &&
+                    typeof result === 'object' &&
+                    (result as { isError?: unknown }).isError === true;
+                writeMcpAudit(name, args, failed ? 'error' : 'accepted');
+                return result;
+            } catch (e: unknown) {
+                writeMcpAudit(name, args, 'error', 'exception');
+                throw e;
+            }
         }) as never);
     };
 
@@ -381,8 +447,8 @@ export function createMdwebMcpServer(deps: McpServerDeps): McpServer {
                 const dir = postsDir(getActive());
                 const postPath = path.join(dir, `${slug}.md`);
                 if (!isSafePath(dir, postPath)) return err('Forbidden');
-                if (!fs.existsSync(postPath)) return err('Post not found');
-                fs.unlinkSync(postPath);
+                const result = deletePostAsCaller(dir, slug, caller);
+                if (!result.ok) return err(result.error);
                 return text({ message: 'Post deleted', slug });
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));

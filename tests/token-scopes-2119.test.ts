@@ -182,7 +182,7 @@ describe('MCP tools are scoped', () => {
         expect(n).toContain('create_post');
         expect(n).toContain('update_post');
         expect(n).toContain('upload_image');
-        expect(n).not.toContain('delete_post');
+        expect(n).toContain('delete_post');
         expect(n).not.toContain('delete_image');
         for (const t of ['get_config', 'update_config', 'list_users', 'list_tokens', 'create_token']) {
             expect(n).not.toContain(t);
@@ -191,7 +191,7 @@ describe('MCP tools are scoped', () => {
 
     it('names the scope a call is missing', async () => {
         const c = await connect('contributor', ['read', 'content:write', 'publish']);
-        const r = await call(c, 'delete_post', { slug: 'x' });
+        const r = await call(c, 'delete_image', { filename: 'x.webp' });
         expect(JSON.stringify(r)).toMatch(/Token lacks scope moderate/);
     });
 
@@ -270,8 +270,8 @@ describe('REST calls are scoped', () => {
         const del = await request(app)
             .delete('/api/posts/x')
             .set('Authorization', `Bearer ${pat}`);
-        expect(del.status).toBe(403);
-        expect(del.body.message).toBe('Token lacks scope moderate');
+        expect(del.status).toBe(404);
+        expect(del.body.message).toBe('Post not found');
     });
 
     it('refuses a mixed-case path the same way', async () => {
@@ -289,8 +289,8 @@ describe('REST calls are scoped', () => {
         const del = await request(app)
             .delete('/API/posts/x')
             .set('Authorization', `Bearer ${pat}`);
-        expect(del.status).toBe(403);
-        expect(del.body.message).toBe('Token lacks scope moderate');
+        expect(del.status).toBe(404);
+        expect(del.body.message).toBe('Post not found');
     });
 });
 

@@ -169,6 +169,17 @@ export interface SecurityConfig {
     mcpRateLimitWindow?: number;
     /** Max requests per window for /mcp. */
     mcpRateLimitMax?: number;
+    /**
+     * Per-token limits (Track #2119 U8). Behind the gateway every agent shares
+     * one address, so these buckets are keyed by personal access token. The
+     * env MDWEB_TOKEN_READ_PER_MIN / MDWEB_TOKEN_WRITE_PER_MIN /
+     * MDWEB_TOKEN_PUBLISH_PER_HOUR wins over this object.
+     */
+    tokenRateLimits?: {
+        readPerMinute?: number;
+        writePerMinute?: number;
+        publishPerHour?: number;
+    };
     /** Allowed browser origins. Never "*". Empty means same-origin only. */
     corsOrigins?: string[];
     disableAI?: boolean;
@@ -619,6 +630,28 @@ export function sanitizeConfig(raw: unknown): { config: Config; warnings: string
             if (typeof sec.loginRateLimitMax === 'number') config.security.loginRateLimitMax = sec.loginRateLimitMax;
             if (typeof sec.mcpRateLimitWindow === 'number') config.security.mcpRateLimitWindow = sec.mcpRateLimitWindow;
             if (typeof sec.mcpRateLimitMax === 'number') config.security.mcpRateLimitMax = sec.mcpRateLimitMax;
+            if (sec.tokenRateLimits && typeof sec.tokenRateLimits === 'object' && !Array.isArray(sec.tokenRateLimits)) {
+                const raw = sec.tokenRateLimits as Record<string, unknown>;
+                const limits: NonNullable<SecurityConfig['tokenRateLimits']> = {};
+                const names = [
+                    ['readPerMinute', 'readPerMinute'],
+                    ['writePerMinute', 'writePerMinute'],
+                    ['publishPerHour', 'publishPerHour']
+                ] as const;
+                for (const [key, outKey] of names) {
+                    const value = raw[key];
+                    if (value === undefined) continue;
+                    // A typo or a negative must not open a bucket.
+                    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+                        limits[outKey] = value;
+                    } else {
+                        warnings.push(`security.tokenRateLimits.${key} invalid; ignored`);
+                    }
+                }
+                if (Object.keys(limits).length) config.security.tokenRateLimits = limits;
+            } else if (sec.tokenRateLimits !== undefined) {
+                warnings.push('security.tokenRateLimits invalid; ignored');
+            }
             if (sec.corsOrigins !== undefined) {
                 config.security.corsOrigins = parseOriginList(sec.corsOrigins);
                 if (sec.corsOrigins === '*' || (Array.isArray(sec.corsOrigins) && sec.corsOrigins.includes('*'))) {

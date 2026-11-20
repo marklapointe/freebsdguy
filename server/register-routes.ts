@@ -36,10 +36,14 @@ import {
 } from './lib/session-store.ts';
 import { getPosts, getPost, findPostByAlias } from './lib/posts.ts';
 import {
+    NOT_ALLOWED_TO_DELETE,
     NOT_YOUR_POST,
+    POST_NOT_FOUND,
+    deletePostAsCaller,
     savePostAsCaller,
     type PostCaller
 } from './lib/post-policy.ts';
+import { requestAuditFields, resolveAuditSite } from './lib/audit-context.ts';
 import { buildMetaTags, injectMeta } from './lib/og-meta.ts';
 import { AIServiceFactory } from './lib/ai-service.ts';
 import { calculateMD5, loadManifest, saveManifest, findDuplicate, findByName, withManifestLock } from './lib/images.ts';
@@ -132,6 +136,9 @@ export function registerRoutes(app: Express, ctx: AppContext): void {
     const passwordMatches = ctx.passwordMatches || defaultPasswordMatches;
     /** Theme dir from the active config (admin saves call setActive, so this stays fresh). */
     const themeDirOf = () => themeDirForConfig(getActive());
+    /** Who acted, how, and from where: the fields every authenticated audit row carries. */
+    const auditFieldsOf = (req: AuthenticatedRequest) =>
+        requestAuditFields(req, resolveAuditSite(getActive()));
 
     // MCP Streamable HTTP (auth required) — before SPA catch-all
     registerMcpRoutes(app, ctx);
@@ -296,7 +303,7 @@ app.post('/api/admin/users', authenticate, requireAdmin, async (req: Authenticat
     saveUsers(usersConfig);
 
     console.log(`[INFO] New user created: ${cleanUsername} with role ${cleanRole}`);
-    writeAudit({ event: 'content', action: 'create', resource: 'user', id: cleanUsername, username: req.user?.username });
+    writeAudit({ event: 'content', action: 'create', resource: 'user', id: cleanUsername, username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: 'User created' });
 });
 
@@ -320,7 +327,7 @@ app.delete('/api/admin/users/:username', authenticate, requireAdmin, (req: Authe
     sessionStore.destroyForUser(String(username));
     revokeTokensForUser(String(username));
     console.log(`[INFO] User deleted: ${username}`);
-    writeAudit({ event: 'content', action: 'delete', resource: 'user', id: String(username), username: req.user?.username });
+    writeAudit({ event: 'content', action: 'delete', resource: 'user', id: String(username), username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: 'User deleted' });
 });
 
@@ -626,7 +633,8 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
         username: req.user.username,
         role: req.user.role,
         // A JWT or session caller is not scope-limited; a PAT carries its scopes.
-        scopes: req.tokenScopes
+        scopes: req.tokenScopes,
+        ...auditFieldsOf(req)
     };
     const result = savePostAsCaller(
         postsDir,
@@ -644,7 +652,8 @@ app.post('/api/posts', authenticate, requireWriter, (req: AuthenticatedRequest, 
         action: result.created ? 'create' : 'update',
         resource: 'post',
         id: slug,
-        username: req.user?.username
+        username: req.user?.username,
+        ...auditFieldsOf(req)
     });
     res.json({ message: 'Post saved' });
 });
@@ -883,7 +892,7 @@ app.post('/api/admin/ai-config', authenticate, requireAdmin, (req: Authenticated
 
     saveConfig(config);
     setActive(config);
-    writeAudit({ event: 'content', action: 'update', resource: 'ai-config', username: req.user?.username });
+    writeAudit({ event: 'content', action: 'update', resource: 'ai-config', username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: 'AI Configuration updated' });
 });
 
@@ -913,7 +922,7 @@ app.delete('/api/admin/images/:filename', authenticate, requireWriter, async (re
             });
 
             console.log(`[INFO] Image deleted: ${filename}`);
-            writeAudit({ event: 'content', action: 'delete', resource: 'image', id: String(req.params.filename || ''), username: req.user?.username });
+            writeAudit({ event: 'content', action: 'delete', resource: 'image', id: String(req.params.filename || ''), username: req.user?.username, ...auditFieldsOf(req) });
             res.json({ message: 'Image deleted' });
         } catch (error: any) {
             console.error(`[ERROR] Failed to delete image ${filename}:`, error.message);
@@ -960,7 +969,7 @@ app.post('/api/admin/images/delete-bulk', authenticate, requireWriter, async (re
     }
 
     saveManifest(imagesDir, manifest);
-    writeAudit({ event: 'content', action: 'delete', resource: 'image', username: req.user?.username });
+    writeAudit({ event: 'content', action: 'delete', resource: 'image', username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: `Deleted ${deletedCount} images`, deletedCount, errors });
     });
 });
@@ -1046,7 +1055,7 @@ app.post('/api/admin/config', authenticate, requireAdmin, (req: AuthenticatedReq
         saveConfig(config);
         setActive(config);
 
-        writeAudit({ event: 'content', action: 'update', resource: 'config', username: req.user?.username });
+        writeAudit({ event: 'content', action: 'update', resource: 'config', username: req.user?.username, ...auditFieldsOf(req) });
         res.json({ message: 'Configuration updated', currentTheme: config.currentTheme, warnings });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to save configuration';
@@ -1092,13 +1101,13 @@ app.post('/api/admin/themes/:name', authenticate, requireAdmin, (req: Authentica
     }
 
     fs.writeFileSync(themePath, JSON.stringify(sanitizedColors, null, 2));
-    writeAudit({ event: 'content', action: 'update', resource: 'theme', id: name, username: req.user?.username });
+    writeAudit({ event: 'content', action: 'update', resource: 'theme', id: name, username: req.user?.username, ...auditFieldsOf(req) });
     res.json({ message: `Theme ${name} saved` });
 });
 
 // Admin: Delete post
 app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedRequest, res: Response) => {
-    const slug = req.params.slug;
+    const slug = String(req.params.slug);
     const config = getActive();
     const postsDir = postsDirOf(config);
     const postPath = path.join(postsDir, `${slug}.md`);
@@ -1108,13 +1117,33 @@ app.delete('/api/posts/:slug', authenticate, requireWriter, (req: AuthenticatedR
         return res.status(403).json({ message: 'Forbidden' });
     }
 
-    if (fs.existsSync(postPath)) {
-        fs.unlinkSync(postPath);
-        writeAudit({ event: 'content', action: 'delete', resource: 'post', id: String(slug), username: req.user?.username });
-        res.json({ message: 'Post deleted' });
-    } else {
-        res.status(404).json({ message: 'Post not found' });
+    // deletePostAsCaller writes the post row with the bytes that were there.
+    const caller: PostCaller = {
+        username: req.user.username,
+        role: req.user.role,
+        scopes: req.tokenScopes,
+        ...auditFieldsOf(req)
+    };
+    const result = deletePostAsCaller(postsDir, slug, caller);
+    if (!result.ok) {
+        if (result.error === POST_NOT_FOUND) {
+            return res.status(404).json({ message: result.error });
+        }
+        if (result.error === NOT_ALLOWED_TO_DELETE) {
+            return res.status(403).json({ message: result.error });
+        }
+        // A parse-error refusal (or any other policy refusal) is a bad request.
+        return res.status(400).json({ message: result.error });
     }
+    writeAudit({
+        event: 'content',
+        action: 'delete',
+        resource: 'post',
+        id: String(slug),
+        username: req.user?.username,
+        ...auditFieldsOf(req)
+    });
+    res.json({ message: 'Post deleted' });
 });
 
 // Image upload (with WebP conversion and renaming)
@@ -1211,7 +1240,7 @@ app.post('/api/admin/upload', authenticate, requireWriter, (req: AuthenticatedRe
         saveManifest(imagesDir, manifest);
 
         console.log(`[INFO] Image uploaded and converted to WebP: ${newFilename}`);
-        writeAudit({ event: 'content', action: 'create', resource: 'image', id: newFilename, username: req.user?.username });
+        writeAudit({ event: 'content', action: 'create', resource: 'image', id: newFilename, username: req.user?.username, ...auditFieldsOf(req) });
         res.json({ filename: newFilename, url: `/api/getimage?fileName=${newFilename}` });
       });
     } catch (error) {
@@ -1316,7 +1345,7 @@ app.post('/api/theme', authenticate, requireAdmin, (req: AuthenticatedRequest, r
         saveConfig(config);
         setActive(config);
         console.log(`[INFO] Admin set site theme to: ${currentTheme}`);
-        writeAudit({ event: 'content', action: 'update', resource: 'site-theme', id: String(currentTheme), username: req.user?.username });
+        writeAudit({ event: 'content', action: 'update', resource: 'site-theme', id: String(currentTheme), username: req.user?.username, ...auditFieldsOf(req) });
         res.json({ message: 'Site theme updated', currentTheme });
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to set theme';

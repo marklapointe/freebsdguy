@@ -408,24 +408,45 @@ describe('WP #1682 CORS allowlist', () => {
         vi.unstubAllEnvs();
     });
 
-    it('does not reflect arbitrary origins or combine * with credentials', async () => {
+    it('does not reflect arbitrary origins and never allows credentials', async () => {
+        // Agents use bearer tokens and the UI is same-origin: no response may
+        // carry Access-Control-Allow-Credentials, for any origin or method.
         const evil = await request(app).get('/api/health').set('Origin', 'https://evil.example');
         expect(evil.headers['access-control-allow-origin']).not.toBe('https://evil.example');
         expect(evil.headers['access-control-allow-origin']).not.toBe('*');
+        expect(evil.headers['access-control-allow-credentials']).toBeUndefined();
 
         vi.stubEnv('MDWEB_CORS_ORIGINS', 'https://ok.example');
         const ok = await request(app).get('/api/health').set('Origin', 'https://ok.example');
         expect(ok.headers['access-control-allow-origin']).toBe('https://ok.example');
-        expect(ok.headers['access-control-allow-credentials']).toBe('true');
+        expect(ok.headers['access-control-allow-credentials']).toBeUndefined();
+
+        for (const route of ['/mcp', '/api/posts']) {
+            const allowed = await request(app)
+                .options(route)
+                .set('Origin', 'https://ok.example')
+                .set('Access-Control-Request-Method', 'POST');
+            expect(allowed.headers['access-control-allow-origin']).toBe('https://ok.example');
+            expect(allowed.headers['access-control-allow-credentials']).toBeUndefined();
+
+            const refused = await request(app)
+                .options(route)
+                .set('Origin', 'https://evil.example')
+                .set('Access-Control-Request-Method', 'POST');
+            expect(refused.headers['access-control-allow-origin']).not.toBe('https://evil.example');
+            expect(refused.headers['access-control-allow-credentials']).toBeUndefined();
+        }
 
         const stillEvil = await request(app).get('/api/health').set('Origin', 'https://evil.example');
         expect(stillEvil.headers['access-control-allow-origin']).not.toBe('https://evil.example');
         expect(stillEvil.headers['access-control-allow-origin']).not.toBe('*');
+        expect(stillEvil.headers['access-control-allow-credentials']).toBeUndefined();
 
         vi.stubEnv('MDWEB_CORS_ORIGINS', '*');
         const star = await request(app).get('/api/health').set('Origin', 'https://evil.example');
         expect(star.headers['access-control-allow-origin']).not.toBe('*');
         expect(star.headers['access-control-allow-origin']).not.toBe('https://evil.example');
+        expect(star.headers['access-control-allow-credentials']).toBeUndefined();
     });
 });
 

@@ -8,11 +8,20 @@
  *     holds the `moderate` scope (an unscoped session counts as holding it);
  *   - a save keeps the author, the status, the publishedAt and every other
  *     front-matter key the input does not name;
- *   - a draft is private: only its author and the admins may see it.
+ *   - a draft is private: only its author and the admins may see it;
+ *   - a contributor may delete only an own draft that was never published: an
+ *     unpublished post keeps `publishedAt` (rollback needs it) and is not the
+ *     author's to destroy;
+ *   - a post the caller may not see is answered as if it did not exist, so a
+ *     delete cannot be used to probe which draft slugs exist.
  */
-import { getPost, postStatus, readFrontMatter, savePost, FrontMatterParseError } from './posts.ts';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { getPost, postStatus, readFrontMatter, savePost, FrontMatterParseError, type PostMetadata, type PostStatus } from './posts.ts';
 import { writeAudit } from './audit-log.ts';
 import { scopeDeniedMessage, type TokenScopes } from './token-scope.ts';
+import type { AuditFields, AuthVia } from './audit-context.ts';
 
 /** The refusal a caller gets for a post that is not theirs. */
 export const NOT_YOUR_POST = 'Not your post';
@@ -20,11 +29,80 @@ export const NOT_YOUR_POST = 'Not your post';
 /** The refusal a caller gets for a post that does not exist. */
 export const POST_NOT_FOUND = 'Post not found';
 
+/** The refusal a caller gets when they are not allowed to delete a post. */
+export const NOT_ALLOWED_TO_DELETE = 'Not allowed to delete this post';
+
 export interface PostCaller {
     username: string;
     role: string;
     /** Undefined for a JWT or session caller: an unscoped caller holds every scope. */
     scopes?: TokenScopes;
+    /** The id of the personal access token that authenticated the caller. */
+    tokenId?: string;
+    /** How the caller authenticated. */
+    via?: AuthVia;
+    /** The address the caller came from. */
+    ip?: string;
+    /** The site this server serves. */
+    site?: string;
+}
+
+/** The audit fields of a caller: who acted, how, and from where. */
+function auditFields(caller: PostCaller): AuditFields {
+    const fields: AuditFields = {};
+    if (caller.tokenId) fields.tokenId = caller.tokenId;
+    if (caller.via) fields.via = caller.via;
+    if (caller.ip) fields.ip = caller.ip;
+    if (caller.site) fields.site = caller.site;
+    return fields;
+}
+
+/**
+ * The sha256 of the bytes of a post file, or null when there is no file.
+ * The hash says which bytes are on disk; the post itself never reaches the
+ * audit log.
+ */
+export function postFileSha256(postsDir: string, slug: string): string | null {
+    try {
+        const filePath = path.join(postsDir, `${slug}.md`);
+        if (!fs.existsSync(filePath)) return null;
+        return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Whether the post has ever been published. Publishing stamps `publishedAt`
+ * once and a later unpublish keeps it, so a draft that carries the stamp was
+ * published before: it is kept for rollback, not deleted.
+ */
+export function everPublished(post: PostMetadata | null | undefined): boolean {
+    const stamped = post?.publishedAt;
+    if (stamped instanceof Date) return !Number.isNaN(stamped.getTime());
+    return typeof stamped === 'string' && stamped.trim() !== '';
+}
+
+/**
+ * Whether the caller may delete a post. A contributor may delete only their own
+ * draft that was never published. An admin may delete their own posts or any
+ * post when they hold the moderation scope; an unscoped JWT/session admin
+ * counts as holding it.
+ */
+export function mayDeletePost(
+    author: string | undefined,
+    status: PostStatus,
+    wasPublished: boolean,
+    caller: PostCaller
+): boolean {
+    const isOwn: boolean = author !== undefined && author !== '' && author === caller.username;
+    if (caller.role === 'contributor') {
+        return isOwn && status === 'draft' && !wasPublished;
+    }
+    // Any role that is not an admin fails closed.
+    if (caller.role !== 'admin') return false;
+    // Admin: own post, or any post with the moderation scope.
+    return isOwn || !caller.scopes || caller.scopes.includes('moderate');
 }
 
 /** Whether the caller may save a post that belongs to `author`. */
@@ -104,6 +182,7 @@ export function savePostAsCaller(
         return { ok: false, error: NOT_YOUR_POST };
     }
     const created = !existing;
+    const beforeSha256 = postFileSha256(postsDir, input.slug);
     savePost(postsDir, {
         slug: input.slug,
         title: input.title,
@@ -120,7 +199,10 @@ export function savePostAsCaller(
         event: 'post',
         action: created ? 'create' : 'update',
         slug: input.slug,
-        user: caller.username
+        user: caller.username,
+        beforeSha256,
+        afterSha256: postFileSha256(postsDir, input.slug),
+        ...auditFields(caller)
     });
     return { ok: true, slug: input.slug, created };
 }
@@ -147,13 +229,22 @@ export function publishPostAsCaller(
     const stamped = existing.publishedAt;
     const publishedAt =
         typeof stamped === 'string' && stamped ? stamped : new Date().toISOString();
+    const beforeSha256 = postFileSha256(postsDir, slug);
     savePost(postsDir, {
         slug,
         content: existing.content,
         status: 'published',
         publishedAt
     });
-    writeAudit({ event: 'post', action: 'publish', slug, user: caller.username });
+    writeAudit({
+        event: 'post',
+        action: 'publish',
+        slug,
+        user: caller.username,
+        beforeSha256,
+        afterSha256: postFileSha256(postsDir, slug),
+        ...auditFields(caller)
+    });
     return { ok: true, slug, created: false };
 }
 
@@ -176,11 +267,145 @@ export function unpublishPostAsCaller(
 
     const existing = getPost(postsDir, slug);
     if (!existing) return { ok: false, error: POST_NOT_FOUND };
+    const beforeSha256 = postFileSha256(postsDir, slug);
     savePost(postsDir, {
         slug,
         content: existing.content,
         status: 'draft'
     });
-    writeAudit({ event: 'post', action: 'unpublish', slug, user: caller.username });
+    writeAudit({
+        event: 'post',
+        action: 'unpublish',
+        slug,
+        user: caller.username,
+        beforeSha256,
+        afterSha256: postFileSha256(postsDir, slug),
+        ...auditFields(caller)
+    });
+    return { ok: true, slug, created: false };
+}
+
+/**
+ * Delete a post. The row names the bytes that were on disk before the delete
+ * and says that nothing is there any more.
+ *
+ * A contributor may delete only their own draft that was never published. An
+ * admin may delete any post only when it is their own or when they hold the
+ * moderation scope. A missing or unparseable post is never deleted by a
+ * contributor (and an unparseable post is refused for everyone, since its
+ * owner cannot be determined).
+ *
+ * A post the caller may not see is answered exactly like a missing one: the
+ * delete must not become a probe for the slugs of other authors' drafts. The
+ * refusal is still audited. An admin without the moderation scope is a trusted
+ * operator and keeps the plain 403: hiding drafts from an admin is not what
+ * the existence rule is for, and its rule is unchanged.
+ */
+export function deletePostAsCaller(
+    postsDir: string,
+    slug: string,
+    caller: PostCaller
+): PostWriteResult {
+    const filePath = path.join(postsDir, `${slug}.md`);
+    if (!fs.existsSync(filePath)) {
+        writeAudit({
+            event: 'post',
+            action: 'delete',
+            slug,
+            user: caller.username,
+            outcome: 'denied',
+            reason: 'not_found',
+            beforeSha256: null,
+            afterSha256: null,
+            ...auditFields(caller)
+        });
+        return { ok: false, error: POST_NOT_FOUND };
+    }
+
+    // A file whose front matter does not parse is never deleted: the owner is
+    // unknown and the broken bytes stay for an operator to inspect.
+    const refusal = frontMatterRefusal(postsDir, slug);
+    if (refusal) {
+        writeAudit({
+            event: 'post',
+            action: 'delete',
+            slug,
+            user: caller.username,
+            outcome: 'denied',
+            reason: 'parse_error',
+            beforeSha256: postFileSha256(postsDir, slug),
+            afterSha256: postFileSha256(postsDir, slug),
+            ...auditFields(caller)
+        });
+        return { ok: false, error: refusal };
+    }
+
+    const existing = getPost(postsDir, slug);
+    if (!existing) {
+        writeAudit({
+            event: 'post',
+            action: 'delete',
+            slug,
+            user: caller.username,
+            outcome: 'denied',
+            reason: 'not_found',
+            beforeSha256: postFileSha256(postsDir, slug),
+            afterSha256: null,
+            ...auditFields(caller)
+        });
+        return { ok: false, error: POST_NOT_FOUND };
+    }
+
+    // A post this caller may not see must look missing, not forbidden: a 403
+    // would tell a contributor which draft slugs exist. The audit row keeps the
+    // truth. Admins keep the 403 (their rule is unchanged).
+    if (caller.role !== 'admin' && !maySeePost(existing, caller)) {
+        writeAudit({
+            event: 'post',
+            action: 'delete',
+            slug,
+            user: caller.username,
+            outcome: 'denied',
+            reason: 'not_owner',
+            beforeSha256: postFileSha256(postsDir, slug),
+            afterSha256: postFileSha256(postsDir, slug),
+            ...auditFields(caller)
+        });
+        return { ok: false, error: POST_NOT_FOUND };
+    }
+
+    const status = postStatus(existing);
+    const wasPublished = everPublished(existing);
+    if (!mayDeletePost(existing.author, status, wasPublished, caller)) {
+        // A published post is refused as published; a draft that was published
+        // once is refused as was_published (it is kept for rollback); any other
+        // refusal is an ownership one.
+        const reason =
+            status !== 'draft' ? 'published' : wasPublished ? 'was_published' : 'not_owner';
+        writeAudit({
+            event: 'post',
+            action: 'delete',
+            slug,
+            user: caller.username,
+            outcome: 'denied',
+            reason,
+            beforeSha256: postFileSha256(postsDir, slug),
+            afterSha256: postFileSha256(postsDir, slug),
+            ...auditFields(caller)
+        });
+        return { ok: false, error: NOT_ALLOWED_TO_DELETE };
+    }
+
+    const beforeSha256 = postFileSha256(postsDir, slug);
+    fs.unlinkSync(filePath);
+    writeAudit({
+        event: 'post',
+        action: 'delete',
+        slug,
+        user: caller.username,
+        beforeSha256,
+        afterSha256: null,
+        ...auditFields(caller)
+    });
     return { ok: true, slug, created: false };
 }
