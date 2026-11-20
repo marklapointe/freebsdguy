@@ -16,6 +16,11 @@ export interface AppContext {
     requireWriter: RequestHandler;
     upload: multer.Multer;
     sessionStore?: FileSessionStore;
+    /**
+     * Password comparison. Injectable so a test can watch the work the login
+     * does; the default is the real bcrypt compare.
+     */
+    passwordMatches?: (plain: unknown, hash: string | undefined) => Promise<boolean>;
 }
 
 export function createActiveConfigHolder(initial: Config) {

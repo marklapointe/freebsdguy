@@ -55,6 +55,7 @@ import {
     revokeTokensForUser
 } from './lib/api-tokens.ts';
 import { parseTokenScopes, scopeDeniedMessage, type TokenScopes } from './lib/token-scope.ts';
+import { passwordMatches as defaultPasswordMatches, DUMMY_PASSWORD_HASH } from './lib/password.ts';
 import { writeAudit } from './lib/audit-log.ts';
 import { DEFAULT_ADMIN_PASSWORD } from './lib/default-credentials.ts';
 import { isDefaultAdminCredential } from './lib/setup-admin.ts';
@@ -127,6 +128,8 @@ export function registerRoutes(app: Express, ctx: AppContext): void {
     const getActive = ctx.getActiveConfig;
     const setActive = ctx.setActiveConfig;
     const sessionStore = ctx.sessionStore || new FileSessionStore();
+    /** The password compare; a test may inject a spy over it. */
+    const passwordMatches = ctx.passwordMatches || defaultPasswordMatches;
     /** Theme dir from the active config (admin saves call setActive, so this stays fresh). */
     const themeDirOf = () => themeDirForConfig(getActive());
 
@@ -183,15 +186,6 @@ app.post('/api/login', async (req: Request, res: Response) => {
 
     console.log(`[AUTH] Login attempt for user: ${username}`);
 
-    const passwordMatches = async (plain: unknown, hash: string | undefined): Promise<boolean> => {
-        if (!hash || typeof plain !== 'string' || !plain) return false;
-        try {
-            return await bcrypt.compare(plain, hash);
-        } catch {
-            return false;
-        }
-    };
-
     const auditName = typeof username === 'string' ? username.slice(0, 120) : undefined;
 
     const rejectDefault = async (hash: string | undefined) => {
@@ -217,14 +211,28 @@ app.post('/api/login', async (req: Request, res: Response) => {
 
     // Check other users
     const user = usersConfig.users.find(u => u.username === username);
-    if (user && (await passwordMatches(password, user.passwordHash))) {
-        if (await rejectDefault(user.passwordHash)) {
-            writeAudit({ event: 'login', outcome: 'rejected', username: auditName });
-            return res.status(403).json({ message: 'Default credentials are disabled' });
+    if (user) {
+        // An MCP-only agent account has no password and may never log in on the web.
+        // The answer is the one a wrong password gets, so nothing tells the caller
+        // that the account exists at all.
+        if (user.mcpOnly === true) {
+            // The same work a wrong password costs: a bcrypt compare against a
+            // fixed dummy hash. A refusal that returns faster than a wrong
+            // password would tell the caller that the account exists.
+            await passwordMatches(password, DUMMY_PASSWORD_HASH);
+            console.warn(`[AUTH] Login refused for MCP-only account: ${username}`);
+            writeAudit({ event: 'login', outcome: 'rejected', reason: 'mcp-only', username: auditName });
+            return res.status(401).json({ message: 'Invalid credentials' });
         }
-        console.log(`[AUTH] User login successful: ${username}`);
-        writeAudit({ event: 'login', outcome: 'success', username: auditName });
-        return issueAuthResponse(res, { username: user.username, role: user.role });
+        if (await passwordMatches(password, user.passwordHash)) {
+            if (await rejectDefault(user.passwordHash)) {
+                writeAudit({ event: 'login', outcome: 'rejected', username: auditName });
+                return res.status(403).json({ message: 'Default credentials are disabled' });
+            }
+            console.log(`[AUTH] User login successful: ${username}`);
+            writeAudit({ event: 'login', outcome: 'success', username: auditName });
+            return issueAuthResponse(res, { username: user.username, role: user.role });
+        }
     }
 
     console.warn(`[AUTH] Login failed for user: ${username}`);

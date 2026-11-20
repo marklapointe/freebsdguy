@@ -66,6 +66,11 @@ export interface User {
     username: string;
     passwordHash: string;
     role: string;
+    /**
+     * An MCP-only agent account (Track #2119 U7): no password, never a web login,
+     * used through a personal access token only. Set on a contributor account.
+     */
+    mcpOnly?: boolean;
     /** @deprecated Site theme is config.currentTheme only; ignored if present in old users.json */
     theme?: string;
 }
@@ -845,6 +850,10 @@ export function sanitizeUsers(raw: unknown): { users: UsersConfig; warnings: str
         if (typeof a.passwordHash !== 'string' || !a.passwordHash) {
             warnings.push('admin.passwordHash missing or empty; login disabled until set');
         }
+        // The admin block never carries mcpOnly: the web admin always has a password.
+        if (a.mcpOnly !== undefined) {
+            warnings.push('admin.mcpOnly dropped; only a contributor account may be MCP-only');
+        }
     } else {
         warnings.push('admin block missing; login locked until users.json is repaired');
     }
@@ -856,11 +865,25 @@ export function sanitizeUsers(raw: unknown): { users: UsersConfig; warnings: str
             const u = item as Record<string, unknown>;
             const username = asNonEmptyString(u.username);
             if (!username) continue;
-            users.push({
+            const role = asNonEmptyString(u.role) || 'contributor';
+            const entry: User = {
                 username,
                 passwordHash: typeof u.passwordHash === 'string' ? u.passwordHash : '',
-                role: asNonEmptyString(u.role) || 'contributor'
-            });
+                role
+            };
+            // mcpOnly survives only as the boolean true on a contributor account.
+            // Anything else is dropped loudly, so a hand-edited file cannot turn
+            // an ordinary account into a passwordless one by accident.
+            if (u.mcpOnly !== undefined) {
+                if (u.mcpOnly === true && role === 'contributor') {
+                    entry.mcpOnly = true;
+                } else {
+                    warnings.push(
+                        `users[${username}].mcpOnly dropped; only true on a contributor account is kept`
+                    );
+                }
+            }
+            users.push(entry);
         }
     } else if (o.users !== undefined) {
         warnings.push('users array invalid; ignored');
@@ -934,7 +957,13 @@ export const saveUsers = (users: UsersConfig, customPath?: string) => {
     writeJsonAtomic(targetPath, clean);
 };
 
-/** Resolve a live account by username (admin or users[]). Null if missing or hash empty. */
+/**
+ * Resolve a live account by username (admin or users[]). Null if missing or locked.
+ *
+ * An MCP-only agent account (Track #2119 U7) has no password at all: it exists
+ * for its personal access token, so it is found even with an empty hash. Every
+ * other account still needs a password hash, so an empty hash keeps it locked.
+ */
 export function findUserByUsername(
     username: string,
     users: UsersConfig = loadUsers()
@@ -944,6 +973,8 @@ export function findUserByUsername(
         return users.admin.passwordHash ? users.admin : null;
     }
     const u = users.users.find((x) => x.username === username);
-    if (!u || !u.passwordHash) return null;
+    if (!u) return null;
+    if (u.mcpOnly === true && u.role === 'contributor') return u;
+    if (!u.passwordHash) return null;
     return u;
 }

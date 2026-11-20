@@ -28,14 +28,19 @@ export function liveIdentity(
     username: unknown,
     sessionStore?: FileSessionStore,
     sessionId?: string
-): { username: string; role: Role } | null {
+): { username: string; role: Role; mcpOnly: boolean } | null {
     if (typeof username !== 'string' || !username) return null;
     const user = findUserByUsername(username);
     if (!user || !isAllowedRole(user.role)) {
         if (sessionStore && sessionId) sessionStore.destroy(sessionId);
         return null;
     }
-    return { username: user.username, role: user.role };
+    return {
+        username: user.username,
+        role: user.role,
+        // An MCP-only agent account (Track #2119 U7): its token is its only identity.
+        mcpOnly: user.mcpOnly === true
+    };
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -117,7 +122,7 @@ export class RoleGuardFactory {
         if (!identity) {
             return denyPat(res, 'user');
         }
-        req.user = identity;
+        req.user = { username: identity.username, role: identity.role };
         req.authVia = 'pat';
         // storedTokenScopes, not tok.scopes: a token that somehow skipped
         // toPublic then fails closed to read-only instead of to no scope.
@@ -156,7 +161,11 @@ export class RoleGuardFactory {
             if (!identity) {
                 return res.status(403).json({ message: 'Failed to authenticate token' });
             }
-            req.user = identity;
+            // An MCP-only agent account has no browser identity: its token is all it gets.
+            if (identity.mcpOnly) {
+                return res.status(403).json({ message: 'Failed to authenticate token' });
+            }
+            req.user = { username: identity.username, role: identity.role };
             req.authVia = 'jwt';
             next();
         });
@@ -176,7 +185,12 @@ export class RoleGuardFactory {
         if (!identity) {
             return res.status(403).json({ message: 'Failed to authenticate token' });
         }
-        req.user = identity;
+        // An MCP-only agent account may not hold a browser session.
+        if (identity.mcpOnly) {
+            store.destroy(rec.id);
+            return res.status(403).json({ message: 'Failed to authenticate token' });
+        }
+        req.user = { username: identity.username, role: identity.role };
         req.authVia = 'session';
         next();
     }
